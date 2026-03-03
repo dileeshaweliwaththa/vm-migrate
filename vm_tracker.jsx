@@ -365,7 +365,7 @@ function App() {
 
                   {/* Migrated-from sections */}
                   {vm.expanded && vm.newIp && vms
-                    .filter(src => src.id !== vm.id && src.newIp === vm.newIp)
+                    .filter(src => src.id !== vm.id && src.newIp === vm.newIp && src.oldIp !== src.newIp)
                     .map(src => (
                       <>
                         {/* Source VM header */}
