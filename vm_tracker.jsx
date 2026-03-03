@@ -45,7 +45,7 @@ function LoginGate({ children }) {
 const INITIAL_VMS = [
   {
     id: 1, name: "vm-prod-01", oldIp: "192.168.1.10", newIp: "10.0.0.10",
-    migrated: "Yes", supabase: "No", notes: "Primary app server", expanded: true,
+    migrated: "Yes", supabase: "No", keep: "No", notes: "Primary app server", expanded: true,
     urls: [
       { id: 1, port: "80",   proto: "HTTP",  url: "http://app.example.com",       dns: "Yes", tested: "Yes", notes: "Redirects to HTTPS" },
       { id: 2, port: "443",  proto: "HTTPS", url: "https://app.example.com",      dns: "Yes", tested: "Yes", notes: "Main frontend" },
@@ -55,7 +55,7 @@ const INITIAL_VMS = [
   },
   {
     id: 2, name: "vm-prod-02", oldIp: "192.168.1.11", newIp: "10.0.0.11",
-    migrated: "No", supabase: "Yes", notes: "Supabase DB - do NOT decommission", expanded: false,
+    migrated: "No", supabase: "Yes", keep: "No", notes: "Supabase DB - do NOT decommission", expanded: false,
     urls: [
       { id: 1, port: "5432", proto: "TCP",  url: "db.example.com",                  dns: "No", tested: "No", notes: "Postgres / Supabase" },
       { id: 2, port: "8000", proto: "HTTP", url: "http://api.supabase.example.com", dns: "No", tested: "No", notes: "Supabase REST API" },
@@ -63,7 +63,7 @@ const INITIAL_VMS = [
   },
   {
     id: 3, name: "vm-prod-03", oldIp: "192.168.1.12", newIp: "10.0.0.12",
-    migrated: "No", supabase: "No", notes: "Waiting on cert renewal", expanded: false,
+    migrated: "No", supabase: "No", keep: "No", notes: "Waiting on cert renewal", expanded: false,
     urls: [
       { id: 1, port: "80",  proto: "HTTP",  url: "http://admin.example.com",    dns: "No", tested: "No", notes: "" },
       { id: 2, port: "443", proto: "HTTPS", url: "https://admin.example.com",   dns: "No", tested: "No", notes: "Admin dashboard" },
@@ -72,7 +72,7 @@ const INITIAL_VMS = [
   },
 ];
 
-const mkVm = () => ({ id: Date.now(), name: "", oldIp: "", newIp: "", migrated: "No", supabase: "No", notes: "", expanded: true, urls: [] });
+const mkVm = () => ({ id: Date.now(), name: "", oldIp: "", newIp: "", migrated: "No", supabase: "No", keep: "No", notes: "", expanded: true, urls: [] });
 const mkUrl = () => ({ id: Date.now() + Math.random(), port: "", proto: "HTTPS", url: "", dns: "No", tested: "No", notes: "" });
 
 function buildFullUrl(proto, newIp, port) {
@@ -84,6 +84,7 @@ function buildFullUrl(proto, newIp, port) {
 
 function safeStatus(vm) {
   if (vm.supabase === "Yes") return { label: "NO - Supabase", color: "#922B21", bg: "#FADBD8" };
+  if (vm.keep === "Yes") return { label: "Not Migrating", color: "#1A5276", bg: "#D6EAF8" };
   if (vm.migrated === "Yes") return { label: "Safe to Remove", color: "#1E8449", bg: "#D5F5E3" };
   return { label: "Pending", color: "#9A7D0A", bg: "#FEF9E7" };
 }
@@ -128,6 +129,7 @@ function App() {
   const stats = {
     vms: vms.length, migrated: vms.filter(v => v.migrated === "Yes").length,
     supa: vms.filter(v => v.supabase === "Yes").length,
+    keeping: vms.filter(v => v.keep === "Yes").length,
     urls: allUrls.length, dns: allUrls.filter(u => u.dns === "Yes").length,
     tested: allUrls.filter(u => u.tested === "Yes").length,
   };
@@ -149,6 +151,8 @@ function App() {
         .url-tr:hover td { background: #dbeafe !important; }
         .ybtn:hover { background: #2E86AB !important; color: #fff !important; border-color: #2E86AB !important; }
         .delbtn:hover { background: #FADBD8 !important; color: #922B21 !important; }
+        .vm-keep-row td { background: #4A2800 !important; border-bottom-color: #E67E22 !important; }
+        .vm-keep-row button { color: #f0a060 !important; }
         select { appearance: none; -webkit-appearance: none; }
       `}</style>
 
@@ -160,6 +164,7 @@ function App() {
             <span>VMs: <b style={{ color: "#fff" }}>{stats.vms}</b></span>
             <span>Migrated: <b style={{ color: "#52d48a" }}>{stats.migrated}/{stats.vms}</b></span>
             <span>Supabase: <b style={{ color: "#c39bd3" }}>{stats.supa}</b></span>
+            <span>Not Migrating: <b style={{ color: "#7fb3d3" }}>{stats.keeping}</b></span>
             <span>URLs: <b style={{ color: "#fff" }}>{stats.urls}</b></span>
             <span>DNS done: <b style={{ color: "#52d48a" }}>{stats.dns}/{stats.urls}</b></span>
             <span>Tested: <b style={{ color: "#52d48a" }}>{stats.tested}/{stats.urls}</b></span>
@@ -182,7 +187,7 @@ function App() {
       </div>
 
       <div style={{ overflowX: "auto" }}>
-        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 1700 }}>
+        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 1820 }}>
           <thead>
             <tr>
               <TH ch="" w={38} />
@@ -197,6 +202,7 @@ function App() {
               <TH ch="URL Tested?" w={105} center />
               <TH ch="VM Migrated?" w={110} center />
               <TH ch="Supabase?" w={100} center />
+              <TH ch="Not Migrating?" w={115} center />
               <TH ch="Safe to Remove?" w={145} center />
               <TH ch="Notes" w={190} />
               <TH ch="Actions" w={95} center />
@@ -208,7 +214,7 @@ function App() {
               return (
                 <>
                   {/* VM ROW */}
-                  <tr key={"vm" + vm.id}>
+                  <tr key={"vm" + vm.id} className={vm.keep === "Yes" ? "vm-keep-row" : ""}>
                     <td style={{ background: vmRowBg, textAlign: "center", padding: 0, borderBottom: "3px solid #2E86AB" }}>
                       <button onClick={() => togExp(vm.id)} style={{
                         width: 38, height: 40, background: "none", border: "none", cursor: "pointer",
@@ -240,6 +246,9 @@ function App() {
                     </td>
                     <td style={{ background: vmRowBg, padding: "7px 8px", borderBottom: "3px solid #2E86AB", textAlign: "center" }}>
                       <YesNo value={vm.supabase} onChange={v => updVm(vm.id, "supabase", v)} />
+                    </td>
+                    <td style={{ background: vmRowBg, padding: "7px 8px", borderBottom: "3px solid #2E86AB", textAlign: "center" }}>
+                      <YesNo value={vm.keep} onChange={v => updVm(vm.id, "keep", v)} />
                     </td>
                     <td style={{ background: vmRowBg, padding: "7px 8px", borderBottom: "3px solid #2E86AB", textAlign: "center" }}>
                       <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, background: safe.bg, color: safe.color, whiteSpace: "nowrap" }}>{safe.label}</span>
@@ -298,6 +307,7 @@ function App() {
                         <td style={{ background: bg, borderBottom: "1px solid #c5d9e8" }} />
                         <td style={{ background: bg, borderBottom: "1px solid #c5d9e8" }} />
                         <td style={{ background: bg, borderBottom: "1px solid #c5d9e8" }} />
+                        <td style={{ background: bg, borderBottom: "1px solid #c5d9e8" }} />
                         <td style={{ background: bg, padding: "5px 10px", borderBottom: "1px solid #c5d9e8" }}>
                           <Inp value={u.notes} onChange={v => updUrl(vm.id, u.id, "notes", v)} placeholder="notes..." style={{ color: "#555" }} />
                         </td>
@@ -315,7 +325,7 @@ function App() {
                   {vm.expanded && (
                     <tr key={"addurl" + vm.id}>
                       <td style={{ background: "#2E86AB" }} />
-                      <td colSpan={14} style={{ background: "#f0f7fc", padding: "5px 10px 6px 22px", borderBottom: "2px solid #c5d9e8" }}>
+                      <td colSpan={15} style={{ background: "#f0f7fc", padding: "5px 10px 6px 22px", borderBottom: "2px solid #c5d9e8" }}>
                         <button onClick={() => addUrl(vm.id)} className="ybtn" style={{
                           background: "none", border: "1px dashed #2E86AB", color: "#2E86AB",
                           borderRadius: 5, padding: "4px 16px", cursor: "pointer", fontSize: 11,
@@ -330,7 +340,7 @@ function App() {
 
             {/* Bottom add VM row */}
             <tr>
-              <td colSpan={15} style={{ padding: "16px 24px", background: "#edf2f7" }}>
+              <td colSpan={16} style={{ padding: "16px 24px", background: "#edf2f7" }}>
                 <button onClick={addVm} style={{
                   padding: "10px 32px", background: "#1E3A5F", color: "#fff", border: "2px dashed #2E86AB",
                   borderRadius: 8, cursor: "pointer", fontSize: 13, fontFamily: "monospace", fontWeight: 700,
