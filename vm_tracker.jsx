@@ -1,6 +1,47 @@
 import { useState, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 
+const CREDS = { user: "upview", pass: "Uv9@mK2xP!" };
+
+function LoginGate({ children }) {
+  const [auth, setAuth] = useState(() => sessionStorage.getItem("vm-auth") === "1");
+  const [u, setU] = useState("");
+  const [p, setP] = useState("");
+  const [err, setErr] = useState("");
+
+  const login = () => {
+    if (u === CREDS.user && p === CREDS.pass) {
+      sessionStorage.setItem("vm-auth", "1");
+      setAuth(true);
+    } else {
+      setErr("Invalid username or password.");
+    }
+  };
+
+  if (auth) return children;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#0d1f35", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
+      <div style={{ background: "#162d47", border: "1px solid #2E86AB", borderRadius: 10, padding: "32px 36px", minWidth: 340, boxShadow: "0 8px 40px #0008", fontFamily: "monospace" }}>
+        <div style={{ fontSize: 16, fontWeight: 800, color: "#fff", letterSpacing: 1, marginBottom: 6, textTransform: "uppercase" }}>Please Sign In</div>
+        <div style={{ fontSize: 11, color: "#7eb8d4", marginBottom: 22 }}>VM Migration Tracker</div>
+        {[{ label: "Username", val: u, set: setU, type: "text" }, { label: "Password", val: p, set: setP, type: "password" }].map(({ label, val, set, type }) => (
+          <div key={label} style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 11, color: "#9ab8d0", marginBottom: 5 }}>{label}</div>
+            <input type={type} value={val} onChange={e => { set(e.target.value); setErr(""); }}
+              onKeyDown={e => e.key === "Enter" && login()}
+              style={{ width: "100%", background: "#0d1f35", border: "1px solid #2E86AB", borderRadius: 5, padding: "8px 10px", color: "#fff", fontFamily: "monospace", fontSize: 13, outline: "none" }} />
+          </div>
+        ))}
+        {err && <div style={{ color: "#f1948a", fontSize: 11, marginBottom: 10 }}>{err}</div>}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 20 }}>
+          <button onClick={login} style={{ padding: "8px 24px", background: "#2E86AB", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: "monospace", fontWeight: 700, fontSize: 13 }}>Sign In</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const INITIAL_VMS = [
   {
     id: 1, name: "vm-prod-01", oldIp: "192.168.1.10", newIp: "10.0.0.10",
@@ -304,4 +345,4 @@ function App() {
   );
 }
 
-createRoot(document.getElementById("root")).render(<App />);
+createRoot(document.getElementById("root")).render(<LoginGate><App /></LoginGate>);
