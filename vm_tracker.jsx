@@ -362,6 +362,56 @@ function App() {
                       </td>
                     </tr>
                   )}
+
+                  {/* Migrated-from sections */}
+                  {vm.expanded && vm.newIp && vms
+                    .filter(src => src.id !== vm.id && src.newIp === vm.newIp)
+                    .map(src => (
+                      <>
+                        {/* Source VM header */}
+                        <tr key={"mig-hdr" + vm.id + src.id}>
+                          <td style={{ background: "#6E1A1A", width: 38 }} />
+                          <td colSpan={15} style={{ background: "#3B0E0E", padding: "5px 14px 5px 20px", borderBottom: "1px solid #7B2020" }}>
+                            <span style={{ fontSize: 10, fontWeight: 800, color: "#e8a0a0", letterSpacing: 1, textTransform: "uppercase" }}>
+                              ⬆ Migrated from: </span>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: "#f5c6c6" }}>{src.name}</span>
+                            <span style={{ marginLeft: 10, fontSize: 10, color: "#a06060" }}>{src.oldIp} → {src.newIp}</span>
+                          </td>
+                        </tr>
+                        {/* Source VM's URL rows (read-only) */}
+                        {src.urls.map((u, ui) => {
+                          const bg = ui % 2 === 0 ? "#2d1212" : "#321515";
+                          const full = buildFullUrl(u.proto, src.newIp, u.port);
+                          return (
+                            <tr key={"mig-url" + vm.id + src.id + u.id}>
+                              <td style={{ background: "#6E1A1A", width: 38, borderBottom: "1px solid #5a2020" }} />
+                              <td style={{ background: bg, padding: "5px 10px 5px 20px", borderBottom: "1px solid #5a2020" }}>
+                                <span style={{ background: "#922B21", color: "#fff", borderRadius: 20, padding: "1px 8px", fontSize: 9, fontWeight: 800, letterSpacing: 0.5 }}>MIGRATED</span>
+                              </td>
+                              <td style={{ background: bg, padding: "5px 10px", borderBottom: "1px solid #5a2020", textAlign: "center", color: "#f9a54a", fontSize: 12, fontWeight: 500 }}>{src.oldIp}</td>
+                              <td style={{ background: bg, padding: "5px 10px", borderBottom: "1px solid #5a2020", textAlign: "center", color: "#52d48a", fontSize: 12, fontWeight: 500 }}>{src.newIp}</td>
+                              <td style={{ background: bg, padding: "5px 10px", borderBottom: "1px solid #5a2020", textAlign: "center", color: "#7eb8d4", fontSize: 12, fontWeight: 700 }}>{u.port}</td>
+                              <td style={{ background: bg, padding: "5px 10px", borderBottom: "1px solid #5a2020", textAlign: "center", color: "#9ab8d0", fontSize: 12 }}>{u.proto}</td>
+                              <td style={{ background: bg, padding: "5px 10px", borderBottom: "1px solid #5a2020", color: "#c8a0a0", fontSize: 12 }}>{u.url}</td>
+                              <td style={{ background: bg, padding: "5px 10px", borderBottom: "1px solid #5a2020", color: "#e8c0c0", fontSize: 12, fontWeight: 600 }}>{full}</td>
+                              <td style={{ background: bg, padding: "5px 8px", borderBottom: "1px solid #5a2020", textAlign: "center" }}>
+                                <span style={{ padding: "2px 8px", borderRadius: 20, fontSize: 10, fontWeight: 700, background: u.dns === "Yes" ? "#1a3a1a" : "#3a1a1a", color: u.dns === "Yes" ? "#52d48a" : "#e8a0a0" }}>{u.dns}</span>
+                              </td>
+                              <td style={{ background: bg, padding: "5px 8px", borderBottom: "1px solid #5a2020", textAlign: "center" }}>
+                                <span style={{ padding: "2px 8px", borderRadius: 20, fontSize: 10, fontWeight: 700, background: u.tested === "Yes" ? "#1a3a1a" : "#3a1a1a", color: u.tested === "Yes" ? "#52d48a" : "#e8a0a0" }}>{u.tested}</span>
+                              </td>
+                              <td style={{ background: bg, borderBottom: "1px solid #5a2020" }} />
+                              <td style={{ background: bg, borderBottom: "1px solid #5a2020" }} />
+                              <td style={{ background: bg, borderBottom: "1px solid #5a2020" }} />
+                              <td style={{ background: bg, borderBottom: "1px solid #5a2020" }} />
+                              <td style={{ background: bg, padding: "5px 10px", borderBottom: "1px solid #5a2020", color: "#a08080", fontSize: 11 }}>{u.notes}</td>
+                              <td style={{ background: bg, borderBottom: "1px solid #5a2020" }} />
+                            </tr>
+                          );
+                        })}
+                      </>
+                    ))
+                  }
                 </>
               );
             })}
