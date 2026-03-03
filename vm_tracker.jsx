@@ -112,15 +112,43 @@ function App() {
     } catch { return INITIAL_VMS; }
   });
   const [seq, setSeq] = useState(200);
+  const [deleted, setDeleted] = useState(() => {
+    try {
+      const saved = localStorage.getItem("vm-tracker-deleted");
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+  const [trashOpen, setTrashOpen] = useState(false);
 
   useEffect(() => {
     localStorage.setItem("vm-tracker-vms", JSON.stringify(vms));
   }, [vms]);
 
+  useEffect(() => {
+    localStorage.setItem("vm-tracker-deleted", JSON.stringify(deleted));
+  }, [deleted]);
+
   const updVm = (id, f, v) => setVms(a => a.map(vm => vm.id === id ? { ...vm, [f]: v } : vm));
   const togExp = (id) => setVms(a => a.map(vm => vm.id === id ? { ...vm, expanded: !vm.expanded } : vm));
   const addVm = () => { const id = seq + 1; setSeq(id); setVms(a => [...a, { ...mkVm(), id }]); };
-  const delVm = (id) => setVms(a => a.filter(vm => vm.id !== id));
+  const delVm = (id) => {
+    const vm = vms.find(v => v.id === id);
+    if (vm) setDeleted(a => [{ ...vm, deletedAt: new Date().toLocaleString() }, ...a]);
+    setVms(a => a.filter(v => v.id !== id));
+  };
+  const restoreVm = (id) => {
+    const vm = deleted.find(v => v.id === id);
+    if (vm) { const { deletedAt, ...rest } = vm; setVms(a => [...a, rest]); }
+    setDeleted(a => a.filter(v => v.id !== id));
+  };
+  const permDeleteVm = (id) => {
+    if (window.confirm("Are you sure you want to permanently delete this VM? This cannot be undone."))
+      setDeleted(a => a.filter(v => v.id !== id));
+  };
+  const clearTrash = () => {
+    if (window.confirm("Permanently delete ALL VMs in the trash? This cannot be undone."))
+      setDeleted([]);
+  };
   const addUrl = (vmId) => setVms(a => a.map(vm => vm.id === vmId ? { ...vm, expanded: true, urls: [...vm.urls, mkUrl()] } : vm));
   const updUrl = (vmId, uid, f, v) => setVms(a => a.map(vm => vm.id === vmId ? { ...vm, urls: vm.urls.map(u => u.id === uid ? { ...u, [f]: v } : u) } : vm));
   const delUrl = (vmId, uid) => setVms(a => a.map(vm => vm.id === vmId ? { ...vm, urls: vm.urls.filter(u => u.id !== uid) } : vm));
@@ -351,6 +379,64 @@ function App() {
           </tbody>
         </table>
       </div>
+
+      {/* Trash / Soft-Delete Section */}
+      {deleted.length > 0 && (
+        <div style={{ margin: "24px 0 0 0", fontFamily: "monospace" }}>
+          <div
+            onClick={() => setTrashOpen(o => !o)}
+            style={{ background: "#3B1A1A", padding: "12px 24px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", userSelect: "none" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 16 }}>🗑️</span>
+              <span style={{ color: "#e8a0a0", fontWeight: 700, fontSize: 13, letterSpacing: 1 }}>DELETED VMs</span>
+              <span style={{ background: "#922B21", color: "#fff", borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>{deleted.length}</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <button onClick={e => { e.stopPropagation(); clearTrash(); }} style={{
+                padding: "4px 14px", background: "#922B21", color: "#fff", border: "none", borderRadius: 5,
+                cursor: "pointer", fontSize: 11, fontFamily: "monospace", fontWeight: 700
+              }}>Clear All</button>
+              <span style={{ color: "#e8a0a0", fontSize: 16 }}>{trashOpen ? "▾" : "▸"}</span>
+            </div>
+          </div>
+          {trashOpen && (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 900 }}>
+                <thead>
+                  <tr style={{ background: "#2a1010" }}>
+                    {["VM Name", "Old IP", "New IP", "Deleted At", "Notes", "Actions"].map(h => (
+                      <th key={h} style={{ padding: "8px 14px", textAlign: "left", color: "#e8a0a0", fontSize: 11, fontWeight: 700, borderBottom: "1px solid #5a2020", whiteSpace: "nowrap" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {deleted.map((vm, i) => (
+                    <tr key={vm.id} style={{ background: i % 2 === 0 ? "#2d1212" : "#321515" }}>
+                      <td style={{ padding: "8px 14px", color: "#f5c6c6", fontWeight: 700, fontSize: 13 }}>{vm.name || "(unnamed)"}</td>
+                      <td style={{ padding: "8px 14px", color: "#f9a54a", fontSize: 12 }}>{vm.oldIp || "—"}</td>
+                      <td style={{ padding: "8px 14px", color: "#52d48a", fontSize: 12 }}>{vm.newIp || "—"}</td>
+                      <td style={{ padding: "8px 14px", color: "#a08080", fontSize: 11 }}>{vm.deletedAt}</td>
+                      <td style={{ padding: "8px 14px", color: "#c09090", fontSize: 12 }}>{vm.notes || "—"}</td>
+                      <td style={{ padding: "8px 14px" }}>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button onClick={() => restoreVm(vm.id)} style={{
+                            padding: "4px 12px", background: "#1E3A5F", color: "#7eb8d4", border: "1px solid #2E86AB",
+                            borderRadius: 5, cursor: "pointer", fontSize: 11, fontFamily: "monospace", fontWeight: 700
+                          }}>↩ Restore</button>
+                          <button onClick={() => permDeleteVm(vm.id)} style={{
+                            padding: "4px 12px", background: "#5a1a1a", color: "#f5c6c6", border: "1px solid #922B21",
+                            borderRadius: 5, cursor: "pointer", fontSize: 11, fontFamily: "monospace", fontWeight: 700
+                          }}>✕ Delete</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
