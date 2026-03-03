@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, Fragment } from "react";
 import { createRoot } from "react-dom/client";
 
 const CREDS = { user: "upview", pass: "Uv9@mK2xP!" };
@@ -240,7 +240,7 @@ function App() {
             {vms.map((vm) => {
               const safe = safeStatus(vm);
               return (
-                <>
+                <Fragment key={"frag-" + vm.id}>
                   {/* VM ROW */}
                   <tr key={"vm" + vm.id} className={vm.keep === "Yes" ? "vm-keep-row" : ""}>
                     <td style={{ background: vmRowBg, textAlign: "center", padding: 0, borderBottom: "3px solid #2E86AB" }}>
@@ -367,7 +367,7 @@ function App() {
                   {vm.expanded && vm.newIp && vms
                     .filter(src => src.id !== vm.id && src.newIp === vm.newIp && src.oldIp !== src.newIp)
                     .map(src => (
-                      <>
+                      <Fragment key={"mig-" + vm.id + "-" + src.id}>
                         {/* Source VM header */}
                         <tr key={"mig-hdr" + vm.id + src.id}>
                           <td style={{ background: "#6E1A1A", width: 38 }} />
@@ -409,10 +409,10 @@ function App() {
                             </tr>
                           );
                         })}
-                      </>
+                      </Fragment>
                     ))
                   }
-                </>
+                </Fragment>
               );
             })}
 
