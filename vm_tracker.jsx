@@ -105,28 +105,53 @@ const Inp = ({ value, onChange, placeholder, style = {} }) => (
 );
 
 function App() {
-  const [vms, setVms] = useState(() => {
-    try {
-      const saved = localStorage.getItem("vm-tracker-vms");
-      return saved ? JSON.parse(saved) : INITIAL_VMS;
-    } catch { return INITIAL_VMS; }
-  });
+  const [vms, setVms] = useState(INITIAL_VMS);
   const [seq, setSeq] = useState(200);
-  const [deleted, setDeleted] = useState(() => {
-    try {
-      const saved = localStorage.getItem("vm-tracker-deleted");
-      return saved ? JSON.parse(saved) : [];
-    } catch { return []; }
-  });
+  const [deleted, setDeleted] = useState([]);
   const [trashOpen, setTrashOpen] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
+  // On mount: load from server API; fall back to localStorage for local dev
   useEffect(() => {
+    fetch("/api/data")
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data && data.vms) {
+          setVms(data.vms);
+          if (data.deleted) setDeleted(data.deleted);
+          const allIds = [...(data.vms || []), ...(data.deleted || [])].map(v => v.id);
+          if (allIds.length) setSeq(Math.max(...allIds, 200));
+        } else {
+          try {
+            const s = localStorage.getItem("vm-tracker-vms");
+            const d = localStorage.getItem("vm-tracker-deleted");
+            if (s) setVms(JSON.parse(s));
+            if (d) setDeleted(JSON.parse(d));
+          } catch {}
+        }
+      })
+      .catch(() => {
+        try {
+          const s = localStorage.getItem("vm-tracker-vms");
+          const d = localStorage.getItem("vm-tracker-deleted");
+          if (s) setVms(JSON.parse(s));
+          if (d) setDeleted(JSON.parse(d));
+        } catch {}
+      })
+      .finally(() => setLoaded(true));
+  }, []);
+
+  // On every change: save to server (shared) + localStorage (local backup)
+  useEffect(() => {
+    if (!loaded) return;
     localStorage.setItem("vm-tracker-vms", JSON.stringify(vms));
-  }, [vms]);
-
-  useEffect(() => {
     localStorage.setItem("vm-tracker-deleted", JSON.stringify(deleted));
-  }, [deleted]);
+    fetch("/api/data", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ vms, deleted }),
+    }).catch(() => {});
+  }, [vms, deleted, loaded]);
 
   const updVm = (id, f, v) => setVms(a => a.map(vm => vm.id === id ? { ...vm, [f]: v } : vm));
   const togExp = (id) => setVms(a => a.map(vm => vm.id === id ? { ...vm, expanded: !vm.expanded } : vm));
@@ -149,6 +174,36 @@ function App() {
     if (window.confirm("Permanently delete ALL VMs in the trash? This cannot be undone."))
       setDeleted([]);
   };
+  const exportData = () => {
+    const data = JSON.stringify({ vms, deleted }, null, 2);
+    const blob = new Blob([data], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `vm-tracker-backup-${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+  };
+
+  const importData = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json";
+    input.onchange = e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = ev => {
+        try {
+          const parsed = JSON.parse(ev.target.result);
+          if (parsed.vms) { setVms(parsed.vms); }
+          if (parsed.deleted) { setDeleted(parsed.deleted); }
+          alert("Data imported successfully!");
+        } catch { alert("Invalid file. Please use a valid VM Tracker backup JSON."); }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  };
+
   const addUrl = (vmId) => setVms(a => a.map(vm => vm.id === vmId ? { ...vm, expanded: true, urls: [...vm.urls, mkUrl()] } : vm));
   const updUrl = (vmId, uid, f, v) => setVms(a => a.map(vm => vm.id === vmId ? { ...vm, urls: vm.urls.map(u => u.id === uid ? { ...u, [f]: v } : u) } : vm));
   const delUrl = (vmId, uid) => setVms(a => a.map(vm => vm.id === vmId ? { ...vm, urls: vm.urls.filter(u => u.id !== uid) } : vm));
@@ -199,6 +254,16 @@ function App() {
           </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={exportData}
+            style={{ padding: "7px 14px", background: "#1a6e3c", color: "#fff", border: "1px solid #27ae60", borderRadius: 6, cursor: "pointer", fontSize: 12, fontFamily: "monospace", fontWeight: 700 }}
+            title="Download all VM data as a JSON backup">
+            ⬇ Export
+          </button>
+          <button onClick={importData}
+            style={{ padding: "7px 14px", background: "#1a3a5c", color: "#7eb8d4", border: "1px solid #2E86AB", borderRadius: 6, cursor: "pointer", fontSize: 12, fontFamily: "monospace", fontWeight: 700 }}
+            title="Load a previously exported JSON backup">
+            ⬆ Import
+          </button>
           <button onClick={() => setVms(a => a.map(v => ({ ...v, expanded: true })))}
             style={{ padding: "7px 14px", background: "#2E86AB", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontFamily: "monospace" }}>
             Expand All
