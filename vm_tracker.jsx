@@ -1,7 +1,12 @@
 import { useState, useEffect, Fragment } from "react";
 import { createRoot } from "react-dom/client";
 
-const CREDS = { user: "upview", pass: "Uv9@mK2xP!" };
+// Credentials are provided at build time via Vite environment variables.
+// Create a `.env` file with VITE_VM_USER and VITE_VM_PASS for local builds.
+const CREDS = {
+  user: import.meta.env.VITE_VM_USER || "",
+  pass: import.meta.env.VITE_VM_PASS || "",
+};
 
 function LoginGate({ children }) {
   const [auth, setAuth] = useState(() => sessionStorage.getItem("vm-auth") === "1");
