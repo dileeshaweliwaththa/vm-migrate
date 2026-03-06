@@ -72,7 +72,7 @@ const INITIAL_VMS = [
   },
 ];
 
-const mkVm = () => ({ id: Date.now(), name: "", oldIp: "", newIp: "", migrated: "No", supabase: "No", keep: "No", notes: "", expanded: true, urls: [] });
+const mkVm = () => ({ id: Date.now(), name: "", oldIp: "", newIp: "", migrated: "No", supabase: "No", keep: "No", notes: "", expanded: true, urls: [], isClient: false });
 const mkUrl = () => ({ id: Date.now() + Math.random(), port: "", proto: "HTTPS", url: "", dns: "No", tested: "No", notes: "" });
 
 function buildFullUrl(proto, newIp, port) {
@@ -109,6 +109,7 @@ function App() {
   const [seq, setSeq] = useState(200);
   const [deleted, setDeleted] = useState([]);
   const [trashOpen, setTrashOpen] = useState(false);
+  const [trashClientOpen, setTrashClientOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
   // On mount: load from server API; fall back to localStorage for local dev
@@ -167,12 +168,38 @@ function App() {
     setDeleted(a => a.filter(v => v.id !== id));
   };
   const permDeleteVm = (id) => {
-    if (window.confirm("Are you sure you want to permanently delete this VM? This cannot be undone."))
+    if (window.confirm("Are you sure you want to permanently delete this VM? This cannot be undone.")) {
+      const vm = deleted.find(v => v.id === id);
+      if (vm && vm.urls && vm.urls.length > 0 && vm.newIp) {
+        setVms(a => a.map(activeVm => {
+          if (activeVm.newIp === vm.newIp && activeVm.id !== vm.id) {
+            const archive = activeVm.migratedArchive || [];
+            if (archive.some(e => e.id === vm.id)) return activeVm;
+            return { ...activeVm, migratedArchive: [...archive, { id: vm.id, name: vm.name, oldIp: vm.oldIp, newIp: vm.newIp, urls: vm.urls }] };
+          }
+          return activeVm;
+        }));
+      }
       setDeleted(a => a.filter(v => v.id !== id));
+    }
   };
-  const clearTrash = () => {
-    if (window.confirm("Permanently delete ALL VMs in the trash? This cannot be undone."))
-      setDeleted([]);
+  const clearTrash = (type) => {
+    const label = type === "client" ? "CLIENT" : "UPVIEW";
+    if (window.confirm(`Permanently delete ALL ${label} VMs in the trash? This cannot be undone.`)) {
+      const toDelete = deleted.filter(v => type === "client" ? !!v.isClient : !v.isClient);
+      const toArchive = toDelete.filter(v => v.urls && v.urls.length > 0 && v.newIp);
+      if (toArchive.length) {
+        setVms(a => a.map(activeVm => {
+          const matching = toArchive.filter(src => src.newIp === activeVm.newIp && src.id !== activeVm.id);
+          if (!matching.length) return activeVm;
+          const archive = activeVm.migratedArchive || [];
+          const toAdd = matching.filter(s => !archive.some(e => e.id === s.id));
+          if (!toAdd.length) return activeVm;
+          return { ...activeVm, migratedArchive: [...archive, ...toAdd.map(s => ({ id: s.id, name: s.name, oldIp: s.oldIp, newIp: s.newIp, urls: s.urls }))] };
+        }));
+      }
+      setDeleted(a => a.filter(v => type === "client" ? !v.isClient : !!v.isClient));
+    }
   };
   const exportData = () => {
     const data = JSON.stringify({ vms, deleted }, null, 2);
@@ -302,7 +329,18 @@ function App() {
             </tr>
           </thead>
           <tbody>
-            {vms.map((vm) => {
+            {[
+              { label: "\uD83D\uDDA5\uFE0F UPVIEW VMs \u2014 Our Servers", sectionFilter: v => !v.isClient, accentColor: "#2E86AB", headerBg: "#0d1f35" },
+              { label: "\uD83D\uDC64 CLIENT VMs", sectionFilter: v => !!v.isClient, accentColor: "#9B59B6", headerBg: "#1A0B2E" }
+            ].map(({ label, sectionFilter, accentColor, headerBg }) => (
+              <Fragment key={label}>
+                <tr>
+                  <td colSpan={16} style={{ background: headerBg, padding: "8px 24px", borderBottom: `2px solid ${accentColor}`, borderTop: "2px solid #1a2a3a" }}>
+                    <span style={{ color: "#fff", fontWeight: 700, fontSize: 11, letterSpacing: 1.5, textTransform: "uppercase" }}>{label}</span>
+                    <span style={{ marginLeft: 10, background: accentColor, color: "#fff", borderRadius: 20, padding: "1px 8px", fontSize: 10, fontWeight: 700 }}>{vms.filter(sectionFilter).length}</span>
+                  </td>
+                </tr>
+                {vms.filter(sectionFilter).map((vm) => {
               const safe = safeStatus(vm);
               return (
                 <Fragment key={"frag-" + vm.id}>
@@ -351,11 +389,16 @@ function App() {
                         style={{ color: "#9ab8d0" }} />
                     </td>
                     <td style={{ background: vmRowBg, padding: "7px 8px", borderBottom: "3px solid #2E86AB", textAlign: "center" }}>
-                      <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
+                      <div style={{ display: "flex", gap: 4, justifyContent: "center", flexWrap: "wrap" }}>
                         <button onClick={() => addUrl(vm.id)} title="Add URL row" style={{
                           width: 28, height: 28, background: "#27ae60", color: "#fff", border: "none",
                           borderRadius: 5, cursor: "pointer", fontSize: 16, fontWeight: 700, lineHeight: "26px",
                         }}>+</button>
+                        <button onClick={() => updVm(vm.id, "isClient", !vm.isClient)}
+                          title={vm.isClient ? "Client VM \u2014 click to move to UPVIEW" : "UPVIEW VM \u2014 click to move to Client"}
+                          style={{ padding: "0 5px", background: vm.isClient ? "#3B1066" : "#1a3a5c", color: vm.isClient ? "#c39bd3" : "#7eb8d4", border: `1px solid ${vm.isClient ? "#9B59B6" : "#2E86AB"}`, borderRadius: 5, cursor: "pointer", fontSize: 9, fontFamily: "monospace", fontWeight: 700, height: 28, whiteSpace: "nowrap", lineHeight: "26px" }}>
+                          {vm.isClient ? "CLIENT" : "UV"}
+                        </button>
                         <button onClick={() => delVm(vm.id)} className="delbtn" title="Delete VM" style={{
                           width: 28, height: 28, background: "#2a4a6b", color: "#9ab8d0", border: "none",
                           borderRadius: 5, cursor: "pointer", fontSize: 13, lineHeight: "26px",
@@ -429,9 +472,12 @@ function App() {
                   )}
 
                   {/* Migrated-from sections */}
-                  {vm.expanded && vm.newIp && vms
-                    .filter(src => src.id !== vm.id && src.newIp === vm.newIp && src.oldIp !== src.newIp)
-                    .map(src => (
+                  {vm.expanded && vm.newIp && (() => {
+                    const activeSrcs = vms.filter(src => src.id !== vm.id && src.newIp === vm.newIp && src.oldIp !== src.newIp);
+                    const deletedSrcs = deleted.filter(src => src.newIp === vm.newIp && src.oldIp !== src.newIp).map(s => ({ ...s, _isDeletedSrc: true }));
+                    const archivedSrcs = (vm.migratedArchive || []).map(s => ({ ...s, _isArchivedSrc: true }));
+                    const allSrcs = [...activeSrcs, ...deletedSrcs, ...archivedSrcs];
+                    return allSrcs.map(src => (
                       <Fragment key={"mig-" + vm.id + "-" + src.id}>
                         {/* Source VM header */}
                         <tr key={"mig-hdr" + vm.id + src.id}>
@@ -441,6 +487,8 @@ function App() {
                               ⬆ Migrated from: </span>
                             <span style={{ fontSize: 12, fontWeight: 700, color: "#f5c6c6" }}>{src.name}</span>
                             <span style={{ marginLeft: 10, fontSize: 10, color: "#a06060" }}>{src.oldIp} → {src.newIp}</span>
+                            {src._isDeletedSrc && <span style={{ marginLeft: 8, fontSize: 9, background: "#7B2020", color: "#f5c6c6", borderRadius: 10, padding: "1px 6px", fontWeight: 700 }}>IN TRASH</span>}
+                            {src._isArchivedSrc && <span style={{ marginLeft: 8, fontSize: 9, background: "#1E6F3A", color: "#a3f0c0", borderRadius: 10, padding: "1px 6px", fontWeight: 700 }}>ARCHIVED</span>}
                           </td>
                         </tr>
                         {/* Source VM's URL rows (read-only) */}
@@ -451,7 +499,7 @@ function App() {
                             <tr key={"mig-url" + vm.id + src.id + u.id}>
                               <td style={{ background: "#6E1A1A", width: 38, borderBottom: "1px solid #5a2020" }} />
                               <td style={{ background: bg, padding: "5px 10px 5px 20px", borderBottom: "1px solid #5a2020" }}>
-                                <span style={{ background: "#922B21", color: "#fff", borderRadius: 20, padding: "1px 8px", fontSize: 9, fontWeight: 800, letterSpacing: 0.5 }}>MIGRATED</span>
+                                <span style={{ background: "#1E6F3A", color: "#a3f0c0", borderRadius: 20, padding: "1px 8px", fontSize: 9, fontWeight: 800, letterSpacing: 0.5 }}>MIGRATED</span>
                               </td>
                               <td style={{ background: bg, padding: "5px 10px", borderBottom: "1px solid #5a2020", textAlign: "center", color: "#f9a54a", fontSize: 12, fontWeight: 500 }}>{src.oldIp}</td>
                               <td style={{ background: bg, padding: "5px 10px", borderBottom: "1px solid #5a2020", textAlign: "center", color: "#52d48a", fontSize: 12, fontWeight: 500 }}>{src.newIp}</td>
@@ -475,11 +523,13 @@ function App() {
                           );
                         })}
                       </Fragment>
-                    ))
-                  }
+                    ));
+                  })()}
                 </Fragment>
               );
-            })}
+                })}
+              </Fragment>
+            ))}
 
             {/* Bottom add VM row */}
             <tr>
@@ -495,38 +545,41 @@ function App() {
         </table>
       </div>
 
-      {/* Trash / Soft-Delete Section */}
-      {deleted.length > 0 && (
-        <div style={{ margin: "24px 0 0 0", fontFamily: "monospace" }}>
+      {/* Trash / Soft-Delete Sections */}
+      {[
+        { type: "upview", label: "🖥️ UPVIEW VMs — DELETED", items: deleted.filter(v => !v.isClient), headerBg: "#3B1A1A", accentColor: "#922B21", rowEven: "#2d1212", rowOdd: "#321515", open: trashOpen, setOpen: setTrashOpen },
+        { type: "client", label: "👤 CLIENT VMs — DELETED", items: deleted.filter(v => !!v.isClient), headerBg: "#2A1040", accentColor: "#9B59B6", rowEven: "#1A0B2E", rowOdd: "#200F38", open: trashClientOpen, setOpen: setTrashClientOpen },
+      ].map(({ type, label, items, headerBg, accentColor, rowEven, rowOdd, open, setOpen }) => items.length === 0 ? null : (
+        <div key={type} style={{ margin: "24px 0 0 0", fontFamily: "monospace" }}>
           <div
-            onClick={() => setTrashOpen(o => !o)}
-            style={{ background: "#3B1A1A", padding: "12px 24px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", userSelect: "none" }}>
+            onClick={() => setOpen(o => !o)}
+            style={{ background: headerBg, padding: "12px 24px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "space-between", userSelect: "none" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <span style={{ fontSize: 16 }}>🗑️</span>
-              <span style={{ color: "#e8a0a0", fontWeight: 700, fontSize: 13, letterSpacing: 1 }}>DELETED VMs</span>
-              <span style={{ background: "#922B21", color: "#fff", borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>{deleted.length}</span>
+              <span style={{ color: "#e8a0a0", fontWeight: 700, fontSize: 13, letterSpacing: 1 }}>{label}</span>
+              <span style={{ background: accentColor, color: "#fff", borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>{items.length}</span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <button onClick={e => { e.stopPropagation(); clearTrash(); }} style={{
-                padding: "4px 14px", background: "#922B21", color: "#fff", border: "none", borderRadius: 5,
+              <button onClick={e => { e.stopPropagation(); clearTrash(type); }} style={{
+                padding: "4px 14px", background: accentColor, color: "#fff", border: "none", borderRadius: 5,
                 cursor: "pointer", fontSize: 11, fontFamily: "monospace", fontWeight: 700
               }}>Clear All</button>
-              <span style={{ color: "#e8a0a0", fontSize: 16 }}>{trashOpen ? "▾" : "▸"}</span>
+              <span style={{ color: "#e8a0a0", fontSize: 16 }}>{open ? "▾" : "▸"}</span>
             </div>
           </div>
-          {trashOpen && (
+          {open && (
             <div style={{ overflowX: "auto" }}>
               <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 900 }}>
                 <thead>
-                  <tr style={{ background: "#2a1010" }}>
+                  <tr style={{ background: type === "client" ? "#1A0B2E" : "#2a1010" }}>
                     {["VM Name", "Old IP", "New IP", "Deleted At", "Notes", "Actions"].map(h => (
-                      <th key={h} style={{ padding: "8px 14px", textAlign: "left", color: "#e8a0a0", fontSize: 11, fontWeight: 700, borderBottom: "1px solid #5a2020", whiteSpace: "nowrap" }}>{h}</th>
+                      <th key={h} style={{ padding: "8px 14px", textAlign: "left", color: "#e8a0a0", fontSize: 11, fontWeight: 700, borderBottom: `1px solid ${type === "client" ? "#5a2080" : "#5a2020"}`, whiteSpace: "nowrap" }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {deleted.map((vm, i) => (
-                    <tr key={vm.id} style={{ background: i % 2 === 0 ? "#2d1212" : "#321515" }}>
+                  {items.map((vm, i) => (
+                    <tr key={vm.id} style={{ background: i % 2 === 0 ? rowEven : rowOdd }}>
                       <td style={{ padding: "8px 14px", color: "#f5c6c6", fontWeight: 700, fontSize: 13 }}>{vm.name || "(unnamed)"}</td>
                       <td style={{ padding: "8px 14px", color: "#f9a54a", fontSize: 12 }}>{vm.oldIp || "—"}</td>
                       <td style={{ padding: "8px 14px", color: "#52d48a", fontSize: 12 }}>{vm.newIp || "—"}</td>
@@ -551,7 +604,7 @@ function App() {
             </div>
           )}
         </div>
-      )}
+      ))}
     </div>
   );
 }
