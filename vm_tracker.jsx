@@ -401,8 +401,8 @@ function App() {
                         }}>+</button>
                         <button onClick={() => updVm(vm.id, "isClient", !vm.isClient)}
                           title={vm.isClient ? "Client VM \u2014 click to move to UPVIEW" : "UPVIEW VM \u2014 click to move to Client"}
-                          style={{ padding: "0 5px", background: vm.isClient ? "#3B1066" : "#1a3a5c", color: vm.isClient ? "#c39bd3" : "#7eb8d4", border: `1px solid ${vm.isClient ? "#9B59B6" : "#2E86AB"}`, borderRadius: 5, cursor: "pointer", fontSize: 9, fontFamily: "monospace", fontWeight: 700, height: 28, whiteSpace: "nowrap", lineHeight: "26px" }}>
-                          {vm.isClient ? "CLIENT" : "UV"}
+                          style={{ padding: "0 5px", background: vm.isClient ? "#3B1066" : "#1a3a5c", color: vm.isClient ? "#c39bd3" : "#7eb8d4", border: `1px solid ${vm.isClient ? "#9B59B6" : "#2E86AB"}`, borderRadius: 5, cursor: "pointer", fontSize: 11, fontFamily: "monospace", fontWeight: 700, height: 28, whiteSpace: "nowrap", lineHeight: "26px", paddingLeft: 8, paddingRight: 8 }}>
+                          {vm.isClient ? "C" : "UV"}
                         </button>
                         <button onClick={() => delVm(vm.id)} className="delbtn" title="Delete VM" style={{
                           width: 28, height: 28, background: "#2a4a6b", color: "#9ab8d0", border: "none",
