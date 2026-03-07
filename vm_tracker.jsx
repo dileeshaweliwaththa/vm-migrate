@@ -176,14 +176,19 @@ function App() {
     if (window.confirm("Are you sure you want to permanently delete this VM? This cannot be undone.")) {
       const vm = deleted.find(v => v.id === id);
       if (vm && vm.urls && vm.urls.length > 0 && vm.newIp) {
-        setVms(a => a.map(activeVm => {
-          if (activeVm.newIp === vm.newIp && activeVm.id !== vm.id) {
+        setVms(a => {
+          // Prefer archiving to the "primary" VM for that IP (oldIp === newIp = the destination server itself)
+          const primaryTarget = a.find(v => v.newIp === vm.newIp && v.id !== vm.id && v.oldIp === v.newIp);
+          const fallbackTarget = a.find(v => v.newIp === vm.newIp && v.id !== vm.id);
+          const target = primaryTarget || fallbackTarget;
+          if (!target) return a;
+          return a.map(activeVm => {
+            if (activeVm.id !== target.id) return activeVm;
             const archive = activeVm.migratedArchive || [];
             if (archive.some(e => e.id === vm.id)) return activeVm;
             return { ...activeVm, migratedArchive: [...archive, { id: vm.id, name: vm.name, oldIp: vm.oldIp, newIp: vm.newIp, urls: vm.urls }] };
-          }
-          return activeVm;
-        }));
+          });
+        });
       }
       setDeleted(a => a.filter(v => v.id !== id));
     }
@@ -194,14 +199,20 @@ function App() {
       const toDelete = deleted.filter(v => type === "client" ? !!v.isClient : !v.isClient);
       const toArchive = toDelete.filter(v => v.urls && v.urls.length > 0 && v.newIp);
       if (toArchive.length) {
-        setVms(a => a.map(activeVm => {
-          const matching = toArchive.filter(src => src.newIp === activeVm.newIp && src.id !== activeVm.id);
-          if (!matching.length) return activeVm;
-          const archive = activeVm.migratedArchive || [];
-          const toAdd = matching.filter(s => !archive.some(e => e.id === s.id));
-          if (!toAdd.length) return activeVm;
-          return { ...activeVm, migratedArchive: [...archive, ...toAdd.map(s => ({ id: s.id, name: s.name, oldIp: s.oldIp, newIp: s.newIp, urls: s.urls }))] };
-        }));
+        setVms(a => {
+          let updated = [...a];
+          toArchive.forEach(src => {
+            // Archive only to the primary VM for that IP (oldIp === newIp)
+            const primaryIdx = updated.findIndex(v => v.newIp === src.newIp && v.id !== src.id && v.oldIp === v.newIp);
+            const fallbackIdx = updated.findIndex(v => v.newIp === src.newIp && v.id !== src.id);
+            const idx = primaryIdx !== -1 ? primaryIdx : fallbackIdx;
+            if (idx === -1) return;
+            const archive = updated[idx].migratedArchive || [];
+            if (archive.some(e => e.id === src.id)) return;
+            updated[idx] = { ...updated[idx], migratedArchive: [...archive, { id: src.id, name: src.name, oldIp: src.oldIp, newIp: src.newIp, urls: src.urls }] };
+          });
+          return updated;
+        });
       }
       setDeleted(a => a.filter(v => type === "client" ? !v.isClient : !!v.isClient));
     }
@@ -478,8 +489,13 @@ function App() {
 
                   {/* Migrated-from sections */}
                   {vm.expanded && vm.newIp && (() => {
-                    const activeSrcs = vms.filter(src => src.id !== vm.id && src.newIp === vm.newIp && src.oldIp !== src.newIp);
-                    const deletedSrcs = deleted.filter(src => src.newIp === vm.newIp && src.oldIp !== src.newIp).map(s => ({ ...s, _isDeletedSrc: true }));
+                    // Only show active/deleted migration sources on the "primary" VM for that IP
+                    // (i.e., the VM that IS the destination server: oldIp === newIp).
+                    // Other VMs co-hosted on the same IP (e.g. being moved there) should not
+                    // inherit unrelated migration history.
+                    const isPrimary = vm.oldIp === vm.newIp;
+                    const activeSrcs = isPrimary ? vms.filter(src => src.id !== vm.id && src.newIp === vm.newIp && src.oldIp !== src.newIp) : [];
+                    const deletedSrcs = isPrimary ? deleted.filter(src => src.newIp === vm.newIp && src.oldIp !== src.newIp).map(s => ({ ...s, _isDeletedSrc: true })) : [];
                     const archivedSrcs = (vm.migratedArchive || []).map(s => ({ ...s, _isArchivedSrc: true }));
                     const allSrcs = [...activeSrcs, ...deletedSrcs, ...archivedSrcs];
                     return allSrcs.map(src => (
