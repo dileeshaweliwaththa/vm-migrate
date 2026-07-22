@@ -1,62 +1,56 @@
 # VM Migration Tracker
 
-A lightweight, browser-based tool for tracking VM migrations — no backend, no database, no login required.
+An internal tool for tracking virtual machines and their endpoints through an
+infrastructure migration — old IP → new IP, DNS status, per-URL testing, and
+"safe to remove" verdicts — built on Next.js + Supabase with a strict
+**5-layer architecture**.
 
-![VM Migration Tracker](./screenshot.png)
+## Tech stack
 
-> All data is saved automatically in your browser's `localStorage`. Nothing is sent to any server.
+- Next.js (App Router) + TypeScript
+- Supabase (Postgres + Auth)
+- TanStack Query
+- shadcn/ui + Tailwind CSS
 
----
+## Features
 
-## What it does
+- **VM grid** at `/tracker` split into **UPVIEW** (our servers) and **Client**
+  sections, each VM expandable into its endpoint (URL) rows.
+- **Per-endpoint tracking** — port, protocol, domain, auto-built "full new
+  URL", DNS-updated and URL-tested flags.
+- **Live stats** — VM/URL counts, migrated, DNS done, tested.
+- **Safe-to-remove verdict** per VM (Supabase → not-migrating → migrated →
+  pending).
+- **Soft-delete trash** with restore / permanent purge and per-section
+  "clear all"; purging a migrated VM **archives its URLs** onto the
+  destination VM so nothing is lost.
+- **JSON import / export** backup of the whole dataset.
+- **Passwordless email sign-in** (Supabase magic link) guarding all
+  protected screens.
 
-Track every VM across a migration from old infrastructure to new:
-
-- **VMs** — name, old IP, new IP, migrated status, Supabase flag, notes
-- **URLs / Endpoints** — per-VM list of ports, protocols, domains, DNS status, tested status
-- **Safe to Remove** — auto-calculated per VM (`Yes` only if migrated and not Supabase)
-- **Live stats** in the topbar — VMs, migrated count, DNS done, URLs tested
-
----
-
-## Running locally
+## Getting started
 
 ```bash
 npm install
-npx vite --open
+cp env.local.sample .env.local   # fill in your Supabase URL + anon key
 ```
 
-App opens at **http://localhost:5173**
-
----
-
-## Deploy (free, no account needed)
+Apply the SQL migrations in [`sql/`](sql) **in order** via the Supabase SQL
+Editor (`000` → `003`). See [docs/schema.md](docs/schema.md).
 
 ```bash
-npx vite build
+npm run dev     # http://localhost:3000  → redirects to /tracker
 ```
 
-Drag the `dist/` folder onto **[netlify.com/drop](https://app.netlify.com/drop)** — get a live public URL instantly.
+## Documentation
 
----
+- [docs/architecture.md](docs/architecture.md) — the mandatory 5-layer model.
+- [docs/tracker.md](docs/tracker.md) — how the VM tracker slice is wired.
+- [docs/auth.md](docs/auth.md) — the email sign-in flow.
+- [docs/schema.md](docs/schema.md) — database tables and the SQL workflow.
+- [docs/ui-guidelines.md](docs/ui-guidelines.md) — shadcn/ui conventions.
 
-## Files
+## Definition of done
 
-| File | Purpose |
-|---|---|
-| `vm_tracker.jsx` | Entire app — React component + data + styles |
-| `index.html` | HTML entry point |
-| `vite.config.js` | Vite + React JSX plugin config |
-| `Dockerfile` | Dockerfile to build a production container |
-
-## What's New (Mar 2026)
-
-This release adds a few workflow and UI improvements to better handle "client" VMs and ensure migrated URLs are preserved:
-
-- **Client VM toggle:** Each VM row now has a small `UV` / `CLIENT` toggle. VMs default to the UPVIEW (our servers) group; toggle a VM to mark it as a Client VM and it will move to the **CLIENT VMs** section.
-- **Separate sections:** The main table is split into two sections: **UPVIEW VMs — Our Servers** and **CLIENT VMs**, each with its own header and VM count.
-- **Deleted (trash) split:** The trash area at the bottom now shows deleted UPVIEW and deleted CLIENT VMs in separate collapsible lists. Each list has its own "Clear All" and restore/delete controls.
-- **Migrated URL preservation:** When a VM that originally migrated its URLs to another VM is permanently removed from the trash, its migrated URLs are preserved and archived on the destination VM so you won't lose sub-URLs that are already migrated.
-- **Migrated badge color:** The read-only `MIGRATED` pill in migrated-source rows is now green to indicate success (rather than red).
-
-These changes are backwards-compatible with existing saved data: existing VMs will stay in place (they default to the UPVIEW section). New fields added to the data model are `isClient` (boolean) and `migratedArchive` (array) and are created automatically when needed.
+After any change, run `npm run build` (zero TypeScript errors) then
+`npm run lint`.
