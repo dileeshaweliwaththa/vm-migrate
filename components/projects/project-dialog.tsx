@@ -4,10 +4,12 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import type { Project } from '@/types/common/project';
 import { useCreateProject, useUpdateProject } from '@/hooks/projects/useProjects';
+import { useTags } from '@/hooks/tags/useTags';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { TagPicker } from '@/components/projects/tag-picker';
 import {
   Dialog,
   DialogContent,
@@ -17,12 +19,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-
-const parseTags = (value: string): string[] =>
-  value
-    .split(',')
-    .map((t) => t.trim())
-    .filter(Boolean);
 
 // Create or edit a project. Pass `project` to edit; omit to create.
 export function ProjectDialog({
@@ -34,16 +30,17 @@ export function ProjectDialog({
 }) {
   const create = useCreateProject();
   const update = useUpdateProject();
+  const { data: availableTags } = useTags();
   const [open, setOpen] = useState(false);
 
   const [name, setName] = useState(project?.name ?? '');
-  const [tags, setTags] = useState((project?.tags ?? []).join(', '));
+  const [tags, setTags] = useState<string[]>(project?.tags ?? []);
   const [description, setDescription] = useState(project?.description ?? '');
 
   const pending = create.isPending || update.isPending;
 
   const handleSave = () => {
-    const input = { name, description, tags: parseTags(tags) };
+    const input = { name, description, tags };
     const done = (message: string) => {
       toast.success(message);
       setOpen(false);
@@ -57,7 +54,7 @@ export function ProjectDialog({
         onSuccess: () => {
           done('Project created.');
           setName('');
-          setTags('');
+          setTags([]);
           setDescription('');
         },
         onError: fail,
@@ -81,14 +78,11 @@ export function ProjectDialog({
             <Input id="p-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="CHEXCALIBUR" />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="p-tags">Tags</Label>
-            <Input
-              id="p-tags"
-              value={tags}
-              onChange={(e) => setTags(e.target.value)}
-              placeholder="CHEX, backend"
-            />
-            <p className="text-xs text-muted-foreground">Comma-separated. Used to group and filter projects.</p>
+            <Label>Tags</Label>
+            <TagPicker value={tags} available={availableTags ?? []} onChange={setTags} />
+            <p className="text-xs text-muted-foreground">
+              Tap a tag to select it, or + to add a new one. Used to group and filter projects.
+            </p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="p-desc">Description</Label>

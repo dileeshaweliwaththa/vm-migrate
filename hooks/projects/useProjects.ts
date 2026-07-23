@@ -1,6 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { TAGS_KEY } from '@/hooks/tags/useTags';
 import type { Project, ProjectDetail, ProjectInput } from '@/types/common/project';
 
 // Hook layer for projects. Components call these; never services/repos directly.
@@ -40,7 +41,10 @@ export const useCreateProject = () => {
         }),
         'Failed to create project.'
       ),
-    onSuccess: () => qc.invalidateQueries({ queryKey: LIST_KEY }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: LIST_KEY });
+      qc.invalidateQueries({ queryKey: TAGS_KEY });
+    },
   });
 };
 
@@ -59,6 +63,7 @@ export const useUpdateProject = () => {
     onSuccess: (_data, { id }) => {
       qc.invalidateQueries({ queryKey: LIST_KEY });
       qc.invalidateQueries({ queryKey: projectDetailKey(id) });
+      qc.invalidateQueries({ queryKey: TAGS_KEY });
     },
   });
 };
