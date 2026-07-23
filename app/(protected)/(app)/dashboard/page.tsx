@@ -1,4 +1,5 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { PageHeader } from '@/components/layout/page-header';
 
 const stats = [
   { label: 'Active users', value: '1.2k' },
@@ -8,16 +9,9 @@ const stats = [
 
 export default function DashboardPage() {
   return (
-    <main className="min-h-screen bg-muted/30 px-6 py-16">
-      <div className="mx-auto flex max-w-6xl flex-col gap-6">
-        <div className="space-y-2">
-          <p className="text-sm font-medium uppercase tracking-[0.2em] text-primary">Protected area</p>
-          <h1 className="text-3xl font-semibold tracking-tight">Welcome to your dashboard</h1>
-          <p className="max-w-2xl text-muted-foreground">
-            This is the place to build your product-specific screens, charts, and workflows.
-          </p>
-        </div>
-
+    <>
+      <PageHeader title="Dashboard" />
+      <div className="mx-auto flex max-w-6xl flex-col gap-6 px-6 py-8">
         <div className="grid gap-4 md:grid-cols-3">
           {stats.map((stat) => (
             <Card key={stat.label} className="border-border shadow-sm">
@@ -43,6 +37,6 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
-    </main>
+    </>
   );
 }

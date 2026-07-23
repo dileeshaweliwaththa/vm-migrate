@@ -20,6 +20,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
+import { PageHeader } from '@/components/layout/page-header';
 import { ProjectDialog } from '@/components/projects/project-dialog';
 import { EnvironmentsSection } from '@/components/environments/environments-section';
 
@@ -57,94 +58,101 @@ export function ProjectDetail({
   }
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-6 px-4 py-8 sm:px-6">
-      <Link
-        href="/projects"
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-      >
-        <ArrowLeft className="h-4 w-4" /> Projects
-      </Link>
-
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="space-y-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-2xl font-semibold tracking-tight">{project.name}</h1>
+    <>
+      <PageHeader
+        title={project.name}
+        stats={
+          <>
             {project.tags.map((t) => (
               <Badge key={t} variant="outline">
                 {t}
               </Badge>
             ))}
-          </div>
-          {project.description ? (
-            <p className="max-w-2xl text-sm text-muted-foreground">{project.description}</p>
-          ) : null}
-        </div>
-
-        {canEdit ? (
-          <div className="flex items-center gap-2">
-            <ProjectDialog
-              project={project}
-              trigger={
-                <Button variant="outline" size="sm">
-                  <Pencil className="mr-2 h-4 w-4" /> Edit
-                </Button>
-              }
-            />
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                archive.mutate(
-                  { id: project.id, archived: !project.archived },
-                  {
-                    onSuccess: () => toast.success(project.archived ? 'Restored.' : 'Archived.'),
-                    onError: (e) => toast.error(e instanceof Error ? e.message : 'Failed.'),
-                  }
-                )
-              }
-            >
-              <Archive className="mr-2 h-4 w-4" /> {project.archived ? 'Restore' : 'Archive'}
-            </Button>
-            {isAdmin ? (
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button variant="destructive" size="sm">
-                    <Trash2 className="mr-2 h-4 w-4" /> Delete
+            <span>
+              {project.environments.length} environment{project.environments.length === 1 ? '' : 's'}
+            </span>
+          </>
+        }
+        actions={
+          canEdit ? (
+            <>
+              <ProjectDialog
+                project={project}
+                trigger={
+                  <Button variant="outline" size="sm">
+                    <Pencil className="mr-2 h-4 w-4" /> Edit
                   </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Delete “{project.name}”?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      This permanently deletes the project, its environments, and ports. This cannot be undone.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction
-                      onClick={() =>
-                        remove.mutate(project.id, {
-                          onSuccess: () => {
-                            toast.success('Project deleted.');
-                            router.push('/projects');
-                          },
-                          onError: (e) => toast.error(e instanceof Error ? e.message : 'Failed.'),
-                        })
-                      }
-                    >
-                      Delete
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            ) : null}
-          </div>
+                }
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  archive.mutate(
+                    { id: project.id, archived: !project.archived },
+                    {
+                      onSuccess: () => toast.success(project.archived ? 'Restored.' : 'Archived.'),
+                      onError: (e) => toast.error(e instanceof Error ? e.message : 'Failed.'),
+                    }
+                  )
+                }
+              >
+                <Archive className="mr-2 h-4 w-4" /> {project.archived ? 'Restore' : 'Archive'}
+              </Button>
+              {isAdmin ? (
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="destructive" size="sm">
+                      <Trash2 className="mr-2 h-4 w-4" /> Delete
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Delete “{project.name}”?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This permanently deletes the project, its environments, and ports. This cannot be undone.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={() =>
+                          remove.mutate(project.id, {
+                            onSuccess: () => {
+                              toast.success('Project deleted.');
+                              router.push('/projects');
+                            },
+                            onError: (e) => toast.error(e instanceof Error ? e.message : 'Failed.'),
+                          })
+                        }
+                      >
+                        Delete
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              ) : null}
+            </>
+          ) : null
+        }
+      />
+
+      <div className="mx-auto w-full max-w-5xl space-y-6 px-4 py-8 sm:px-6">
+        <Link
+          href="/projects"
+          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="h-4 w-4" /> Projects
+        </Link>
+
+        {project.description ? (
+          <p className="max-w-2xl text-sm text-muted-foreground">{project.description}</p>
         ) : null}
+
+        <Separator />
+
+        <EnvironmentsSection project={project} canEdit={canEdit} />
       </div>
-
-      <Separator />
-
-      <EnvironmentsSection project={project} canEdit={canEdit} />
-    </div>
+    </>
   );
 }

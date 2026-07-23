@@ -49,6 +49,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
+import { PageHeader } from '@/components/layout/page-header';
 
 export function UsersManager() {
   const { data: users, isLoading, error } = useUsers();
@@ -99,17 +100,24 @@ export function UsersManager() {
     });
   };
 
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Users</h1>
-          <p className="text-sm text-muted-foreground">
-            Provision team members and assign their access. Users sign in with an email code — there is no self-signup.
-          </p>
-        </div>
+  const adminCount = (users ?? []).filter((u) => u.role === 'admin').length;
 
-        <Dialog open={open} onOpenChange={setOpen}>
+  return (
+    <>
+      <PageHeader
+        title="Users"
+        stats={
+          <>
+            <span>
+              Users: <b className="text-foreground">{users?.length ?? 0}</b>
+            </span>
+            <span>
+              Admins: <b className="text-foreground">{adminCount}</b>
+            </span>
+          </>
+        }
+        actions={
+          <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button>
               <UserPlus className="mr-2 h-4 w-4" /> Add user
@@ -167,7 +175,10 @@ export function UsersManager() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
-      </div>
+        }
+      />
+
+      <div className="mx-auto w-full max-w-5xl space-y-6 px-4 py-8 sm:px-6">
 
       {isLoading ? (
         <p className="text-sm text-muted-foreground">Loading users…</p>
@@ -244,6 +255,7 @@ export function UsersManager() {
           </Table>
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 }

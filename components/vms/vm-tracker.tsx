@@ -11,6 +11,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { PageHeader } from '@/components/layout/page-header';
 import { computeStats } from '@/lib/vm-utils';
 import type { TrackerData, Vm, VmUrl, TrashType } from '@/types/common/vm';
 import {
@@ -245,11 +246,10 @@ export function VmTracker() {
 
   return (
     <div className="flex flex-1 flex-col">
-      {/* Feature sub-header (sticks below the app header, which is h-14) */}
-      <header className="sticky top-14 z-20 flex flex-wrap items-center justify-between gap-4 border-b border-border bg-background/95 px-6 py-3 backdrop-blur">
-        <div>
-          <h1 className="text-lg font-bold tracking-tight uppercase">VM Migration Tracker</h1>
-          <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+      <PageHeader
+        title="VM Migration Tracker"
+        stats={
+          <>
             <span>
               VMs: <b className="text-foreground">{stats.vms}</b>
             </span>
@@ -280,26 +280,28 @@ export function VmTracker() {
                 {stats.tested}/{stats.urls}
               </b>
             </span>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" onClick={handleExport}>
-            <Download className="size-4" /> Export
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleImport}>
-            <Upload className="size-4" /> Import
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setAllExpanded(true)}>
-            Expand all
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setAllExpanded(false)}>
-            Collapse all
-          </Button>
-          <Button size="sm" onClick={handleAddVm}>
-            <Plus className="size-4" /> Add VM
-          </Button>
-        </div>
-      </header>
+          </>
+        }
+        actions={
+          <>
+            <Button variant="outline" size="sm" onClick={handleExport}>
+              <Download className="size-4" /> Export
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleImport}>
+              <Upload className="size-4" /> Import
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setAllExpanded(true)}>
+              Expand all
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setAllExpanded(false)}>
+              Collapse all
+            </Button>
+            <Button size="sm" onClick={handleAddVm}>
+              <Plus className="size-4" /> Add VM
+            </Button>
+          </>
+        }
+      />
 
       <main className="flex-1 p-4">
         <div className="overflow-x-auto rounded-xl border border-border">

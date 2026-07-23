@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { PageHeader } from '@/components/layout/page-header';
 import { ProjectDialog } from '@/components/projects/project-dialog';
 
 const ALL = 'All';
@@ -35,27 +36,37 @@ export function ProjectsDashboard({ canEdit }: { canEdit: boolean }) {
     });
   }, [projects, tag, search]);
 
-  return (
-    <div className="mx-auto w-full max-w-7xl space-y-6 px-4 py-8 sm:px-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Projects</h1>
-          <p className="text-sm text-muted-foreground">
-            All deployments. Click a project to manage its environments and docs.
-          </p>
-        </div>
-        {canEdit ? (
-          <ProjectDialog
-            trigger={
-              <Button>
-                <Plus className="mr-2 h-4 w-4" /> New project
-              </Button>
-            }
-          />
-        ) : null}
-      </div>
+  const tagCount = Math.max(0, tags.length - 1);
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+  return (
+    <>
+      <PageHeader
+        title="Projects"
+        stats={
+          <>
+            <span>
+              Projects: <b className="text-foreground">{projects?.length ?? 0}</b>
+            </span>
+            <span>
+              Tags: <b className="text-foreground">{tagCount}</b>
+            </span>
+          </>
+        }
+        actions={
+          canEdit ? (
+            <ProjectDialog
+              trigger={
+                <Button>
+                  <Plus className="mr-2 h-4 w-4" /> New project
+                </Button>
+              }
+            />
+          ) : null
+        }
+      />
+
+      <div className="mx-auto w-full max-w-7xl space-y-6 px-4 py-8 sm:px-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
         {tags.length > 1 ? (
           <Tabs value={tag} onValueChange={setTag}>
             <TabsList>
@@ -100,8 +111,9 @@ export function ProjectsDashboard({ canEdit }: { canEdit: boolean }) {
             <ProjectCard key={project.id} project={project} />
           ))}
         </div>
-      )}
-    </div>
+        )}
+      </div>
+    </>
   );
 }
 
