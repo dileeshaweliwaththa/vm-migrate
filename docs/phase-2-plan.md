@@ -103,10 +103,19 @@ $$;
 | `cicd_provider` | `text` | same check set; overrides project default |
 | `jenkins_url` | `text` | Jenkins job URL (nullable when provider ≠ jenkins) |
 | `deploy_url` | `text` | live/deployed URL or domain |
-| `vm_id` | `uuid` null | fk → `vms(id)` `on delete set null` — optional link to existing VM |
+| `vm_id` | `uuid` null | fk → `vms(id)` `on delete set null` — optional link to a VM (existing or created inline; see below) |
 | `notes` | `text` | |
 | `position` | `integer` | display order within a project |
 | `created_at` / `updated_at` | `timestamptz` | `set_updated_at` trigger |
+
+**VM selection — pick existing or create inline.** When adding/editing an
+environment, the VM field is a searchable picker over the existing `vms` rows.
+If the target VM doesn't exist yet, the same form can **create a new VM**
+(name, `old_ip`/`new_ip`, `is_client`, etc.) which is inserted into `vms` and
+immediately linked via `vm_id`. The environment service reuses the existing
+`vmService`/`vmRepository` (no duplicate VM write path), so a VM created here
+also shows up in the VM tracker. `vms` stays the single source of truth for
+infrastructure.
 
 ### 3.4 `environment_ports`
 
@@ -190,7 +199,7 @@ repositories (see [architecture.md](./architecture.md)). Reference wiring:
 | RBAC / session role | — | — | — | `auth/authService` (+`getCurrentRole`) | `profiles/profileRepository` |
 | User management | `app/api/users/**`, `app/(protected)/admin/users/page.tsx` | `components/users/*` | `hooks/users/useUsers.ts` | `services/users/userService.ts` | `repositories/users/userRepository.ts` (service-role) |
 | Projects dashboard | `app/api/projects/**`, `app/(protected)/dashboard/page.tsx` | `components/projects/*` | `hooks/projects/useProjects.ts` | `services/projects/projectService.ts` | `repositories/projects/projectRepository.ts` |
-| Project detail + envs | `app/api/projects/:id/environments/**`, `app/(protected)/projects/[id]/page.tsx` | `components/environments/*` | `hooks/environments/useEnvironments.ts` | `services/environments/environmentService.ts` | `repositories/environments/*`, `repositories/environmentPorts/*` |
+| Project detail + envs | `app/api/projects/:id/environments/**`, `app/(protected)/projects/[id]/page.tsx` | `components/environments/*` | `hooks/environments/useEnvironments.ts` | `services/environments/environmentService.ts` (reuses `vms/vmService` for inline VM create) | `repositories/environments/*`, `repositories/environmentPorts/*`, `repositories/vms/*` (existing) |
 | Documentation | `app/api/projects/:id/docs/**` | `components/docs/*` (Tiptap) | `hooks/docs/useProjectDoc.ts` | `services/docs/docService.ts` | `repositories/projectDocs/*` |
 | AI generation | `app/api/ai/generate-docs/route.ts` | `components/docs/generate-button.tsx` | `hooks/ai/useGenerateDocs.ts` | `services/ai/aiService.ts` | `repositories/appSettings/*` (read key) |
 | App settings | `app/api/settings/**`, `app/(protected)/admin/settings/page.tsx` | `components/settings/*` | `hooks/settings/useAppSettings.ts` | `services/settings/settingsService.ts` | `repositories/appSettings/*` |
@@ -233,6 +242,10 @@ distinct `client` values.
   Jenkins URL, deploy URL, linked VM (deep-link into tracker), and a **ports**
   table. Editors get inline add/edit; local-first editing like the tracker
   where it helps.
+- **VM picker (existing or new).** The env form's VM field is a
+  searchable combobox over `vms`; a "**+ Create new VM**" option opens an
+  inline form (name, old/new IP, client flag) that inserts into `vms` via the
+  existing `vmService` and links it. New VMs also appear in the VM tracker.
 - **Documentation** tab: Tiptap editor (editor+) / read-only rendered HTML
   (viewer), with the **Generate by AI** button.
 
@@ -305,7 +318,7 @@ finish green on `npm run build` + `npm run lint`. **Epic → issues:**
 | B2 | **Projects dashboard**: list, client-tab filter, search, provider filter, cards | — | B1 |
 | B3 | **Project create/edit/delete**: editor create/edit, admin delete, soft-archive | — | B1, B2 |
 | B4 | **Environments schema** (`environments` + `environment_ports` + RLS) | ✅ | B1 |
-| B5 | **Environment + ports CRUD**: per-project envs, Jenkins URL, deploy URL, `cicd_provider`, VM link, ports table | — | B4 |
+| B5 | **Environment + ports CRUD**: per-project envs, Jenkins URL, deploy URL, `cicd_provider`, ports table, **VM picker (select existing or create a new VM inline via `vmService`)** | — | B4 |
 | A4 | **User management UI (admin)**: list users, add by email, change role, remove | — | A2 |
 
 ### Milestone M2 — Documentation & AI
