@@ -56,8 +56,8 @@ export function ProjectsDashboard({ canEdit }: { canEdit: boolean }) {
           canEdit ? (
             <ProjectDialog
               trigger={
-                <Button>
-                  <Plus className="mr-2 h-4 w-4" /> New project
+                <Button size="sm">
+                  <Plus className="mr-2 h-4 w-4" /> New Project
                 </Button>
               }
             />

@@ -119,13 +119,13 @@ export function UsersManager() {
         actions={
           <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
-            <Button>
-              <UserPlus className="mr-2 h-4 w-4" /> Add user
+            <Button size="sm">
+              <UserPlus className="mr-2 h-4 w-4" /> Add User
             </Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Add user</DialogTitle>
+              <DialogTitle>Add User</DialogTitle>
               <DialogDescription>
                 They receive access immediately and can sign in with a one-time email code.
               </DialogDescription>
@@ -167,10 +167,11 @@ export function UsersManager() {
             </div>
             <DialogFooter>
               <Button
+                size="sm"
                 onClick={handleInvite}
                 disabled={!email || provision.isPending}
               >
-                {provision.isPending ? 'Adding…' : 'Add user'}
+                {provision.isPending ? 'Adding…' : 'Add User'}
               </Button>
             </DialogFooter>
           </DialogContent>

@@ -151,7 +151,7 @@ export function AppSidebar({ role, email }: { role: UserRole; email: string }) {
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleSignOut}>
-                  <LogOut className="mr-2 h-4 w-4" /> Sign out
+                  <LogOut className="mr-2 h-4 w-4" /> Sign Out
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

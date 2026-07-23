@@ -10,7 +10,9 @@ const buttonVariants = cva(
       variant: {
         default: 'bg-primary text-primary-foreground hover:opacity-90',
         destructive: 'bg-destructive text-white hover:bg-destructive/90',
-        outline: 'border border-input bg-background hover:bg-accent hover:text-accent-foreground',
+        // Blue-tinted (teal accent from globals): blue border + text, fills on hover.
+        outline:
+          'border border-brand-accent bg-background text-brand-accent hover:bg-brand-accent hover:text-brand-foreground',
         secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
         ghost: 'hover:bg-accent hover:text-accent-foreground',
       },

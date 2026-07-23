@@ -83,7 +83,7 @@ export function EnvironmentForm({
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent className="max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{environment ? 'Edit environment' : 'Add environment'}</DialogTitle>
+          <DialogTitle>{environment ? 'Edit Environment' : 'Add Environment'}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
@@ -135,8 +135,8 @@ export function EnvironmentForm({
           </div>
         </div>
         <DialogFooter>
-          <Button onClick={handleSave} disabled={!name || pending}>
-            {pending ? 'Saving…' : environment ? 'Save changes' : 'Add environment'}
+          <Button size="sm" onClick={handleSave} disabled={!name || pending}>
+            {pending ? 'Saving…' : environment ? 'Save Changes' : 'Add Environment'}
           </Button>
         </DialogFooter>
       </DialogContent>

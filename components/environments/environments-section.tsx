@@ -54,7 +54,7 @@ export function EnvironmentsSection({
             projectId={project.id}
             trigger={
               <Button size="sm">
-                <Plus className="mr-2 h-4 w-4" /> Add environment
+                <Plus className="mr-2 h-4 w-4" /> Add Environment
               </Button>
             }
           />

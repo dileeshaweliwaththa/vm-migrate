@@ -67,7 +67,7 @@ export function ProjectDialog({
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{project ? 'Edit project' : 'New project'}</DialogTitle>
+          <DialogTitle>{project ? 'Edit Project' : 'New Project'}</DialogTitle>
           <DialogDescription>
             {project ? 'Update this project’s details.' : 'Add a project to the deployment dashboard.'}
           </DialogDescription>
@@ -90,8 +90,8 @@ export function ProjectDialog({
           </div>
         </div>
         <DialogFooter>
-          <Button onClick={handleSave} disabled={!name || pending}>
-            {pending ? 'Saving…' : project ? 'Save changes' : 'Create project'}
+          <Button size="sm" onClick={handleSave} disabled={!name || pending}>
+            {pending ? 'Saving…' : project ? 'Save Changes' : 'Create Project'}
           </Button>
         </DialogFooter>
       </DialogContent>

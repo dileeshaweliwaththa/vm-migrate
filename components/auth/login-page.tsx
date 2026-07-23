@@ -90,7 +90,7 @@ export default function LoginPage() {
                 />
               </div>
               <Button type="submit" className="w-full" disabled={isSending}>
-                {isSending ? 'Sending…' : 'Send code'}
+                {isSending ? 'Sending…' : 'Send Code'}
               </Button>
             </form>
           ) : (
@@ -110,7 +110,7 @@ export default function LoginPage() {
                 />
               </div>
               <Button type="submit" className="w-full" disabled={isVerifying || code.length < 6}>
-                {isVerifying ? 'Verifying…' : 'Verify & sign in'}
+                {isVerifying ? 'Verifying…' : 'Verify & Sign In'}
               </Button>
               <button
                 type="button"

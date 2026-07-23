@@ -291,10 +291,10 @@ export function VmTracker() {
               <Upload className="size-4" /> Import
             </Button>
             <Button variant="outline" size="sm" onClick={() => setAllExpanded(true)}>
-              Expand all
+              Expand All
             </Button>
             <Button variant="outline" size="sm" onClick={() => setAllExpanded(false)}>
-              Collapse all
+              Collapse All
             </Button>
             <Button size="sm" onClick={handleAddVm}>
               <Plus className="size-4" /> Add VM
