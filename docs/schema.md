@@ -84,25 +84,34 @@ to its URLs. Same shared-access RLS as `vms`.
 
 ## `projects`
 
-Phase 2. One row per deployable project/app. Flat model — `client` is a
-free-text tag for grouping/filtering, not a hierarchy. RLS reuses
+Phase 2. One row per deployable project/app (e.g. `CHEXCALIBUR`). Grouping is
+via **tags** (many-to-many, see below), not a single client field. No
+project-level repo or CI/CD — CI/CD is per-environment. RLS reuses
 `current_user_role()`: read = any authenticated user, insert/update =
 `editor`/`admin`, delete = `admin` only.
 
 | column          | type          | notes                                             |
 | --------------- | ------------- | ------------------------------------------------- |
 | `id`            | `uuid`        | primary key                                       |
-| `name`          | `text`        | e.g. `chex-api`                                   |
+| `name`          | `text`        | e.g. `CHEXCALIBUR`                                |
 | `slug`          | `text`        | unique, url-safe                                  |
-| `client`        | `text`        | tag (CHEX/INAI/KOMPETE/UPVIEW/…)                  |
 | `description`   | `text`        | short summary                                     |
-| `repo_url`      | `text`        | optional                                          |
-| `cicd_provider` | `text`        | `jenkins`/`aws`/`azure`/`amplify`/`other`/`none`  |
 | `archived`      | `boolean`     | soft-delete flag                                  |
 | `archived_at`   | `timestamptz` | when archived                                     |
 | `created_by`    | `uuid`        | FK → `auth.users`, `on delete set null`           |
 | `created_at`    | `timestamptz` | default `now()`                                   |
 | `updated_at`    | `timestamptz` | `set_updated_at` trigger                          |
+
+## `tags` / `project_tags`
+
+Phase 2. `tags` is the global list of tag names (unique); `project_tags` is the
+many-to-many join to `projects` (composite PK, cascade on both FKs). Read = any
+authenticated user; write = `editor`/`admin`.
+
+| table          | columns                                                        |
+| -------------- | -------------------------------------------------------------- |
+| `tags`         | `id uuid pk`, `name text unique`, `created_at`                 |
+| `project_tags` | `project_id → projects`, `tag_id → tags`, PK(`project_id`,`tag_id`) |
 
 ## `environments`
 
@@ -163,6 +172,9 @@ In `supabase/migrations/`, applied in timestamp order:
 - `…_constrain_environment_names.sql` — `environments.name` becomes the
   `environment_name` enum (`DEV`/`STAGE`/`PRODUCTION`); existing values are
   normalized first.
+- `…_project_tags_and_drop_client_repo_cicd.sql` — adds `tags` + `project_tags`
+  (migrating existing `client` values into tags) and drops `projects.client`,
+  `projects.repo_url`, `projects.cicd_provider`.
 
 ## Deploying migrations
 

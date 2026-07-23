@@ -17,23 +17,23 @@ const ALL = 'All';
 
 export function ProjectsDashboard({ canEdit }: { canEdit: boolean }) {
   const { data: projects, isLoading, error } = useProjects();
-  const [client, setClient] = useState(ALL);
+  const [tag, setTag] = useState(ALL);
   const [search, setSearch] = useState('');
 
-  const clients = useMemo(() => {
+  const tags = useMemo(() => {
     const set = new Set<string>();
-    (projects ?? []).forEach((p) => p.client && set.add(p.client));
+    (projects ?? []).forEach((p) => p.tags.forEach((t) => set.add(t)));
     return [ALL, ...Array.from(set).sort()];
   }, [projects]);
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     return (projects ?? []).filter((p) => {
-      if (client !== ALL && p.client !== client) return false;
-      if (term && !`${p.name} ${p.client} ${p.description}`.toLowerCase().includes(term)) return false;
+      if (tag !== ALL && !p.tags.includes(tag)) return false;
+      if (term && !`${p.name} ${p.tags.join(' ')} ${p.description}`.toLowerCase().includes(term)) return false;
       return true;
     });
-  }, [projects, client, search]);
+  }, [projects, tag, search]);
 
   return (
     <div className="mx-auto w-full max-w-7xl space-y-6 px-4 py-8 sm:px-6">
@@ -41,7 +41,7 @@ export function ProjectsDashboard({ canEdit }: { canEdit: boolean }) {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Projects</h1>
           <p className="text-sm text-muted-foreground">
-            All deployments across clients. Click a project to manage its environments and docs.
+            All deployments. Click a project to manage its environments and docs.
           </p>
         </div>
         {canEdit ? (
@@ -56,15 +56,19 @@ export function ProjectsDashboard({ canEdit }: { canEdit: boolean }) {
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Tabs value={client} onValueChange={setClient}>
-          <TabsList>
-            {clients.map((c) => (
-              <TabsTrigger key={c} value={c}>
-                {c}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
+        {tags.length > 1 ? (
+          <Tabs value={tag} onValueChange={setTag}>
+            <TabsList>
+              {tags.map((t) => (
+                <TabsTrigger key={t} value={t}>
+                  {t}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        ) : (
+          <span />
+        )}
         <div className="relative w-full max-w-xs">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
@@ -88,7 +92,7 @@ export function ProjectsDashboard({ canEdit }: { canEdit: boolean }) {
         </p>
       ) : filtered.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border py-16 text-center text-sm text-muted-foreground">
-          No projects{client !== ALL ? ` for ${client}` : ''} yet.
+          No projects{tag !== ALL ? ` tagged ${tag}` : ''} yet.
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -108,20 +112,23 @@ function ProjectCard({ project }: { project: Project }) {
         <CardHeader className="pb-2">
           <div className="flex items-start justify-between gap-2">
             <CardTitle className="text-base">{project.name}</CardTitle>
-            {project.client ? <Badge variant="outline">{project.client}</Badge> : null}
           </div>
+          {project.tags.length ? (
+            <div className="flex flex-wrap gap-1 pt-1">
+              {project.tags.map((t) => (
+                <Badge key={t} variant="outline">
+                  {t}
+                </Badge>
+              ))}
+            </div>
+          ) : null}
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="line-clamp-2 min-h-8 text-sm text-muted-foreground">
             {project.description || 'No description yet.'}
           </p>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Badge variant="secondary" className="uppercase">
-              {project.cicdProvider}
-            </Badge>
-            <span>
-              {project.environmentCount} environment{project.environmentCount === 1 ? '' : 's'}
-            </span>
+          <div className="text-xs text-muted-foreground">
+            {project.environmentCount} environment{project.environmentCount === 1 ? '' : 's'}
           </div>
         </CardContent>
       </Card>

@@ -38,14 +38,17 @@ export interface Environment {
   ports: EnvironmentPort[];
 }
 
+export interface Tag {
+  id: string;
+  name: string;
+}
+
 export interface Project {
   id: string;
   name: string;
   slug: string;
-  client: string;
   description: string;
-  repoUrl: string;
-  cicdProvider: CicdProvider;
+  tags: string[];
   archived: boolean;
   archivedAt: string | null;
   createdAt: string;
@@ -57,9 +60,9 @@ export interface ProjectDetail extends Project {
   environments: Environment[];
 }
 
-export type ProjectInput = Partial<
-  Pick<Project, 'name' | 'slug' | 'client' | 'description' | 'repoUrl' | 'cicdProvider'>
->;
+export type ProjectInput = Partial<Pick<Project, 'name' | 'slug' | 'description'>> & {
+  tags?: string[];
+};
 
 // A new VM created inline from the environment form (subset of the VM tracker's
 // fields). The service creates it via vmService, then links it as vm_id.

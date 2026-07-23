@@ -8,10 +8,7 @@ import type { EnvironmentRow } from '@/types/supabase/response/environments';
 export type ProjectWriteColumns = Partial<{
   name: string;
   slug: string;
-  client: string;
   description: string;
-  repo_url: string;
-  cicd_provider: string;
   archived: boolean;
   archived_at: string | null;
   created_by: string | null;
@@ -21,7 +18,7 @@ export const findAllProjects = async (): Promise<ProjectRow[]> => {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from('projects')
-    .select('*, environments(count)')
+    .select('*, environments(count), project_tags(tags(name))')
     .order('created_at', { ascending: true });
   if (error) throw new Error(error.message);
   return (data ?? []) as ProjectRow[];
@@ -29,7 +26,11 @@ export const findAllProjects = async (): Promise<ProjectRow[]> => {
 
 export const findProjectById = async (id: string): Promise<ProjectRow | null> => {
   const supabase = await createClient();
-  const { data, error } = await supabase.from('projects').select('*').eq('id', id).maybeSingle();
+  const { data, error } = await supabase
+    .from('projects')
+    .select('*, project_tags(tags(name))')
+    .eq('id', id)
+    .maybeSingle();
   if (error) throw new Error(error.message);
   return (data as ProjectRow | null) ?? null;
 };
@@ -61,7 +62,7 @@ export const updateProject = async (
     .from('projects')
     .update(values)
     .eq('id', id)
-    .select('*')
+    .select('*, project_tags(tags(name))')
     .single();
   if (error) throw new Error(error.message);
   return data as ProjectRow;

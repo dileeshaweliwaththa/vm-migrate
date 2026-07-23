@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { CICD_PROVIDERS, type CicdProvider, type Project } from '@/types/common/project';
+import type { Project } from '@/types/common/project';
 import { useCreateProject, useUpdateProject } from '@/hooks/projects/useProjects';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,13 +17,12 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
+
+const parseTags = (value: string): string[] =>
+  value
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean);
 
 // Create or edit a project. Pass `project` to edit; omit to create.
 export function ProjectDialog({
@@ -38,15 +37,13 @@ export function ProjectDialog({
   const [open, setOpen] = useState(false);
 
   const [name, setName] = useState(project?.name ?? '');
-  const [client, setClient] = useState(project?.client ?? '');
+  const [tags, setTags] = useState((project?.tags ?? []).join(', '));
   const [description, setDescription] = useState(project?.description ?? '');
-  const [repoUrl, setRepoUrl] = useState(project?.repoUrl ?? '');
-  const [cicdProvider, setCicdProvider] = useState<CicdProvider>(project?.cicdProvider ?? 'none');
 
   const pending = create.isPending || update.isPending;
 
   const handleSave = () => {
-    const input = { name, client, description, repoUrl, cicdProvider };
+    const input = { name, description, tags: parseTags(tags) };
     const done = (message: string) => {
       toast.success(message);
       setOpen(false);
@@ -60,10 +57,8 @@ export function ProjectDialog({
         onSuccess: () => {
           done('Project created.');
           setName('');
-          setClient('');
+          setTags('');
           setDescription('');
-          setRepoUrl('');
-          setCicdProvider('none');
         },
         onError: fail,
       });
@@ -81,40 +76,23 @@ export function ProjectDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="p-name">Name</Label>
-              <Input id="p-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="chex-api" />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="p-client">Client / group</Label>
-              <Input id="p-client" value={client} onChange={(e) => setClient(e.target.value)} placeholder="CHEX" />
-            </div>
+          <div className="space-y-2">
+            <Label htmlFor="p-name">Name</Label>
+            <Input id="p-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="CHEXCALIBUR" />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="p-tags">Tags</Label>
+            <Input
+              id="p-tags"
+              value={tags}
+              onChange={(e) => setTags(e.target.value)}
+              placeholder="CHEX, backend"
+            />
+            <p className="text-xs text-muted-foreground">Comma-separated. Used to group and filter projects.</p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="p-desc">Description</Label>
             <Textarea id="p-desc" value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="p-repo">Repository URL</Label>
-              <Input id="p-repo" value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)} placeholder="https://github.com/…" />
-            </div>
-            <div className="space-y-2">
-              <Label>Default CI/CD</Label>
-              <Select value={cicdProvider} onValueChange={(v) => setCicdProvider(v as CicdProvider)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {CICD_PROVIDERS.map((p) => (
-                    <SelectItem key={p} value={p} className="uppercase">
-                      {p}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
           </div>
         </div>
         <DialogFooter>

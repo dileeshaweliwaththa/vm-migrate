@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { ArrowLeft, Archive, ExternalLink, Pencil, Trash2 } from 'lucide-react';
+import { ArrowLeft, Archive, Pencil, Trash2 } from 'lucide-react';
 import { useProject, useArchiveProject, useDeleteProject } from '@/hooks/projects/useProjects';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -67,25 +67,16 @@ export function ProjectDetail({
 
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="space-y-1">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-semibold tracking-tight">{project.name}</h1>
-            {project.client ? <Badge variant="outline">{project.client}</Badge> : null}
-            <Badge variant="secondary" className="uppercase">
-              {project.cicdProvider}
-            </Badge>
+            {project.tags.map((t) => (
+              <Badge key={t} variant="outline">
+                {t}
+              </Badge>
+            ))}
           </div>
           {project.description ? (
             <p className="max-w-2xl text-sm text-muted-foreground">{project.description}</p>
-          ) : null}
-          {project.repoUrl ? (
-            <a
-              href={project.repoUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-            >
-              Repository <ExternalLink className="h-3 w-3" />
-            </a>
           ) : null}
         </div>
 

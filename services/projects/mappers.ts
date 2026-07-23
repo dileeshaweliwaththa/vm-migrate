@@ -17,10 +17,11 @@ export const rowToProject = (row: ProjectRow): Project => ({
   id: row.id,
   name: row.name,
   slug: row.slug,
-  client: row.client,
   description: row.description,
-  repoUrl: row.repo_url,
-  cicdProvider: row.cicd_provider as CicdProvider,
+  tags: (row.project_tags ?? [])
+    .map((pt) => pt.tags?.name)
+    .filter((n): n is string => Boolean(n))
+    .sort(),
   archived: row.archived,
   archivedAt: row.archived_at,
   createdAt: row.created_at,
