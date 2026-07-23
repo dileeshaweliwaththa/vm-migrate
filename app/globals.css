@@ -71,8 +71,10 @@
   --color-accent-800: #0c2862;
   --color-accent-900: #061331;
 
-  /* Brand — base blue carried over from the original VM tracker (#2E86AB) */
-  --color-brand: #2e86ab;
+  /* Brand — carried over from the original VM tracker:
+     navy #162d47 (base/chrome) + teal #2e86ab (accent). */
+  --color-brand: #162d47;
+  --color-brand-accent: #2e86ab;
   --color-brand-foreground: #ffffff;
 
   /* Custom Font Sizes */
@@ -97,7 +99,7 @@
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: #2e86ab;
+  --primary: #162d47;
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
@@ -116,7 +118,7 @@
   --chart-5: oklch(0.769 0.188 70.08);
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: #2e86ab;
+  --sidebar-primary: #162d47;
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.97 0 0);
   --sidebar-accent-foreground: oklch(0.205 0 0);
@@ -124,7 +126,7 @@
   --sidebar-ring: oklch(0.708 0 0);
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: #2e86ab;
+  --sidebar-primary: #162d47;
   --sidebar-primary-foreground: oklch(0.985 0 0);
   --sidebar-accent: oklch(0.97 0 0);
   --sidebar-accent-foreground: oklch(0.205 0 0);
