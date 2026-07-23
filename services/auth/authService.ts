@@ -5,7 +5,8 @@ import {
   signOut,
   verifyEmailOtp,
 } from '@/repositories/auth/authRepository';
-import { findProfileByEmail } from '@/repositories/profiles/profileRepository';
+import { findProfileByEmail, findRoleById } from '@/repositories/profiles/profileRepository';
+import type { UserRole } from '@/types/common';
 
 // Service layer: business logic and use-case orchestration. Calls the
 // repository layer, transforms results into domain types (ApiResponse), and
@@ -94,4 +95,15 @@ export const logout = async (): Promise<ApiResponse> => {
 
 export const getCurrentUser = async () => {
   return getAuthenticatedUser();
+};
+
+// Resolves the signed-in user's global RBAC role. Returns null when there is
+// no session; defaults to the least-privileged 'viewer' if the profile row has
+// no role yet. UI and other services use this to gate admin/editor actions
+// (the authoritative check remains role-based RLS in Postgres).
+export const getCurrentRole = async (): Promise<UserRole | null> => {
+  const user = await getAuthenticatedUser();
+  if (!user) return null;
+  const role = await findRoleById(user.id);
+  return (role as UserRole | null) ?? 'viewer';
 };

@@ -13,15 +13,22 @@ One row per `auth.users` entry, created automatically by the
 `on_auth_user_created` trigger on sign-up. Extend this table with the columns
 your app needs.
 
-| column       | type          | notes                              |
-| ------------ | ------------- | ---------------------------------- |
-| `id`         | `uuid`        | primary key, FK → `auth.users.id`  |
-| `email`      | `text`        | from sign-up                       |
-| `name`       | `text`        | nullable; from sign-up metadata    |
-| `created_at` | `timestamptz` | default `now()`                    |
+| column       | type          | notes                                             |
+| ------------ | ------------- | ------------------------------------------------- |
+| `id`         | `uuid`        | primary key, FK → `auth.users.id`                 |
+| `email`      | `text`        | from sign-up                                      |
+| `name`       | `text`        | nullable; from sign-up metadata                   |
+| `role`       | `text`        | RBAC role: `admin` \| `editor` \| `viewer` (default `viewer`) |
+| `created_at` | `timestamptz` | default `now()`                                   |
 
-RLS: authenticated users can read their own profile only
-(`id = auth.uid()`). There is no update policy by default.
+RLS: authenticated users can read their own profile (`id = auth.uid()`);
+**admins** (via `current_user_role() = 'admin'`) can additionally read and
+update all profiles, which powers the admin user-management flow.
+
+`public.current_user_role()` is a `SECURITY DEFINER` helper that returns the
+signed-in user's role; every Phase 2 table's RLS reuses it to gate writes
+(select = any authenticated user, insert/update = editor|admin, delete =
+admin). See [phase-2-plan.md](./phase-2-plan.md) §2–§3.
 
 ## `vms`
 
@@ -77,6 +84,9 @@ In `supabase/migrations/`, applied in timestamp order:
   trigger.
 - `…_create_vm_urls_table.sql` — `vm_urls` table, FK to `vms` (cascade),
   shared-access RLS, `set_updated_at` trigger.
+- `…_add_profiles_role.sql` — Phase 2 RBAC: `profiles.role`
+  (`admin`/`editor`/`viewer`), the `current_user_role()` helper, and admin
+  read/update policies on `profiles`.
 
 ## Deploying migrations
 

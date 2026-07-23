@@ -17,8 +17,18 @@ export const findProfileById = async (id: string) => {
   const supabase = await createClient();
   const { data } = await supabase
     .from('profiles')
-    .select('id, name')
+    .select('id, name, role')
     .eq('id', id)
     .maybeSingle();
   return data as Profiles | null;
+};
+
+export const findRoleById = async (id: string) => {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('id', id)
+    .maybeSingle();
+  return data?.role ?? null;
 };
