@@ -10,6 +10,10 @@ export type CicdProvider = (typeof CICD_PROVIDERS)[number];
 export const PORT_SOURCES = ['manual', 'jenkins'] as const;
 export type PortSource = (typeof PORT_SOURCES)[number];
 
+// Fixed environment names (mirrors the `environment_name` DB enum).
+export const ENVIRONMENT_NAMES = ['DEV', 'STAGE', 'PRODUCTION'] as const;
+export type EnvironmentName = (typeof ENVIRONMENT_NAMES)[number];
+
 export interface EnvironmentPort {
   id: string;
   environmentId: string;
@@ -23,7 +27,7 @@ export interface EnvironmentPort {
 export interface Environment {
   id: string;
   projectId: string;
-  name: string;
+  name: EnvironmentName;
   cicdProvider: CicdProvider;
   jenkinsUrl: string;
   deployUrl: string;

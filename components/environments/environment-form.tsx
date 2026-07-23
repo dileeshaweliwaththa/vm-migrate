@@ -2,7 +2,14 @@
 
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { CICD_PROVIDERS, type CicdProvider, type Environment, type EnvironmentInput } from '@/types/common/project';
+import {
+  CICD_PROVIDERS,
+  ENVIRONMENT_NAMES,
+  type CicdProvider,
+  type Environment,
+  type EnvironmentInput,
+  type EnvironmentName,
+} from '@/types/common/project';
 import { useEnvironmentMutations } from '@/hooks/environments/useEnvironments';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -38,7 +45,7 @@ export function EnvironmentForm({
   const { addEnvironment, updateEnvironment } = useEnvironmentMutations(projectId);
   const [open, setOpen] = useState(false);
 
-  const [name, setName] = useState(environment?.name ?? '');
+  const [name, setName] = useState<EnvironmentName>(environment?.name ?? 'DEV');
   const [cicdProvider, setCicdProvider] = useState<CicdProvider>(environment?.cicdProvider ?? 'jenkins');
   const [jenkinsUrl, setJenkinsUrl] = useState(environment?.jenkinsUrl ?? '');
   const [deployUrl, setDeployUrl] = useState(environment?.deployUrl ?? '');
@@ -81,8 +88,19 @@ export function EnvironmentForm({
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="e-name">Name</Label>
-              <Input id="e-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="production" />
+              <Label>Environment</Label>
+              <Select value={name} onValueChange={(v) => setName(v as EnvironmentName)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ENVIRONMENT_NAMES.map((n) => (
+                    <SelectItem key={n} value={n}>
+                      {n}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
               <Label>CI/CD</Label>

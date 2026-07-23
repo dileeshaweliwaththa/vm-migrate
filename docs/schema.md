@@ -27,9 +27,11 @@ update all profiles, which powers the admin user-management flow.
 
 Fixed-value columns use Postgres **enum types** (not `text` + `CHECK`):
 `user_role` (`profiles.role`), `cicd_provider` (`projects`/`environments`),
-`net_protocol` (`environment_ports.protocol`), and `port_source`
-(`environment_ports.source`). Each mirrors a TS constant of the same values
-(`USER_ROLES`, `CICD_PROVIDERS`, `PROTOCOLS`, `PORT_SOURCES`). The legacy
+`net_protocol` (`environment_ports.protocol`), `port_source`
+(`environment_ports.source`), and `environment_name` (`environments.name` —
+`DEV`/`STAGE`/`PRODUCTION`). Each mirrors a TS constant of the same values
+(`USER_ROLES`, `CICD_PROVIDERS`, `PROTOCOLS`, `PORT_SOURCES`,
+`ENVIRONMENT_NAMES`). The legacy
 `vm_urls.proto` remains `text` for tracker-data compatibility.
 
 `public.current_user_role()` is a `SECURITY DEFINER` helper that returns the
@@ -111,7 +113,7 @@ role-based RLS as `projects` (writes = `editor`/`admin`).
 | --------------- | ------------- | ------------------------------------------------ |
 | `id`            | `uuid`        | primary key                                      |
 | `project_id`    | `uuid`        | FK → `projects.id`, `on delete cascade`          |
-| `name`          | `text`        | dev / staging / prod / custom                    |
+| `name`          | `environment_name` | enum: `DEV` / `STAGE` / `PRODUCTION`        |
 | `cicd_provider` | `text`        | overrides the project default                    |
 | `jenkins_url`   | `text`        | Jenkins job URL                                  |
 | `deploy_url`    | `text`        | live/deployed URL                                |
@@ -158,6 +160,9 @@ In `supabase/migrations/`, applied in timestamp order:
 - `…_convert_fixed_values_to_enums.sql` — replaces the `text` + `CHECK`
   fixed-value columns with the `user_role`, `cicd_provider`, `net_protocol`,
   and `port_source` enum types.
+- `…_constrain_environment_names.sql` — `environments.name` becomes the
+  `environment_name` enum (`DEV`/`STAGE`/`PRODUCTION`); existing values are
+  normalized first.
 
 ## Deploying migrations
 

@@ -5,6 +5,7 @@ import type { Protocol } from '@/types/common/vm';
 import type {
   CicdProvider,
   Environment,
+  EnvironmentName,
   EnvironmentPort,
   Project,
 } from '@/types/common/project';
@@ -40,7 +41,7 @@ export const rowToPort = (row: EnvironmentPortRow): EnvironmentPort => ({
 export const rowToEnvironment = (row: EnvironmentRow): Environment => ({
   id: row.id,
   projectId: row.project_id,
-  name: row.name,
+  name: row.name as EnvironmentName,
   cicdProvider: row.cicd_provider as CicdProvider,
   jenkinsUrl: row.jenkins_url,
   deployUrl: row.deploy_url,
