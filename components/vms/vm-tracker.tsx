@@ -1,8 +1,7 @@
 'use client';
 
 import { Fragment, useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { Download, LogOut, Plus, Upload } from 'lucide-react';
+import { Download, Plus, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -12,7 +11,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { createClient } from '@/lib/supabase/client';
 import { computeStats } from '@/lib/vm-utils';
 import type { TrackerData, Vm, VmUrl, TrashType } from '@/types/common/vm';
 import {
@@ -56,7 +54,6 @@ const SECTIONS: { label: string; isClient: boolean }[] = [
 ];
 
 export function VmTracker() {
-  const router = useRouter();
   const { data: loaded, isLoading, error, refetch } = useTrackerData();
   const [data, setData] = useState<TrackerData | null>(null);
 
@@ -233,11 +230,6 @@ export function VmTracker() {
     input.click();
   };
 
-  const handleSignOut = async () => {
-    await createClient().auth.signOut();
-    router.push('/login');
-  };
-
   if (isLoading) {
     return <div className="p-10 text-sm text-muted-foreground">Loading VMs…</div>;
   }
@@ -252,9 +244,9 @@ export function VmTracker() {
   const stats = computeStats(data.vms);
 
   return (
-    <div className="flex min-h-screen flex-col">
-      {/* Topbar */}
-      <header className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-4 border-b border-border bg-background/95 px-6 py-3 backdrop-blur">
+    <div className="flex flex-1 flex-col">
+      {/* Feature sub-header (sticks below the app header, which is h-14) */}
+      <header className="sticky top-14 z-20 flex flex-wrap items-center justify-between gap-4 border-b border-border bg-background/95 px-6 py-3 backdrop-blur">
         <div>
           <h1 className="text-lg font-bold tracking-tight uppercase">VM Migration Tracker</h1>
           <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
@@ -305,9 +297,6 @@ export function VmTracker() {
           </Button>
           <Button size="sm" onClick={handleAddVm}>
             <Plus className="size-4" /> Add VM
-          </Button>
-          <Button variant="ghost" size="sm" onClick={handleSignOut} title="Sign out">
-            <LogOut className="size-4" />
           </Button>
         </div>
       </header>
