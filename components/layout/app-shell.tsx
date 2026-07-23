@@ -28,6 +28,7 @@ interface NavItem {
 // Nav grows as later issues land their pages (Projects → B2, Settings → C1).
 const NAV: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard' },
+  { href: '/projects', label: 'Projects' },
   { href: '/tracker', label: 'VM Tracker' },
   { href: '/admin/users', label: 'Users', adminOnly: true },
 ];

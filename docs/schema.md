@@ -73,6 +73,62 @@ to its URLs. Same shared-access RLS as `vms`.
 | `created_at` | `timestamptz` | default `now()`                          |
 | `updated_at` | `timestamptz` | kept fresh by the `set_updated_at` trigger |
 
+## `projects`
+
+Phase 2. One row per deployable project/app. Flat model — `client` is a
+free-text tag for grouping/filtering, not a hierarchy. RLS reuses
+`current_user_role()`: read = any authenticated user, insert/update =
+`editor`/`admin`, delete = `admin` only.
+
+| column          | type          | notes                                             |
+| --------------- | ------------- | ------------------------------------------------- |
+| `id`            | `uuid`        | primary key                                       |
+| `name`          | `text`        | e.g. `chex-api`                                   |
+| `slug`          | `text`        | unique, url-safe                                  |
+| `client`        | `text`        | tag (CHEX/INAI/KOMPETE/UPVIEW/…)                  |
+| `description`   | `text`        | short summary                                     |
+| `repo_url`      | `text`        | optional                                          |
+| `cicd_provider` | `text`        | `jenkins`/`aws`/`azure`/`amplify`/`other`/`none`  |
+| `archived`      | `boolean`     | soft-delete flag                                  |
+| `archived_at`   | `timestamptz` | when archived                                     |
+| `created_by`    | `uuid`        | FK → `auth.users`, `on delete set null`           |
+| `created_at`    | `timestamptz` | default `now()`                                   |
+| `updated_at`    | `timestamptz` | `set_updated_at` trigger                          |
+
+## `environments`
+
+Phase 2. Zero-to-many per project; deleting a project cascades. Same
+role-based RLS as `projects` (writes = `editor`/`admin`).
+
+| column          | type          | notes                                            |
+| --------------- | ------------- | ------------------------------------------------ |
+| `id`            | `uuid`        | primary key                                      |
+| `project_id`    | `uuid`        | FK → `projects.id`, `on delete cascade`          |
+| `name`          | `text`        | dev / staging / prod / custom                    |
+| `cicd_provider` | `text`        | overrides the project default                    |
+| `jenkins_url`   | `text`        | Jenkins job URL                                  |
+| `deploy_url`    | `text`        | live/deployed URL                                |
+| `vm_id`         | `uuid`        | FK → `vms.id`, `on delete set null` (optional)   |
+| `notes`         | `text`        | free text                                        |
+| `position`      | `integer`     | display order within the project                 |
+| `created_at` / `updated_at` | `timestamptz` | `set_updated_at` trigger             |
+
+## `environment_ports`
+
+Phase 2. One row per deployed port (mirrors `vm_urls`). `source` records
+provenance (`manual` now, `jenkins` after the Phase 2b sync).
+
+| column           | type          | notes                                   |
+| ---------------- | ------------- | --------------------------------------- |
+| `id`             | `uuid`        | primary key                             |
+| `environment_id` | `uuid`        | FK → `environments.id`, `on delete cascade` |
+| `port`           | `text`        | e.g. `3000`                             |
+| `protocol`       | `text`        | HTTP/HTTPS/TCP/UDP/WS/WSS               |
+| `description`    | `text`        | e.g. "API"                              |
+| `source`         | `text`        | `manual` \| `jenkins`                   |
+| `position`       | `integer`     | display order                           |
+| `created_at` / `updated_at` | `timestamptz` | `set_updated_at` trigger     |
+
 ## Migration files
 
 In `supabase/migrations/`, applied in timestamp order:
@@ -87,6 +143,11 @@ In `supabase/migrations/`, applied in timestamp order:
 - `…_add_profiles_role.sql` — Phase 2 RBAC: `profiles.role`
   (`admin`/`editor`/`viewer`), the `current_user_role()` helper, and admin
   read/update policies on `profiles`.
+- `…_create_projects_table.sql` — `projects` table, role-based RLS,
+  `set_updated_at` trigger.
+- `…_create_environments_tables.sql` — `environments` + `environment_ports`
+  tables (FK cascade to `projects`, optional FK to `vms`), role-based RLS,
+  `set_updated_at` triggers.
 
 ## Deploying migrations
 

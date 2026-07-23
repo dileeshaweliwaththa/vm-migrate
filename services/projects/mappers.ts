@@ -1,0 +1,62 @@
+import type { ProjectRow } from '@/types/supabase/response/projects';
+import type { EnvironmentRow } from '@/types/supabase/response/environments';
+import type { EnvironmentPortRow } from '@/types/supabase/response/environmentPorts';
+import type { Protocol } from '@/types/common/vm';
+import type {
+  CicdProvider,
+  Environment,
+  EnvironmentPort,
+  Project,
+} from '@/types/common/project';
+
+// Shared row -> domain mappers for the projects/environments slice. Kept in one
+// place so both projectService and environmentService map consistently.
+
+export const rowToProject = (row: ProjectRow): Project => ({
+  id: row.id,
+  name: row.name,
+  slug: row.slug,
+  client: row.client,
+  description: row.description,
+  repoUrl: row.repo_url,
+  cicdProvider: row.cicd_provider as CicdProvider,
+  archived: row.archived,
+  archivedAt: row.archived_at,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+  environmentCount: row.environments?.[0]?.count ?? 0,
+});
+
+export const rowToPort = (row: EnvironmentPortRow): EnvironmentPort => ({
+  id: row.id,
+  environmentId: row.environment_id,
+  port: row.port,
+  protocol: row.protocol as Protocol,
+  description: row.description,
+  source: row.source === 'jenkins' ? 'jenkins' : 'manual',
+  position: row.position,
+});
+
+export const rowToEnvironment = (row: EnvironmentRow): Environment => ({
+  id: row.id,
+  projectId: row.project_id,
+  name: row.name,
+  cicdProvider: row.cicd_provider as CicdProvider,
+  jenkinsUrl: row.jenkins_url,
+  deployUrl: row.deploy_url,
+  vmId: row.vm_id,
+  vmName: row.vms?.name ?? null,
+  notes: row.notes,
+  position: row.position,
+  ports: (row.environment_ports ?? [])
+    .map(rowToPort)
+    .sort((a, b) => a.position - b.position),
+});
+
+export const slugify = (value: string): string =>
+  value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60) || 'project';
