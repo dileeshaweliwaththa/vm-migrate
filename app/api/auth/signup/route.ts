@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 
 export async function POST(request: Request) {
   try {
-    const { email, name } = await request.json();
+    const { email } = await request.json();
 
     if (!email || typeof email !== 'string') {
       return NextResponse.json(
@@ -12,7 +12,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const response = await emailSignUp(email, typeof name === 'string' ? name : undefined);
+    const response = await emailSignUp(email);
 
     return NextResponse.json({ response }, { status: response.success ? 200 : 400 });
   } catch (error) {

@@ -3,7 +3,9 @@ import { createClient } from '@/lib/supabase/server';
 // Repository layer: pure Supabase data access. No business rules — just
 // queries and auth calls that return raw results to the service layer.
 
-export const signInWithOtp = async (email: string, shouldCreateUser = true, name?: string) => {
+// No self-signup: default shouldCreateUser to false so only pre-provisioned
+// users (created by an admin) can receive a sign-in code.
+export const signInWithOtp = async (email: string, shouldCreateUser = false, name?: string) => {
   const supabase = await createClient();
   const { error } = await supabase.auth.signInWithOtp({
     email,

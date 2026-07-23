@@ -5,7 +5,7 @@ import {
   signOut,
   verifyEmailOtp,
 } from '@/repositories/auth/authRepository';
-import { findProfileByEmail, findRoleById } from '@/repositories/profiles/profileRepository';
+import { findRoleById } from '@/repositories/profiles/profileRepository';
 import type { UserRole } from '@/types/common';
 
 // Service layer: business logic and use-case orchestration. Calls the
@@ -23,7 +23,12 @@ const authErrorMessage = (message: string | undefined, fallback: string): string
   return message;
 };
 
-export const emailSignUp = async (email: string, name?: string): Promise<ApiResponse> => {
+// Requests a passwordless sign-in code. Self-signup is disabled
+// (`shouldCreateUser: false`), so only users an admin has provisioned can
+// receive a code. We return a generic success message regardless of whether
+// the email is registered, so the endpoint can't be used to enumerate which
+// addresses exist (this also supersedes the old leaky existing-user check).
+export const emailSignUp = async (email: string): Promise<ApiResponse> => {
   if (!email) {
     return {
       success: false,
@@ -31,28 +36,17 @@ export const emailSignUp = async (email: string, name?: string): Promise<ApiResp
     };
   }
 
-  const existingUser = await findProfileByEmail(email);
-  if (existingUser) {
+  const { error } = await signInWithOtp(email, false);
+  if (error && error.message === 'email rate limit exceeded') {
     return {
       success: false,
-      message: 'Account already exists. Please login.',
-    };
-  }
-
-  const { error } = await signInWithOtp(email, true, name?.trim() || undefined);
-  if (error) {
-    return {
-      success: false,
-      message: authErrorMessage(
-        error.message,
-        'Could not send the sign-in email. Please try again in a moment.'
-      ),
+      message: authErrorMessage(error.message, 'Too many emails sent recently. Please wait a few minutes.'),
     };
   }
 
   return {
     success: true,
-    message: 'Magic link sent successfully. Please check your inbox.',
+    message: 'If your email is registered, a 6-digit sign-in code is on its way.',
   };
 };
 
