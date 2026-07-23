@@ -32,24 +32,26 @@ Before implementing any feature, request, or fix, read and follow:
 - [docs/ui-guidelines.md](docs/ui-guidelines.md) — shadcn/ui is the only
   allowed component library; install primitives via the shadcn CLI and
   compose feature components from them.
-- [docs/schema.md](docs/schema.md) — database schema and the SQL workflow.
+- [docs/schema.md](docs/schema.md) — database schema and the migration workflow.
 - [docs/auth.md](docs/auth.md) — the email sign-in flow and how to extend it.
 - [docs/tracker.md](docs/tracker.md) — the VM tracker feature, its layers, and
   its API.
 
-## Database / SQL workflow
+## Database / migration workflow
 
-Supabase tables are **never** created or altered by application code or
-migrations run from the app. Instead:
+Supabase tables are **never** created or altered by application code or by
+migrations run from the app. Schema changes are managed with the **Supabase
+CLI** and live in [`supabase/migrations/`](supabase/migrations):
 
-- Every new table or schema change gets its own numbered `.sql` file in
-  [`sql/`](sql) (e.g. `002_add_xyz.sql`), written so it can be pasted
-  directly into the Supabase SQL Editor and run manually.
-- The `sql/` folder is excluded from the Next.js build
+- Create each schema change with `supabase migration new <name>`, which writes
+  a timestamp-prefixed `.sql` file to `supabase/migrations/`. Migrations apply
+  in timestamp order.
+- Deploy to the linked remote project with `supabase db push` (or apply to a
+  local stack with `supabase db reset` / `supabase migration up`).
+- The `supabase/` folder is excluded from the Next.js build
   (`outputFileTracingExcludes` in `next.config.ts`) and from the TypeScript
-  project (`tsconfig.json`) — it is documentation/ops only, never imported
-  by app code.
-- After adding or changing a `.sql` file, update
+  project (`tsconfig.json`) — it is ops-only, never imported by app code.
+- After adding or changing a migration, update
   [docs/schema.md](docs/schema.md) to match.
 
 After making any code change, run `npm run build` and ensure it completes

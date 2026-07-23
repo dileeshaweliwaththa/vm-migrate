@@ -35,8 +35,9 @@ npm install
 cp env.local.sample .env.local   # fill in your Supabase URL + anon key
 ```
 
-Apply the SQL migrations in [`sql/`](sql) **in order** via the Supabase SQL
-Editor (`000` → `003`). See [docs/schema.md](docs/schema.md).
+Apply the database migrations with the Supabase CLI: `supabase link
+--project-ref <ref>` then `supabase db push`. See
+[docs/schema.md](docs/schema.md).
 
 ```bash
 npm run dev     # http://localhost:3000  → redirects to /tracker
@@ -47,7 +48,7 @@ npm run dev     # http://localhost:3000  → redirects to /tracker
 - [docs/architecture.md](docs/architecture.md) — the mandatory 5-layer model.
 - [docs/tracker.md](docs/tracker.md) — how the VM tracker slice is wired.
 - [docs/auth.md](docs/auth.md) — the email sign-in flow.
-- [docs/schema.md](docs/schema.md) — database tables and the SQL workflow.
+- [docs/schema.md](docs/schema.md) — database tables and the migration workflow.
 - [docs/ui-guidelines.md](docs/ui-guidelines.md) — shadcn/ui conventions.
 
 ## Definition of done

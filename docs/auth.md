@@ -12,7 +12,7 @@ touches all five architecture layers (see [architecture.md](./architecture.md)).
    `services/auth/authService.ts` → `signInWithOtp` with
    `shouldCreateUser: true` (`repositories/auth/authRepository.ts`). Supabase
    emails the code. On new accounts the `on_auth_user_created` trigger creates
-   the matching `profiles` row (`sql/001_create_profiles_table.sql`).
+   the matching `profiles` row (`supabase/migrations/…_create_profiles_table.sql`).
 2. **Enter the code.** The login page switches to a code input; the
    `useVerifyOtp` hook POSTs to `/api/auth/verify`, which calls `verifyOtp`
    (`repositories/auth/authRepository.ts` → `verifyOtp` with `type: 'email'`).
@@ -50,7 +50,7 @@ Common next steps when building a real app on top of the starter:
 - Add a route guard in `app/(protected)/...` that redirects unauthenticated
   users away, using `getCurrentUser` from the auth service.
 - Add roles/permissions by extending `profiles` with a new column (a new
-  numbered file in `sql/`) and reading it in the service layer.
+  `supabase migration new` file) and reading it in the service layer.
 
 ## Known limitation
 

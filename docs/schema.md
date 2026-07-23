@@ -1,11 +1,11 @@
 # Data Model
 
 Supabase tables are **never** created or altered by application code or by
-migrations run from the app. Every schema change is a plain `.sql` file in
-[`sql/`](../sql), applied **manually** in the Supabase SQL Editor in numeric
-order. The `sql/` folder is not imported by the app and is excluded from both
-the Next.js build (`next.config.ts`) and the TypeScript project
-(`tsconfig.json`).
+migrations run from the app. Every schema change is a timestamp-prefixed `.sql`
+migration in [`supabase/migrations/`](../supabase/migrations), managed with the
+**Supabase CLI** and applied in timestamp order. The `supabase/` folder is not
+imported by the app and is excluded from both the Next.js build
+(`next.config.ts`) and the TypeScript project (`tsconfig.json`).
 
 ## `profiles`
 
@@ -66,23 +66,38 @@ to its URLs. Same shared-access RLS as `vms`.
 | `created_at` | `timestamptz` | default `now()`                          |
 | `updated_at` | `timestamptz` | kept fresh by the `set_updated_at` trigger |
 
-## SQL files
+## Migration files
 
-- `000_helpers.sql` — shared `set_updated_at()` trigger function. Apply first.
-- `001_create_profiles_table.sql` — `profiles` table, RLS "read own profile"
+In `supabase/migrations/`, applied in timestamp order:
+
+- `…_helpers.sql` — shared `set_updated_at()` trigger function. Applies first.
+- `…_create_profiles_table.sql` — `profiles` table, RLS "read own profile"
   policy, the `handle_new_user` trigger, and a backfill from `auth.users`.
-- `002_create_vms_table.sql` — `vms` table, shared-access RLS, `set_updated_at`
+- `…_create_vms_table.sql` — `vms` table, shared-access RLS, `set_updated_at`
   trigger.
-- `003_create_vm_urls_table.sql` — `vm_urls` table, FK to `vms` (cascade),
+- `…_create_vm_urls_table.sql` — `vm_urls` table, FK to `vms` (cascade),
   shared-access RLS, `set_updated_at` trigger.
+
+## Deploying migrations
+
+One-time setup: `supabase login`, then `supabase link --project-ref <ref>`.
+Then apply pending migrations to the remote database:
+
+```bash
+supabase db push
+```
+
+(For local development against the CLI stack, use `supabase db reset` or
+`supabase migration up` instead.)
 
 ## Adding a table
 
-1. Create the next numbered file, e.g. `sql/002_create_<name>_table.sql`,
-   written so it can be pasted directly into the Supabase SQL Editor.
+1. Create the migration with `supabase migration new create_<name>_table`,
+   which writes a timestamped `.sql` file to `supabase/migrations/`.
 2. Enable RLS and add the policies the app needs.
 3. If the table has an `updated_at` column, attach the `set_updated_at`
-   trigger from `000_helpers.sql`.
+   trigger from the helpers migration.
 4. Add matching types under `types/supabase/response/<name>/` and, where
    useful, a domain type under `types/common/`.
-5. Update this doc to describe the new table.
+5. Apply it with `supabase db push` and update this doc to describe the new
+   table.

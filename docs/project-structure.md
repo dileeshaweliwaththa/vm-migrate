@@ -19,8 +19,8 @@ A quick "where does this go?" map. The authoritative rules live in
   Supabase clients, `cn()`).
 - `types/` — shared domain types (`common/`) and raw Supabase response types
   (`supabase/`).
-- `sql/` — manual Supabase migrations, applied by hand (see
-  [schema.md](./schema.md)).
+- `supabase/` — Supabase CLI config and `migrations/`, applied with
+  `supabase db push` (see [schema.md](./schema.md)).
 - `docs/` — project documentation.
 
 ## Reuse pattern

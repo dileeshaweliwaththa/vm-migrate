@@ -81,7 +81,7 @@ lib/
     session.ts                        ← session helper
     proxy.ts                          ← session refresh for the proxy (middleware)
 
-sql/                                  ← manual Supabase migrations (see schema.md)
+supabase/migrations/                  ← Supabase CLI migrations (see schema.md)
 ```
 
 ## Rules of thumb
