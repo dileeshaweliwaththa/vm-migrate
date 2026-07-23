@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { Trash2, UserPlus } from 'lucide-react';
-import type { UserRole } from '@/types/common';
+import { USER_ROLES, type UserRole } from '@/types/common';
 import type { AppUser } from '@/types/common/user';
 import {
   useUsers,
@@ -49,8 +49,6 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-
-const ROLES: UserRole[] = ['viewer', 'editor', 'admin'];
 
 export function UsersManager() {
   const { data: users, isLoading, error } = useUsers();
@@ -150,7 +148,7 @@ export function UsersManager() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {ROLES.map((r) => (
+                    {USER_ROLES.map((r) => (
                       <SelectItem key={r} value={r} className="capitalize">
                         {r}
                       </SelectItem>
@@ -202,7 +200,7 @@ export function UsersManager() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {ROLES.map((r) => (
+                        {USER_ROLES.map((r) => (
                           <SelectItem key={r} value={r} className="capitalize">
                             {r}
                           </SelectItem>

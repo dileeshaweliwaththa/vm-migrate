@@ -4,7 +4,9 @@ export interface ApiResponse {
 }
 
 // Global RBAC role stored on profiles.role. Ordered least- to most-privileged.
-export type UserRole = 'viewer' | 'editor' | 'admin';
+// Single source of truth for the value set (mirrors the `user_role` DB enum).
+export const USER_ROLES = ['viewer', 'editor', 'admin'] as const;
+export type UserRole = (typeof USER_ROLES)[number];
  
 export interface ApiSingleResponse<T> extends ApiResponse {
   data: T | null;

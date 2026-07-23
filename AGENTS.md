@@ -54,6 +54,27 @@ CLI** and live in [`supabase/migrations/`](supabase/migrations):
 - After adding or changing a migration, update
   [docs/schema.md](docs/schema.md) to match.
 
+## Types, enums & constants
+
+Fixed value sets are modelled as **enums**, never as ad-hoc string literals or
+repeated arrays:
+
+- **Database:** a column whose values come from a fixed set uses a Postgres
+  **enum type** (e.g. `user_role`, `cicd_provider`, `net_protocol`,
+  `port_source`), not `text` + a `CHECK` constraint. Create the enum with
+  `create type … as enum (…)` (guarded with a `duplicate_object` `DO` block so
+  the migration is re-runnable) and convert existing columns via
+  `alter column … type … using …::…`.
+- **TypeScript:** each set has **one** source of truth — a
+  `const X = [...] as const` array with a derived
+  `type X = (typeof X)[number]` — and everything else imports it (e.g.
+  `USER_ROLES`, `CICD_PROVIDERS`, `PROTOCOLS`, `PORT_SOURCES`). The DB enum and
+  the TS constant must list the same values in the same order.
+- **No magic strings.** Don't re-type `'admin'`/`'editor'` checks or duplicate
+  role arrays across files. Use the shared constants and the helpers in
+  [`lib/rbac.ts`](lib/rbac.ts) (`isAdmin`, `canEdit`) for role logic; add a
+  helper rather than repeating a comparison.
+
 After making any code change, run `npm run build` and ensure it completes
 with zero TypeScript errors, then run `npm run lint`, before considering the
 task done.

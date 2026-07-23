@@ -25,6 +25,13 @@ RLS: authenticated users can read their own profile (`id = auth.uid()`);
 **admins** (via `current_user_role() = 'admin'`) can additionally read and
 update all profiles, which powers the admin user-management flow.
 
+Fixed-value columns use Postgres **enum types** (not `text` + `CHECK`):
+`user_role` (`profiles.role`), `cicd_provider` (`projects`/`environments`),
+`net_protocol` (`environment_ports.protocol`), and `port_source`
+(`environment_ports.source`). Each mirrors a TS constant of the same values
+(`USER_ROLES`, `CICD_PROVIDERS`, `PROTOCOLS`, `PORT_SOURCES`). The legacy
+`vm_urls.proto` remains `text` for tracker-data compatibility.
+
 `public.current_user_role()` is a `SECURITY DEFINER` helper that returns the
 signed-in user's role; every Phase 2 table's RLS reuses it to gate writes
 (select = any authenticated user, insert/update = editor|admin, delete =
@@ -148,6 +155,9 @@ In `supabase/migrations/`, applied in timestamp order:
 - `…_create_environments_tables.sql` — `environments` + `environment_ports`
   tables (FK cascade to `projects`, optional FK to `vms`), role-based RLS,
   `set_updated_at` triggers.
+- `…_convert_fixed_values_to_enums.sql` — replaces the `text` + `CHECK`
+  fixed-value columns with the `user_role`, `cicd_provider`, `net_protocol`,
+  and `port_source` enum types.
 
 ## Deploying migrations
 

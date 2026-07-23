@@ -6,13 +6,17 @@ import type { Protocol } from '@/types/common/vm';
 export const CICD_PROVIDERS = ['jenkins', 'aws', 'azure', 'amplify', 'other', 'none'] as const;
 export type CicdProvider = (typeof CICD_PROVIDERS)[number];
 
+// Provenance of a port row (mirrors the `port_source` DB enum).
+export const PORT_SOURCES = ['manual', 'jenkins'] as const;
+export type PortSource = (typeof PORT_SOURCES)[number];
+
 export interface EnvironmentPort {
   id: string;
   environmentId: string;
   port: string;
   protocol: Protocol;
   description: string;
-  source: 'manual' | 'jenkins';
+  source: PortSource;
   position: number;
 }
 

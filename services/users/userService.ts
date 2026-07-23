@@ -1,4 +1,4 @@
-import type { ApiResponse, ApiSingleResponse, UserRole } from '@/types/common';
+import { USER_ROLES, type ApiResponse, type ApiSingleResponse, type UserRole } from '@/types/common';
 import type { AppUser } from '@/types/common/user';
 import { getAuthenticatedUser } from '@/repositories/auth/authRepository';
 import { getCurrentRole } from '@/services/auth/authService';
@@ -15,7 +15,7 @@ import {
 // service-role repository, so RLS-bypassing calls can never be reached by a
 // non-admin. Has no React dependency.
 
-const ROLES: UserRole[] = ['viewer', 'editor', 'admin'];
+const isValidRole = (role: UserRole): boolean => USER_ROLES.includes(role);
 
 const requireAdmin = async (): Promise<ApiResponse | null> => {
   const role = await getCurrentRole();
@@ -60,7 +60,7 @@ export const provisionUser = async (
 
   const cleanEmail = email?.trim().toLowerCase();
   if (!cleanEmail) return { success: false, message: 'Email is required.' };
-  if (!ROLES.includes(role)) return { success: false, message: 'Invalid role.' };
+  if (!isValidRole(role)) return { success: false, message: 'Invalid role.' };
 
   try {
     const { user, error } = await adminCreateAuthUser(cleanEmail, name?.trim() || undefined);
@@ -88,7 +88,7 @@ export const provisionUser = async (
 export const changeUserRole = async (id: string, role: UserRole): Promise<ApiResponse> => {
   const denied = await requireAdmin();
   if (denied) return denied;
-  if (!ROLES.includes(role)) return { success: false, message: 'Invalid role.' };
+  if (!isValidRole(role)) return { success: false, message: 'Invalid role.' };
   try {
     const { error } = await adminUpdateRole(id, role);
     if (error) return { success: false, message: asError(error, 'Could not update the role.') };

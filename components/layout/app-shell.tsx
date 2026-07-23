@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { LogOut } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { cn } from '@/lib/utils';
+import { isAdmin } from '@/lib/rbac';
 import type { UserRole } from '@/types/common';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
@@ -51,7 +52,7 @@ export function AppShell({
   const pathname = usePathname();
   const router = useRouter();
 
-  const items = NAV.filter((item) => !item.adminOnly || role === 'admin');
+  const items = NAV.filter((item) => !item.adminOnly || isAdmin(role));
 
   const handleSignOut = async () => {
     await createClient().auth.signOut();
