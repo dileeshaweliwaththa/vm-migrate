@@ -92,13 +92,18 @@ export function AppSidebar({ role, email }: { role: UserRole; email: string }) {
         <SidebarGroup>
           <SidebarGroupLabel>Navigation</SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu>
+            <SidebarMenu className="gap-1.5">
               {items.map((item) => {
                 const active =
                   pathname === item.href || pathname.startsWith(`${item.href}/`);
                 return (
                   <SidebarMenuItem key={item.href}>
-                    <SidebarMenuButton asChild isActive={active} tooltip={item.label}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={active}
+                      tooltip={item.label}
+                      className="h-11 gap-3 text-[15px] [&>svg]:size-5"
+                    >
                       <Link href={item.href}>
                         <item.icon />
                         <span>{item.label}</span>
