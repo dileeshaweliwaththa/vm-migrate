@@ -49,7 +49,7 @@ export default function LoginPage() {
       {
         onSuccess: (res) => {
           if (res.success) {
-            router.push('/tracker');
+            router.push('/dashboard');
             router.refresh();
           } else {
             setMessage(res.message || 'Invalid or expired code.');
