@@ -1,6 +1,7 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
- 
+@plugin '@tailwindcss/typography';
+
 @custom-variant dark (&:is(.dark *));
  
 @theme inline {
@@ -246,4 +247,21 @@
     font-weight: 500;
     line-height: 1.5;
   }
+}
+/* Tiptap documentation editor — themed via tokens (light + dark). The prose
+   classes come from @tailwindcss/typography; these fill in the editing chrome
+   and the empty-state placeholder. */
+.tiptap {
+  outline: none;
+  min-height: 16rem;
+}
+.tiptap :first-child {
+  margin-top: 0;
+}
+.tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--muted-foreground);
+  float: left;
+  height: 0;
+  pointer-events: none;
 }

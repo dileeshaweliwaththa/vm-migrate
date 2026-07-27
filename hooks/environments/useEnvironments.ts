@@ -87,5 +87,25 @@ export const useEnvironmentMutations = (projectId: string) => {
     onSuccess: invalidate,
   });
 
-  return { addEnvironment, updateEnvironment, removeEnvironment, addPort, updatePort, removePort };
+  // Pull this environment's Jenkins job config and refresh its jenkins-sourced
+  // ports (global credentials, per-environment target). Returns a result message.
+  const syncFromJenkins = useMutation({
+    mutationFn: async (envId: string): Promise<{ written: number; message: string }> => {
+      const res = await fetch(`${base}/${envId}/jenkins-sync`, { method: 'POST' });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? 'Jenkins sync failed.');
+      return { written: body.data?.written ?? 0, message: body.message ?? 'Synced.' };
+    },
+    onSuccess: invalidate,
+  });
+
+  return {
+    addEnvironment,
+    updateEnvironment,
+    removeEnvironment,
+    addPort,
+    updatePort,
+    removePort,
+    syncFromJenkins,
+  };
 };

@@ -45,6 +45,7 @@ export const rowToEnvironment = (row: EnvironmentRow): Environment => ({
   name: row.name as EnvironmentName,
   cicdProvider: row.cicd_provider as CicdProvider,
   jenkinsUrl: row.jenkins_url,
+  jenkinsUsername: row.jenkins_username ?? '',
   deployUrl: row.deploy_url,
   vmId: row.vm_id,
   vmName: row.vms?.name ?? null,

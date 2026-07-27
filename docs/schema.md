@@ -124,7 +124,8 @@ role-based RLS as `projects` (writes = `editor`/`admin`).
 | `project_id`    | `uuid`        | FK → `projects.id`, `on delete cascade`          |
 | `name`          | `environment_name` | enum: `DEV` / `STAGE` / `PRODUCTION`        |
 | `cicd_provider` | `text`        | overrides the project default                    |
-| `jenkins_url`   | `text`        | Jenkins job URL                                  |
+| `jenkins_url`   | `text`        | Jenkins job URL (secret token lives in `environment_secrets`) |
+| `jenkins_username` | `text`     | Jenkins Basic-auth username (non-secret)         |
 | `deploy_url`    | `text`        | live/deployed URL                                |
 | `vm_id`         | `uuid`        | FK → `vms.id`, `on delete set null` (optional)   |
 | `notes`         | `text`        | free text                                        |
@@ -146,6 +147,62 @@ provenance (`manual` now, `jenkins` after the Phase 2b sync).
 | `source`         | `text`        | `manual` \| `jenkins`                   |
 | `position`       | `integer`     | display order                           |
 | `created_at` / `updated_at` | `timestamptz` | `set_updated_at` trigger     |
+
+## `project_docs`
+
+Phase 2 · M2. One row per project (1-to-1, `project_id` is the PK and cascades
+on project delete). Holds the project's documentation as a Tiptap document:
+`content_json` is canonical and re-editable; `content_html` is a server-derived
+copy for cheap read-only rendering to viewers. Same role-based RLS as projects
+(read = any authenticated user, write = `editor`/`admin`). See
+[ai-docs.md](./ai-docs.md).
+
+| column            | type          | notes                                        |
+| ----------------- | ------------- | -------------------------------------------- |
+| `project_id`      | `uuid`        | PK, FK → `projects.id`, `on delete cascade`  |
+| `content_json`    | `jsonb`       | canonical Tiptap document JSON               |
+| `content_html`    | `text`        | rendered HTML (derived from JSON server-side) |
+| `generated_by_ai` | `boolean`     | last save came from the “Generate by AI” flow |
+| `updated_by`      | `uuid`        | FK → `auth.users`, `on delete set null`      |
+| `created_at` / `updated_at` | `timestamptz` | `set_updated_at` trigger           |
+
+## `app_settings`
+
+Phase 2 · M2. A **singleton** (`id boolean primary key default true
+check (id)` enforces the single row) holding admin-configured global values:
+the Gemini AI key/model/house-style prompt. RLS is **admin-only** for
+select/insert/update — the secret (`gemini_api_key`) never travels to a
+non-admin. Server routes that need it for a non-admin caller (the AI “Generate
+by AI” flow) read it via the **service-role** client, which bypasses RLS; the
+value is used to call Gemini and never returned to the browser (the settings
+service masks it to a boolean, and the key field is write-only in the UI). An
+MVP fallback reads `GEMINI_API_KEY` from the server env if the row is unset.
+Jenkins is configured **per-environment**, not here (see `environment_secrets`).
+See [settings.md](./settings.md) and [ai-docs.md](./ai-docs.md).
+
+| column             | type          | notes                                       |
+| ------------------ | ------------- | ------------------------------------------- |
+| `id`               | `boolean`     | PK, `default true check (id)` — single row  |
+| `gemini_api_key`   | `text`        | **secret** — read server-side only          |
+| `gemini_model`     | `text`        | default `gemini-2.5-flash`                  |
+| `ai_style_prompt`  | `text`        | house-style instructions for consistent docs |
+| `created_at` / `updated_at` | `timestamptz` | `set_updated_at` trigger           |
+
+## `environment_secrets`
+
+Phase 2b · M3. The **secret** per-environment Jenkins API token, split out from
+`environments` because that table is readable by every authenticated user (a
+token there would leak). RLS is **enabled with no policies**, so no
+authenticated client can read or write it — only the **service-role** client
+(server-side, behind an editor/admin check) touches it. The non-secret Jenkins
+job URL + username live on `environments` (`jenkins_url`, `jenkins_username`).
+See [jenkins-sync.md](./jenkins-sync.md).
+
+| column              | type          | notes                                      |
+| ------------------- | ------------- | ------------------------------------------ |
+| `environment_id`    | `uuid`        | PK, FK → `environments.id`, `on delete cascade` |
+| `jenkins_api_token` | `text`        | **secret** — read server-side only         |
+| `created_at` / `updated_at` | `timestamptz` | `set_updated_at` trigger           |
 
 ## Migration files
 
@@ -175,6 +232,14 @@ In `supabase/migrations/`, applied in timestamp order:
 - `…_project_tags_and_drop_client_repo_cicd.sql` — adds `tags` + `project_tags`
   (migrating existing `client` values into tags) and drops `projects.client`,
   `projects.repo_url`, `projects.cicd_provider`.
+- `…_create_app_settings_table.sql` — the `app_settings` singleton (admin-only
+  RLS, seeded with one row), holding the Gemini configuration.
+- `…_create_project_docs_table.sql` — the `project_docs` table (1-to-1 with a
+  project, cascade delete), storing Tiptap JSON + rendered HTML with role-based
+  RLS.
+- `…_environment_jenkins_secrets.sql` — adds `environments.jenkins_username` and
+  the `environment_secrets` table (per-environment Jenkins API token; RLS on
+  with no policies, so it's service-role-only).
 
 ## Deploying migrations
 

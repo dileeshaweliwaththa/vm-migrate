@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   LogOut,
   Server,
+  Settings,
   Users,
   type LucideIcon,
 } from 'lucide-react';
@@ -50,6 +51,7 @@ const NAV: NavItem[] = [
   { href: '/projects', label: 'Projects', icon: FolderKanban },
   { href: '/tracker', label: 'VM Tracker', icon: Server },
   { href: '/admin/users', label: 'Users', icon: Users, adminOnly: true },
+  { href: '/admin/settings', label: 'Settings', icon: Settings, adminOnly: true },
 ];
 
 const roleBadgeVariant: Record<UserRole, 'default' | 'secondary' | 'outline'> = {

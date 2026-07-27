@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
-import { ExternalLink, Pencil, Plus, Server, Trash2 } from 'lucide-react';
+import { ExternalLink, Pencil, Plus, RefreshCw, Server, Settings2, Trash2 } from 'lucide-react';
 import { PROTOCOLS, type Protocol } from '@/types/common/vm';
 import type { Environment, ProjectDetail } from '@/types/common/project';
 import { useEnvironmentMutations } from '@/hooks/environments/useEnvironments';
@@ -37,6 +37,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { EnvironmentForm } from '@/components/environments/environment-form';
+import { JenkinsConfigDialog } from '@/components/environments/jenkins-config-dialog';
 
 export function EnvironmentsSection({
   project,
@@ -85,10 +86,20 @@ function EnvironmentCard({
   env: Environment;
   canEdit: boolean;
 }) {
-  const { removeEnvironment, addPort, removePort } = useEnvironmentMutations(projectId);
+  const { removeEnvironment, addPort, removePort, syncFromJenkins } =
+    useEnvironmentMutations(projectId);
   const [port, setPort] = useState('');
   const [protocol, setProtocol] = useState<Protocol>('HTTPS');
   const [description, setDescription] = useState('');
+  const [jenkinsOpen, setJenkinsOpen] = useState(false);
+  const isJenkins = env.cicdProvider === 'jenkins';
+
+  const handleSyncJenkins = () => {
+    syncFromJenkins.mutate(env.id, {
+      onSuccess: (r) => toast.success(r.message),
+      onError: (e) => toast.error(e instanceof Error ? e.message : 'Jenkins sync failed.'),
+    });
+  };
 
   const handleAddPort = () => {
     if (!port.trim()) return;
@@ -144,6 +155,40 @@ function EnvironmentCard({
           ) : null}
           {canEdit ? (
             <>
+              {isJenkins ? (
+                <>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Jenkins settings"
+                    title="Jenkins settings"
+                    onClick={() => setJenkinsOpen(true)}
+                  >
+                    <Settings2 className="h-4 w-4" />
+                  </Button>
+                  {env.jenkinsUrl ? (
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Sync ports from Jenkins"
+                      title="Sync ports from Jenkins"
+                      onClick={handleSyncJenkins}
+                      disabled={syncFromJenkins.isPending}
+                    >
+                      <RefreshCw
+                        className={`h-4 w-4 ${syncFromJenkins.isPending ? 'animate-spin' : ''}`}
+                      />
+                    </Button>
+                  ) : null}
+                  <JenkinsConfigDialog
+                    projectId={projectId}
+                    envId={env.id}
+                    envName={env.name}
+                    open={jenkinsOpen}
+                    onOpenChange={setJenkinsOpen}
+                  />
+                </>
+              ) : null}
               <EnvironmentForm
                 projectId={projectId}
                 environment={env}

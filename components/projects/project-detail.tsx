@@ -1,14 +1,16 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { ArrowLeft, Archive, Pencil, Trash2 } from 'lucide-react';
+import { ArrowLeft, Archive, FileText, Pencil, Server, Trash2 } from 'lucide-react';
 import { useProject, useArchiveProject, useDeleteProject } from '@/hooks/projects/useProjects';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,6 +25,7 @@ import {
 import { PageHeader } from '@/components/layout/page-header';
 import { ProjectDialog } from '@/components/projects/project-dialog';
 import { EnvironmentsSection } from '@/components/environments/environments-section';
+import { DocumentationSection } from '@/components/docs/documentation-section';
 
 export function ProjectDetail({
   projectId,
@@ -37,6 +40,7 @@ export function ProjectDetail({
   const archive = useArchiveProject();
   const remove = useDeleteProject();
   const router = useRouter();
+  const [view, setView] = useState<'environments' | 'documentation'>('environments');
 
   if (isLoading) {
     return (
@@ -151,7 +155,31 @@ export function ProjectDetail({
 
         <Separator />
 
-        <EnvironmentsSection project={project} canEdit={canEdit} />
+        <ToggleGroup
+          type="single"
+          value={view}
+          onValueChange={(v) => v && setView(v as 'environments' | 'documentation')}
+          className="border border-border bg-muted p-1"
+        >
+          <ToggleGroupItem
+            value="environments"
+            className="px-3 data-[state=on]:bg-background data-[state=on]:shadow-sm"
+          >
+            <Server className="mr-2 h-4 w-4" /> Environments
+          </ToggleGroupItem>
+          <ToggleGroupItem
+            value="documentation"
+            className="px-3 data-[state=on]:bg-background data-[state=on]:shadow-sm"
+          >
+            <FileText className="mr-2 h-4 w-4" /> Documentation
+          </ToggleGroupItem>
+        </ToggleGroup>
+
+        {view === 'environments' ? (
+          <EnvironmentsSection project={project} canEdit={canEdit} />
+        ) : (
+          <DocumentationSection projectId={project.id} canEdit={canEdit} />
+        )}
       </div>
     </>
   );

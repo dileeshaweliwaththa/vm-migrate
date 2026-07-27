@@ -30,6 +30,7 @@ export interface Environment {
   name: EnvironmentName;
   cicdProvider: CicdProvider;
   jenkinsUrl: string;
+  jenkinsUsername: string;
   deployUrl: string;
   vmId: string | null;
   vmName: string | null;
