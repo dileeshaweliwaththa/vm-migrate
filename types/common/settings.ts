@@ -7,6 +7,20 @@
 //
 // Jenkins is configured per-environment (not here) — see types/common/jenkins.ts.
 
+// Fallback model list for the settings dropdown when the live list from the
+// Gemini API can't be fetched yet (e.g. before a key is saved). The authoritative
+// list comes from the API (see aiService.listGeminiModels); this is just so the
+// dropdown is never empty. First entry is the default.
+export const GEMINI_MODEL_FALLBACKS = [
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-lite',
+  'gemini-2.5-flash-lite',
+  'gemini-2.5-flash',
+  'gemini-2.5-pro',
+] as const;
+
+export const DEFAULT_GEMINI_MODEL = GEMINI_MODEL_FALLBACKS[0];
+
 export interface AppSettings {
   geminiModel: string;
   aiStylePrompt: string;

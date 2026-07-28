@@ -80,6 +80,7 @@ const portInputToColumns = (input: EnvironmentPortInput): EnvironmentPortWriteCo
   if (input.port !== undefined) cols.port = input.port;
   if (input.protocol !== undefined) cols.protocol = input.protocol;
   if (input.description !== undefined) cols.description = input.description;
+  if (input.jenkinsJobUrl !== undefined) cols.jenkins_job_url = input.jenkinsJobUrl;
   if (input.position !== undefined) cols.position = input.position;
   return cols;
 };
@@ -90,7 +91,9 @@ export const addPort = async (
 ): Promise<EnvironmentPort> => {
   const row = await insertPort({
     environment_id: environmentId,
-    source: 'manual',
+    // A record created from a Jenkins job is provenance 'jenkins'; a hand-added
+    // port is 'manual'.
+    source: input.jenkinsJobUrl ? 'jenkins' : 'manual',
     ...portInputToColumns(input),
   });
   return rowToPort(row);

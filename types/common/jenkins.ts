@@ -11,6 +11,48 @@ export interface JenkinsAuth {
   apiToken: string;
 }
 
+// Normalized build status for a job (mapped from Jenkins' `color` + last build
+// result). BUILDING overlays any of the others while a run is in progress.
+export const JENKINS_STATUSES = [
+  'SUCCESS',
+  'FAILED',
+  'UNSTABLE',
+  'ABORTED',
+  'DISABLED',
+  'NOT_BUILT',
+  'PENDING',
+  'BUILDING',
+  'UNKNOWN',
+] as const;
+export type JenkinsBuildStatus = (typeof JENKINS_STATUSES)[number];
+
+// Raw job node from the Jenkins JSON API (folders/multibranch nest via `jobs`).
+export interface JenkinsRawJob {
+  name?: string;
+  url?: string;
+  color?: string;
+  description?: string;
+  jobs?: JenkinsRawJob[];
+  lastCompletedBuild?: { number?: number; result?: string; timestamp?: number } | null;
+}
+
+// A runnable job flattened for display in the browse-jobs list.
+export interface JenkinsJobSummary {
+  name: string;
+  path: string; // folder path, e.g. "chex-api / dev"
+  url: string;
+  status: JenkinsBuildStatus;
+  building: boolean;
+  lastBuildNumber: number | null;
+  lastBuildAt: string | null; // ISO
+  description: string;
+}
+
+export interface TriggerBuildResult {
+  queued: boolean;
+  message: string;
+}
+
 // A port/CI-CD hint extracted best-effort from a job's config (D3).
 export interface ExtractedPort {
   port: string;

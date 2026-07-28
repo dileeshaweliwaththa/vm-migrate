@@ -6,6 +6,7 @@ import {
   type AppSettingsWriteColumns,
 } from '@/repositories/appSettings/appSettingsRepository';
 import type { ApiResponse, ApiSingleResponse } from '@/types/common';
+import { DEFAULT_GEMINI_MODEL } from '@/types/common/settings';
 import type { AppSettings, AppSettingsInput, GeminiConfig } from '@/types/common/settings';
 import type { AppSettingsRow } from '@/types/supabase/response/appSettings';
 
@@ -15,7 +16,7 @@ import type { AppSettingsRow } from '@/types/supabase/response/appSettings';
 // client; only `getGeminiConfig` (server-side, service-role) resolves the real
 // key, and its result is used to call Gemini — never returned to the browser.
 
-const DEFAULT_MODEL = 'gemini-2.5-flash';
+const DEFAULT_MODEL = DEFAULT_GEMINI_MODEL;
 
 const requireAdmin = async (): Promise<ApiResponse | null> => {
   const role = await getCurrentRole();

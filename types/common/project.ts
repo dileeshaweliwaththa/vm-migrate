@@ -21,6 +21,7 @@ export interface EnvironmentPort {
   protocol: Protocol;
   description: string;
   source: PortSource;
+  jenkinsJobUrl: string;
   position: number;
 }
 
@@ -79,5 +80,5 @@ export type EnvironmentInput = Partial<
 > & { newVm?: InlineVmInput };
 
 export type EnvironmentPortInput = Partial<
-  Pick<EnvironmentPort, 'port' | 'protocol' | 'description' | 'position'>
+  Pick<EnvironmentPort, 'port' | 'protocol' | 'description' | 'position' | 'jenkinsJobUrl'>
 >;

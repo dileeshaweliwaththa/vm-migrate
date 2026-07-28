@@ -1,7 +1,11 @@
 import { getCurrentRole } from '@/services/auth/authService';
 import { getProject } from '@/services/projects/projectService';
 import { extractPorts } from '@/services/jenkins/extraction';
-import { fetchJobConfigXml } from '@/repositories/jenkins/jenkinsRepository';
+import {
+  fetchJobConfigXml,
+  listAllJobs,
+  triggerBuild,
+} from '@/repositories/jenkins/jenkinsRepository';
 import { updateEnvironment } from '@/repositories/environments/environmentRepository';
 import {
   getEnvironmentToken,
@@ -10,11 +14,15 @@ import {
 } from '@/repositories/environmentSecrets/environmentSecretRepository';
 import { insertPort, deletePort } from '@/repositories/environmentPorts/environmentPortRepository';
 import { canEdit } from '@/lib/rbac';
-import type { ApiSingleResponse } from '@/types/common';
+import type { ApiResponse, ApiSingleResponse } from '@/types/common';
 import type {
   EnvironmentJenkinsConfig,
   EnvironmentJenkinsInput,
   EnvironmentSyncResult,
+  JenkinsAuth,
+  JenkinsBuildStatus,
+  JenkinsJobSummary,
+  JenkinsRawJob,
 } from '@/types/common/jenkins';
 import type { Environment } from '@/types/common/project';
 
@@ -29,12 +37,113 @@ import type { Environment } from '@/types/common/project';
 const asMsg = (error: unknown, fallback: string): string =>
   (error instanceof Error && error.message) || fallback;
 
+// Turns a config.xml fetch outcome into a precise, actionable message.
+const configErrorMessage = (status: number, error?: string, username?: string): string => {
+  switch (status) {
+    case 401:
+      return `Jenkins rejected the credentials (401)${
+        username ? ` for user “${username}”` : ' — no username is set'
+      }. The API token must be paired with the exact Jenkins user it belongs to (Basic auth = username:token).`;
+    case 403:
+      return 'Jenkins denied access to the job config (403). The user needs “Job → Extended Read” (or Admin) permission to read config.xml.';
+    case 404:
+      return 'Jenkins job not found (404). Make sure the Job URL points to a job (e.g. https://jenkins…/job/NAME/).';
+    case 0:
+      return `Couldn’t reach Jenkins${error ? ` — ${error}` : ''}. Check the Job URL and that the server is reachable.`;
+    default:
+      return `Jenkins returned HTTP ${status} reading the job config. Check the URL, credentials, and permissions.`;
+  }
+};
+
 const findEnv = async (
   projectId: string,
   envId: string
 ): Promise<Environment | undefined> => {
   const detail = await getProject(projectId);
   return detail?.environments.find((e) => e.id === envId);
+};
+
+// Derives the Jenkins server root from a job URL (handles context paths and
+// plain roots): everything before "/job/", else the URL itself.
+const deriveBase = (jobUrl: string): string => {
+  const trimmed = jobUrl.trim().replace(/\/+$/, '');
+  const idx = trimmed.indexOf('/job/');
+  return idx > -1 ? trimmed.slice(0, idx) : trimmed;
+};
+
+const RESULT_MAP: Record<string, JenkinsBuildStatus> = {
+  SUCCESS: 'SUCCESS',
+  FAILURE: 'FAILED',
+  UNSTABLE: 'UNSTABLE',
+  ABORTED: 'ABORTED',
+  NOT_BUILT: 'NOT_BUILT',
+};
+const COLOR_MAP: Record<string, JenkinsBuildStatus> = {
+  blue: 'SUCCESS',
+  green: 'SUCCESS',
+  red: 'FAILED',
+  yellow: 'UNSTABLE',
+  aborted: 'ABORTED',
+  disabled: 'DISABLED',
+  grey: 'PENDING',
+  notbuilt: 'NOT_BUILT',
+  nobuilt: 'NOT_BUILT',
+};
+
+const jobStatus = (job: JenkinsRawJob): { status: JenkinsBuildStatus; building: boolean } => {
+  const color = job.color ?? '';
+  const building = color.endsWith('_anime');
+  const result = job.lastCompletedBuild?.result;
+  const status =
+    (result && RESULT_MAP[result]) || COLOR_MAP[color.replace('_anime', '')] || 'UNKNOWN';
+  return { status, building };
+};
+
+// Flattens the nested job tree into runnable-job summaries (leaves), carrying a
+// human folder path. Nodes with children are folders/multibranch — recurse.
+const flattenJobs = (jobs: JenkinsRawJob[], prefix = ''): JenkinsJobSummary[] => {
+  const out: JenkinsJobSummary[] = [];
+  for (const job of jobs) {
+    const name = job.name ?? '';
+    const path = prefix ? `${prefix} / ${name}` : name;
+    if (job.jobs && job.jobs.length > 0) {
+      out.push(...flattenJobs(job.jobs, path));
+    } else if (job.url) {
+      const { status, building } = jobStatus(job);
+      const ts = job.lastCompletedBuild?.timestamp;
+      out.push({
+        name,
+        path,
+        url: job.url,
+        status,
+        building,
+        lastBuildNumber: job.lastCompletedBuild?.number ?? null,
+        lastBuildAt: ts ? new Date(ts).toISOString() : null,
+        description: job.description ?? '',
+      });
+    }
+  }
+  return out;
+};
+
+// Resolves an environment's Jenkins auth + server base, or a clear error.
+type ResolvedJenkins = { env: Environment; auth: JenkinsAuth; base: string };
+const resolveEnvJenkins = async (
+  projectId: string,
+  envId: string
+): Promise<{ ok: true; value: ResolvedJenkins } | { ok: false; message: string }> => {
+  const env = await findEnv(projectId, envId);
+  if (!env) return { ok: false, message: 'Environment not found.' };
+  if (!env.jenkinsUrl.trim()) {
+    return { ok: false, message: 'Set the Jenkins URL first (Jenkins settings).' };
+  }
+  const apiToken = (await getEnvironmentToken(envId)).trim();
+  if (!apiToken) return { ok: false, message: 'No Jenkins API token set for this environment.' };
+  const username = env.jenkinsUsername.trim();
+  if (!username) {
+    return { ok: false, message: 'Set the Jenkins username (the token must be paired with its user).' };
+  }
+  return { ok: true, value: { env, auth: { username, apiToken }, base: deriveBase(env.jenkinsUrl) } };
 };
 
 // Public, secret-free config for the modal (token replaced by a boolean).
@@ -115,24 +224,28 @@ export const syncEnvironmentPorts = async (
   }
 
   try {
-    const apiToken = await getEnvironmentToken(envId);
+    // Re-trim on read: guards against a stray space/newline pasted into the
+    // token or username field that would otherwise silently 401.
+    const apiToken = (await getEnvironmentToken(envId)).trim();
     if (!apiToken) {
       return { success: false, message: 'No Jenkins API token set for this environment.', data: null };
     }
-
-    const xml = await fetchJobConfigXml(
-      { username: env.jenkinsUsername, apiToken },
-      env.jenkinsUrl
-    );
-    if (xml === null) {
+    const username = env.jenkinsUsername.trim();
+    if (!username) {
       return {
         success: false,
-        message: 'Could not read the Jenkins job config — check the URL, credentials, and permissions.',
+        message:
+          'Set the Jenkins username. A Jenkins API token only authenticates when sent with the username that owns it (Basic auth = username:token).',
         data: null,
       };
     }
 
-    const ports = extractPorts(xml);
+    const result = await fetchJobConfigXml({ username, apiToken }, env.jenkinsUrl);
+    if (!result.ok || result.xml === null) {
+      return { success: false, message: configErrorMessage(result.status, result.error, username), data: null };
+    }
+
+    const ports = extractPorts(result.xml);
 
     // Replace only the jenkins-sourced ports; keep manual ones.
     for (const p of env.ports.filter((p) => p.source === 'jenkins')) {
@@ -159,5 +272,101 @@ export const syncEnvironmentPorts = async (
     };
   } catch (error) {
     return { success: false, message: asMsg(error, 'Jenkins sync failed.'), data: null };
+  }
+};
+
+// Lists all jobs on the environment's Jenkins server (editor+). The server root
+// is derived from the environment's Jenkins URL, so setting just the base URL is
+// enough to browse and then pick a specific job.
+export const listJenkinsJobs = async (
+  projectId: string,
+  envId: string
+): Promise<ApiSingleResponse<JenkinsJobSummary[]>> => {
+  const role = await getCurrentRole();
+  if (!canEdit(role)) return { success: false, message: 'Editor access required.', data: null };
+
+  try {
+    const resolved = await resolveEnvJenkins(projectId, envId);
+    if (!resolved.ok) return { success: false, message: resolved.message, data: null };
+
+    const { auth, base } = resolved.value;
+    const res = await listAllJobs(auth, base);
+    if (!res.ok) {
+      return { success: false, message: configErrorMessage(res.status, res.error, auth.username), data: null };
+    }
+    const jobs = flattenJobs(res.jobs).sort((a, b) => a.path.localeCompare(b.path));
+    return { success: true, message: 'OK', data: jobs };
+  } catch (error) {
+    return { success: false, message: asMsg(error, 'Failed to load Jenkins jobs.'), data: null };
+  }
+};
+
+// Triggers a build of a job on the environment's Jenkins server (editor+). The
+// jobUrl must belong to that same server (SSRF guard).
+export const triggerJenkinsBuild = async (
+  projectId: string,
+  envId: string,
+  jobUrl: string
+): Promise<ApiResponse> => {
+  const role = await getCurrentRole();
+  if (!canEdit(role)) return { success: false, message: 'Editor access required.' };
+
+  try {
+    const resolved = await resolveEnvJenkins(projectId, envId);
+    if (!resolved.ok) return { success: false, message: resolved.message };
+
+    const { auth, base } = resolved.value;
+    if (!jobUrl || !jobUrl.startsWith(base)) {
+      return { success: false, message: 'That job URL doesn’t belong to this Jenkins server.' };
+    }
+
+    const res = await triggerBuild(auth, base, jobUrl);
+    if (!res.ok) {
+      if (res.status === 403) {
+        return { success: false, message: 'Jenkins denied the build (403). The token’s user needs “Job → Build” permission.' };
+      }
+      if (res.status === 409) {
+        return { success: false, message: 'Jenkins refused the build (409) — the job may be disabled.' };
+      }
+      if (res.status === 0) {
+        return { success: false, message: `Couldn’t reach Jenkins${res.error ? ` — ${res.error}` : ''}.` };
+      }
+      return { success: false, message: `Jenkins returned HTTP ${res.status} triggering the build.` };
+    }
+    return { success: true, message: 'Build queued in Jenkins.' };
+  } catch (error) {
+    return { success: false, message: asMsg(error, 'Failed to trigger the build.') };
+  }
+};
+
+// Links a chosen job to the environment: sets its Jenkins URL and (optionally)
+// copies the job description into the environment notes. Editor+. The jobUrl
+// must belong to the same server the environment already points at.
+export const linkJenkinsJob = async (
+  projectId: string,
+  envId: string,
+  jobUrl: string,
+  description: string
+): Promise<ApiSingleResponse<{ jenkinsUrl: string }>> => {
+  const role = await getCurrentRole();
+  if (!canEdit(role)) return { success: false, message: 'Editor access required.', data: null };
+
+  const env = await findEnv(projectId, envId);
+  if (!env) return { success: false, message: 'Environment not found.', data: null };
+
+  const base = deriveBase(env.jenkinsUrl);
+  if (!base || !jobUrl.startsWith(base)) {
+    return { success: false, message: 'That job URL doesn’t belong to this Jenkins server.', data: null };
+  }
+
+  try {
+    await updateEnvironment(envId, {
+      jenkins_url: jobUrl,
+      cicd_provider: 'jenkins',
+      ...(description.trim() ? { notes: description.trim() } : {}),
+    });
+    return { success: true, message: 'Job linked to this environment.', data: { jenkinsUrl: jobUrl } };
+  } catch (error) {
+    return { success: false, message: asMsg(error, 'Failed to link the job.'), data: null };
   }
 };

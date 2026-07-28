@@ -11,7 +11,7 @@
 create table public.app_settings (
   id               boolean primary key default true check (id),
   gemini_api_key   text not null default '',
-  gemini_model     text not null default 'gemini-2.5-flash',
+  gemini_model     text not null default 'gemini-2.0-flash',
   ai_style_prompt  text not null default '',
   created_at       timestamptz not null default now(),
   updated_at       timestamptz not null default now()

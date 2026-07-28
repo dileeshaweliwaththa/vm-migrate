@@ -9,6 +9,7 @@ export type EnvironmentPortWriteColumns = Partial<{
   protocol: string;
   description: string;
   source: string;
+  jenkins_job_url: string;
   position: number;
 }>;
 

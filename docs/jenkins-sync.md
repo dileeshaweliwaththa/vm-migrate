@@ -33,15 +33,29 @@ exception to "repositories only touch Supabase" (architecture.md / AGENTS.md §2
 On a project page, each environment whose CI/CD provider is **Jenkins** shows
 (editor+):
 
-1. **Jenkins settings** (⚙) — opens a modal to set the **Job URL**,
-   **Username**, and **API token** (write-only; masked once stored). URL +
-   username save to the environment; the token saves to `environment_secrets`.
-2. **Sync from Jenkins** (⟳, shown once a URL is set) — reads the job's
-   `config.xml` using the stored credentials, extracts ports best-effort, and
-   replaces only the `jenkins`-sourced ports (manual entries are preserved).
+1. **Jenkins settings** (⚙) — opens a modal to set the **Job URL** (a specific
+   job, or just the server base URL), **Username**, and **API token**
+   (write-only; masked once stored). URL + username save to the environment; the
+   token saves to `environment_secrets`.
+2. **Browse jobs** (list icon, shown once a URL is set) — lists **all jobs on
+   the server** (the base is derived from the Job URL, so a bare base URL is
+   enough to browse). For each job it shows status (from `color` + last build
+   result), last build #/time, and description, with:
+   - **Run** — triggers a build (POST `{jobUrl}/build` with a CSRF crumb),
+     behind a confirm. Needs `Job → Build` permission.
+   - **Use** — adds the job as a **record in the environment's ports table**
+     (`source='jenkins'`, description from the job, job URL stored on the row,
+     port left blank). The dialog stays open so several jobs can be added.
+3. **Sync from Jenkins** (⟳) — reads the job's `config.xml` and refreshes only
+   the `jenkins`-sourced ports (manual entries preserved).
+4. **Records** — each row in the ports table is editable inline (fill in the
+   **port** later, tweak protocol/description) and, when it carries a Jenkins
+   job, shows a **Run build** ▶ action and a deep link to the job.
 
 The token is read server-side only (service-role), so a non-admin **editor** can
-configure and sync without ever seeing it — mirrors the AI "Generate by AI" flow.
+configure, browse, run, and sync without ever seeing it — mirrors the AI
+"Generate by AI" flow. Build triggers and job links are SSRF-guarded: the target
+job URL must belong to the same Jenkins server the environment points at.
 
 ## Port & CI/CD extraction (D3)
 
@@ -54,8 +68,11 @@ sync says so rather than failing silently (see phase-2-plan.md §10).
 
 ## Limitations
 
-- Extraction depends on the job config contents and permission to read
-  `config.xml`.
+- Extraction reads `.../job/NAME/config.xml`, which in Jenkins requires the
+  authenticating user to have **Job → Extended Read** (or Admin) permission — a
+  plain `Job/Read` user gets a **403** even with valid credentials. The sync
+  reports the exact HTTP status (401 auth / 403 permission / 404 wrong URL /
+  network) so the cause is clear.
 - The sync only adds/updates jenkins-sourced ports; it never deletes manual
   ports.
 - Untested against a live Jenkins instance in this build — validate on a real

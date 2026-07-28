@@ -58,5 +58,7 @@ returns a clear "AI is not configured" message.
 
 An admin sets the Gemini key, model, and house-style prompt in **Settings**
 (`/admin/settings`), or an operator sets `GEMINI_API_KEY` in the server env as
-an MVP fallback. Confirm the current `@google/genai` SDK + model id at deploy
-time (this slice targets a `gemini-2.5-*` model).
+an MVP fallback. The **model is chosen from a dropdown** populated live from the
+Gemini API (`GET /api/ai/models` → `aiService.listGeminiModels`, filtered to
+models supporting `generateContent`); before a key is saved it falls back to the
+static `GEMINI_MODEL_FALLBACKS` list. Default: `gemini-2.0-flash`.
