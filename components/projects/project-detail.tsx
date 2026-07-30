@@ -44,7 +44,7 @@ export function ProjectDetail({
 
   if (isLoading) {
     return (
-      <div className="mx-auto w-full max-w-5xl space-y-4 px-4 py-8 sm:px-6">
+      <div className="mx-auto w-full max-w-7xl space-y-4 px-4 py-8 sm:px-6">
         <Skeleton className="h-8 w-56" />
         <Skeleton className="h-24 w-full" />
       </div>
@@ -53,7 +53,7 @@ export function ProjectDetail({
 
   if (error || !project) {
     return (
-      <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
+      <div className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6">
         <p className="text-sm text-destructive">
           {error instanceof Error ? error.message : 'Project not found.'}
         </p>
@@ -141,7 +141,7 @@ export function ProjectDetail({
         }
       />
 
-      <div className="mx-auto w-full max-w-5xl space-y-6 px-4 py-8 sm:px-6">
+      <div className="mx-auto w-full max-w-7xl space-y-6 px-4 py-8 sm:px-6">
         <Link
           href="/projects"
           className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"

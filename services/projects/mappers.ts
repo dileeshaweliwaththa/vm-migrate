@@ -35,6 +35,7 @@ export const rowToPort = (row: EnvironmentPortRow): EnvironmentPort => ({
   port: row.port,
   protocol: row.protocol as Protocol,
   description: row.description,
+  domain: row.domain ?? '',
   source: row.source === 'jenkins' ? 'jenkins' : 'manual',
   jenkinsJobUrl: row.jenkins_job_url ?? '',
   position: row.position,

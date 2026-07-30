@@ -19,7 +19,11 @@ export interface EnvironmentPort {
   environmentId: string;
   port: string;
   protocol: Protocol;
+  // The record's label — a Jenkins job name for jenkins-linked records, or a
+  // hand-typed name for manual ones. Surfaced as the "Name" column.
   description: string;
+  // The domain/host this record is served on, e.g. `dev.imaui.upview.tech`.
+  domain: string;
   source: PortSource;
   jenkinsJobUrl: string;
   position: number;
@@ -80,5 +84,5 @@ export type EnvironmentInput = Partial<
 > & { newVm?: InlineVmInput };
 
 export type EnvironmentPortInput = Partial<
-  Pick<EnvironmentPort, 'port' | 'protocol' | 'description' | 'position' | 'jenkinsJobUrl'>
+  Pick<EnvironmentPort, 'port' | 'protocol' | 'description' | 'domain' | 'position' | 'jenkinsJobUrl'>
 >;

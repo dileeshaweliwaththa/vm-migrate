@@ -80,6 +80,9 @@ const portInputToColumns = (input: EnvironmentPortInput): EnvironmentPortWriteCo
   if (input.port !== undefined) cols.port = input.port;
   if (input.protocol !== undefined) cols.protocol = input.protocol;
   if (input.description !== undefined) cols.description = input.description;
+  // Domains are pasted as often as typed — trim so a stray space doesn't become
+  // part of the host.
+  if (input.domain !== undefined) cols.domain = input.domain.trim();
   if (input.jenkinsJobUrl !== undefined) cols.jenkins_job_url = input.jenkinsJobUrl;
   if (input.position !== undefined) cols.position = input.position;
   return cols;

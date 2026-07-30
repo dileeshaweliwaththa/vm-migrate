@@ -73,21 +73,27 @@ export function JenkinsJobsDialog({
     });
   };
 
-  // "Use" adds the job as a record in the environment's table (port left blank
-  // to fill later). Keeps the dialog open so several jobs can be added.
+  // "Use" adds the job as a record in the environment's table (port and domain
+  // left blank to fill later). Keeps the dialog open so several jobs can be added.
+  //
+  // The record is labelled by the job's *name* — the same value this list shows
+  // in bold — not its Jenkins description, so the table and this dialog agree on
+  // what a job is called. Folder-nested jobs fall back to the path, where the
+  // bare name alone would be ambiguous.
   const handleUse = (job: JenkinsJobSummary) => {
+    const label = job.name || job.path;
     addPort.mutate(
       {
         envId,
         input: {
           port: '',
           protocol: 'HTTPS',
-          description: job.description || job.path,
+          description: label,
           jenkinsJobUrl: job.url,
         },
       },
       {
-        onSuccess: () => toast.success(`Added “${job.path}” — set its port when ready.`),
+        onSuccess: () => toast.success(`Added “${label}” — set its port and domain when ready.`),
         onError: (e) => toast.error(e instanceof Error ? e.message : 'Failed to add the record.'),
       }
     );

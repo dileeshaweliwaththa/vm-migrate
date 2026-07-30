@@ -4,6 +4,7 @@ export interface EnvironmentPortRow {
   port: string;
   protocol: string;
   description: string;
+  domain: string;
   source: string;
   jenkins_job_url: string;
   position: number;

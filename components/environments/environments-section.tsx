@@ -84,9 +84,9 @@ function LastBuild({ job }: { job?: JenkinsJobSummary }) {
   );
 }
 
-// A single record row: Port · URL · Status · Last build (+ Run/Delete). Status
-// and last build come live from Jenkins (matched by job URL); the port is
-// editable inline so it can be filled in later.
+// A single record row: Port · Name · Domain · Status · Last build (+ Run/Delete).
+// Status and last build come live from Jenkins (matched by job URL); port, name,
+// and domain are editable inline so they can be filled in later.
 function PortRow({
   projectId,
   env,
@@ -104,6 +104,7 @@ function PortRow({
   const trigger = useTriggerJenkinsBuild(projectId, env.id);
   const [portVal, setPortVal] = useState(port.port);
   const [descVal, setDescVal] = useState(port.description);
+  const [domainVal, setDomainVal] = useState(port.domain);
 
   const onError = (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed.');
   const save = (input: Parameters<typeof updatePort.mutate>[0]['input']) =>
@@ -115,9 +116,9 @@ function PortRow({
     <span className="text-muted-foreground">—</span>
   );
 
-  // URL cell: for a Jenkins record, a link to the job (labelled by description);
-  // for a manual record, the editable description/label.
-  const urlCell = port.jenkinsJobUrl ? (
+  // Name cell: for a Jenkins record, the job name as a link to the job; for a
+  // manual record, an editable label.
+  const nameCell = port.jenkinsJobUrl ? (
     <a
       href={port.jenkinsJobUrl}
       target="_blank"
@@ -133,11 +134,26 @@ function PortRow({
       onChange={(e) => setDescVal(e.target.value)}
       onBlur={() => descVal !== port.description && save({ description: descVal })}
       onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-      placeholder="Description / URL"
+      placeholder="Name"
       className="h-8"
     />
   ) : (
     <span className="text-muted-foreground">{port.description || '—'}</span>
+  );
+
+  // Domain cell: the host this record is served on. Editable for every record,
+  // Jenkins-linked or not — Jenkins knows the job, not where it's published.
+  const domainCell = canEdit ? (
+    <Input
+      value={domainVal}
+      onChange={(e) => setDomainVal(e.target.value)}
+      onBlur={() => domainVal !== port.domain && save({ domain: domainVal })}
+      onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+      placeholder="dev.example.com"
+      className="h-8"
+    />
+  ) : (
+    <span className="text-sm text-muted-foreground">{port.domain || '—'}</span>
   );
 
   return (
@@ -156,7 +172,8 @@ function PortRow({
           <span className="font-mono">{port.port || '—'}</span>
         )}
       </TableCell>
-      <TableCell>{urlCell}</TableCell>
+      <TableCell>{nameCell}</TableCell>
+      <TableCell>{domainCell}</TableCell>
       <TableCell>{status}</TableCell>
       <TableCell>
         <LastBuild job={job} />
@@ -208,6 +225,7 @@ function EnvironmentCard({
   const { removeEnvironment, addPort, syncFromJenkins } = useEnvironmentMutations(projectId);
   const [port, setPort] = useState('');
   const [description, setDescription] = useState('');
+  const [domain, setDomain] = useState('');
   const [jenkinsOpen, setJenkinsOpen] = useState(false);
   const [jobsOpen, setJobsOpen] = useState(false);
   const isJenkins = env.cicdProvider === 'jenkins';
@@ -232,11 +250,15 @@ function EnvironmentCard({
   const handleAddPort = () => {
     if (!port.trim()) return;
     addPort.mutate(
-      { envId: env.id, input: { port, protocol: 'HTTPS', description, position: env.ports.length } },
+      {
+        envId: env.id,
+        input: { port, protocol: 'HTTPS', description, domain, position: env.ports.length },
+      },
       {
         onSuccess: () => {
           setPort('');
           setDescription('');
+          setDomain('');
         },
         onError: (e) => toast.error(e instanceof Error ? e.message : 'Failed to add port.'),
       }
@@ -379,12 +401,15 @@ function EnvironmentCard({
         </div>
       </div>
 
-      <div className="px-4 py-3">
-        <Table>
+      {/* Five columns don't fit on a narrow viewport, so the table scrolls inside
+          its own card rather than making the page scroll sideways. */}
+      <div className="overflow-x-auto px-4 py-3">
+        <Table className="min-w-[48rem]">
           <TableHeader>
             <TableRow>
               <TableHead className="w-24">Port</TableHead>
-              <TableHead>URL</TableHead>
+              <TableHead className="w-[22%]">Name</TableHead>
+              <TableHead>Domain</TableHead>
               <TableHead className="w-28">Status</TableHead>
               <TableHead className="w-40">Last build</TableHead>
               {canEdit ? <TableHead className="w-20" /> : null}
@@ -403,7 +428,7 @@ function EnvironmentCard({
             ))}
             {env.ports.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={canEdit ? 5 : 4} className="text-center text-sm text-muted-foreground">
+                <TableCell colSpan={canEdit ? 6 : 5} className="text-center text-sm text-muted-foreground">
                   No records yet.
                 </TableCell>
               </TableRow>
@@ -422,7 +447,16 @@ function EnvironmentCard({
                   <Input
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
-                    placeholder="Description / URL"
+                    placeholder="Name"
+                    className="h-8"
+                    onKeyDown={(e) => e.key === 'Enter' && handleAddPort()}
+                  />
+                </TableCell>
+                <TableCell>
+                  <Input
+                    value={domain}
+                    onChange={(e) => setDomain(e.target.value)}
+                    placeholder="dev.example.com"
                     className="h-8"
                     onKeyDown={(e) => e.key === 'Enter' && handleAddPort()}
                   />

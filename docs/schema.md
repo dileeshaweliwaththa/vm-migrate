@@ -134,8 +134,9 @@ role-based RLS as `projects` (writes = `editor`/`admin`).
 
 ## `environment_ports`
 
-Phase 2. One row per deployed port (mirrors `vm_urls`). `source` records
-provenance (`manual` now, `jenkins` after the Phase 2b sync).
+Phase 2. One row per deployed record (mirrors `vm_urls`). `source` records
+provenance (`manual`, or `jenkins` when the row came from the Phase 2b sync or
+from "Use" in the browse-jobs dialog).
 
 | column           | type          | notes                                   |
 | ---------------- | ------------- | --------------------------------------- |
@@ -143,8 +144,10 @@ provenance (`manual` now, `jenkins` after the Phase 2b sync).
 | `environment_id` | `uuid`        | FK → `environments.id`, `on delete cascade` |
 | `port`           | `text`        | e.g. `3000`                             |
 | `protocol`       | `text`        | HTTP/HTTPS/TCP/UDP/WS/WSS               |
-| `description`    | `text`        | e.g. "API"                              |
+| `description`    | `text`        | the record's label — surfaced as the **Name** column (a Jenkins job name, or hand-typed) |
+| `domain`         | `text`        | assigned domain/host, e.g. `dev.imaui.upview.tech` |
 | `source`         | `text`        | `manual` \| `jenkins`                   |
+| `jenkins_job_url`| `text`        | Jenkins job this record represents (non-secret; powers per-record "Run build") |
 | `position`       | `integer`     | display order                           |
 | `created_at` / `updated_at` | `timestamptz` | `set_updated_at` trigger     |
 
@@ -240,6 +243,11 @@ In `supabase/migrations/`, applied in timestamp order:
 - `…_environment_jenkins_secrets.sql` — adds `environments.jenkins_username` and
   the `environment_secrets` table (per-environment Jenkins API token; RLS on
   with no policies, so it's service-role-only).
+- `…_add_jenkins_job_url_to_ports.sql` — adds `environment_ports.jenkins_job_url`
+  so a record can represent a specific Jenkins job (non-secret, powers the
+  per-record "Run build").
+- `…_add_domain_to_environment_ports.sql` — adds `environment_ports.domain`, the
+  assigned domain/host for a record.
 
 ## Deploying migrations
 
