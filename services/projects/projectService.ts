@@ -9,12 +9,15 @@ import {
 } from '@/repositories/projects/projectRepository';
 import { getAuthenticatedUser } from '@/repositories/auth/authRepository';
 import { upsertTags, replaceProjectTags } from '@/repositories/tags/tagRepository';
+import { getCurrentRole } from '@/services/auth/authService';
+import { isAdmin } from '@/lib/rbac';
 import type { Project, ProjectDetail, ProjectInput } from '@/types/common/project';
 import { rowToProject, rowToEnvironment, slugify } from '@/services/projects/mappers';
 
 // Service layer: business logic for projects. Maps rows to domain types and
-// owns slug generation. Role enforcement is handled by RLS (see the projects
-// migration) and role-aware UI; this layer stays lean like the VM tracker.
+// owns slug generation. Write-role enforcement is handled by RLS (see the projects
+// migration) and role-aware UI; this layer stays lean like the VM tracker. The one
+// read rule it owns is archived visibility — admins only, see listProjects.
 
 const projectInputToColumns = (input: ProjectInput): ProjectWriteColumns => {
   const cols: ProjectWriteColumns = {};
@@ -44,10 +47,16 @@ const syncTags = async (projectId: string, tags: string[]): Promise<void> => {
   await replaceProjectTags(projectId, rows.map((t) => t.id));
 };
 
+// Archived projects are visible to **admins only**. The flag is re-checked here
+// against the caller's real role rather than trusted from the query string, so a
+// hand-crafted `?archived=true` reveals nothing to an editor or viewer. Ignored
+// rather than rejected — it's a view filter, and silently returning the active
+// list can't break a caller.
 export const listProjects = async (includeArchived = false): Promise<Project[]> => {
+  const showArchived = includeArchived && isAdmin(await getCurrentRole());
   const rows = await findAllProjects();
   const projects = rows.map(rowToProject);
-  return includeArchived ? projects : projects.filter((p) => !p.archived);
+  return showArchived ? projects : projects.filter((p) => !p.archived);
 };
 
 export const getProject = async (id: string): Promise<ProjectDetail | null> => {

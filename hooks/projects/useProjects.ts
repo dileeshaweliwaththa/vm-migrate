@@ -15,10 +15,18 @@ const json = async (res: Response, fallback: string) => {
   return body.data;
 };
 
-export const useProjects = () =>
+// `includeArchived` is a request, not a grant: the service re-checks the caller is
+// an admin, so passing true as an editor simply returns the active list. The flag
+// is part of the query key so toggling it refetches instead of reusing the other
+// list; LIST_KEY stays the prefix, so existing invalidations still match both.
+export const useProjects = (includeArchived = false) =>
   useQuery({
-    queryKey: LIST_KEY,
-    queryFn: async (): Promise<Project[]> => json(await fetch('/api/projects'), 'Failed to load projects.'),
+    queryKey: [...LIST_KEY, { archived: includeArchived }],
+    queryFn: async (): Promise<Project[]> =>
+      json(
+        await fetch(`/api/projects${includeArchived ? '?archived=true' : ''}`),
+        'Failed to load projects.'
+      ),
   });
 
 export const useProject = (id: string) =>

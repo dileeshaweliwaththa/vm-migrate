@@ -40,11 +40,57 @@ The **Generate by AI** button drafts a doc from the project's structured data:
 1. `useGenerateDocs` → `POST /api/ai/generate-docs` with the `projectId`.
 2. `aiService.generateProjectDocs` re-checks the caller is `editor`/`admin`,
    resolves the Gemini config server-side (`getGeminiConfig`), and loads the
-   project detail (name, tags, description, environments, ports, VM links).
+   project detail (name, tags, description, environments, records, VM links).
 3. It calls Gemini (`@google/genai`) with a fixed system prompt (a section
    skeleton: Overview / Architecture / Environments / Deployment / Ports /
    Runbook) plus the admin's house-style prompt, asking for a clean HTML
    fragment.
+
+### What the model is given about records
+
+`buildProjectContext` spells out **every field of every record**, because the model
+can only write about what it's handed, and endpoints are the most useful thing in
+the document:
+
+```
+Environments: 2. Records (deployed endpoints) in total: 1.
+  - DEV, CI/CD: jenkins, Jenkins: http://…/job/IMAUI/, notes: IMAUI Deployment
+    records for DEV (1):
+    - port 3000; protocol HTTPS; domain dev.imaui.upview.tech; name "IMAUI";
+      reachable at https://dev.imaui.upview.tech:3000; from its Jenkins job;
+      Jenkins job http://…/job/IMAUI/
+  - PRODUCTION, CI/CD: other
+    - no records (ports/domains) recorded for PRODUCTION yet
+```
+
+Details that matter:
+
+- **The URL is computed, not guessed.** `recordUrl` in [`lib/endpoints.ts`](../lib/endpoints.ts)
+  builds it from protocol + domain + port (eliding `:443`/`:80`, tolerating a
+  domain pasted with a scheme, returning `null` for TCP/UDP). A hallucinated
+  endpoint in deployment docs is worse than no endpoint, so it never comes from
+  the model.
+- **Blank fields are labelled `NOT RECORDED YET`** and the prompt forbids guessing
+  them. A record added via Jenkins "Use" or a docker import may legitimately have
+  no port or domain yet.
+- **Provenance is included** in words (`entered manually` / `from its Jenkins job`
+  / `imported from docker ps`).
+- **The record total is stated** so the prompt can require the Ports section to
+  account for all of them — a model left to its own devices summarises a couple
+  and moves on.
+- **Environments with no records say so**, rather than being silently absent.
+
+The prompt carries two hard requirements: each environment gets an `h3` in
+**Environments** listing all its records with domain and port, and **Ports**
+accounts for every record across all environments.
+
+### Why no tables
+
+The returned HTML is parsed back into Tiptap JSON with `tiptapExtensions`, which is
+`[StarterKit]` — **no table extension**. A `<table>` would be silently dropped on
+the way in, so the prompt's tag allowlist excludes it and asks for lists instead.
+If tables are ever wanted here, the extension has to be added to
+`lib/tiptap/extensions.ts` first (it feeds both the editor and the server render).
 4. The HTML is converted to Tiptap JSON (`generateJSON`) and returned.
 5. The editor loads the draft (`setContent`); the user reviews and **Saves** —
    nothing is persisted by the generation route itself. Saving marks

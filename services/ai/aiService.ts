@@ -8,7 +8,8 @@ import { canEdit } from '@/lib/rbac';
 import { tiptapExtensions } from '@/lib/tiptap/extensions';
 import { interpretGeminiError } from '@/services/ai/errors';
 import type { ApiSingleResponse } from '@/types/common';
-import type { ProjectDetail } from '@/types/common/project';
+import { recordUrl } from '@/lib/endpoints';
+import type { EnvironmentPort, PortSource, ProjectDetail } from '@/types/common/project';
 import type { GeminiStatus } from '@/types/common/ai';
 
 // Service layer: AI documentation generation (Gemini). Reads the key server-side
@@ -18,16 +19,64 @@ import type { GeminiStatus } from '@/types/common/ai';
 // result is editable before the user saves it. See phase-2-plan.md §7.
 
 // A fixed section skeleton keeps every generated doc consistent in shape.
+//
+// The tag allowlist is not arbitrary: the HTML is parsed back into Tiptap JSON with
+// `tiptapExtensions` (StarterKit only), which has no table support — a <table>
+// would be silently dropped on the way in. Keep endpoint data in lists.
 const SYSTEM_PROMPT = [
   'You are a senior platform engineer writing internal deployment documentation.',
   'Return a single self-contained HTML fragment — no <html>, <head>, <body>, no',
   'markdown code fences, no commentary before or after.',
   'Use ONLY these tags: h2, h3, p, ul, ol, li, strong, em, code, pre, blockquote, hr.',
+  'Do NOT use <table> — it is not supported and will be discarded.',
   'Structure the document with these H2 sections in order: Overview, Architecture,',
   'Environments, Deployment, Ports, Runbook. Omit a section only if there is truly',
-  'nothing to say. Be concise and factual; do not invent infrastructure that is not',
-  'described in the provided data.',
+  'nothing to say.',
+  // The records are the most useful thing in the whole document and the easiest
+  // for a model to summarise away, so both requirements are stated explicitly.
+  'The provided data lists each environment with its RECORDS — the deployed',
+  'endpoints, each with a port, protocol, domain and name. These are the most',
+  'important facts in the document. Two hard requirements:',
+  '(1) In the Environments section, give each environment its own h3 and list ALL',
+  'of its records underneath, showing the domain and port for each; if an',
+  'environment has no records, say so plainly.',
+  '(2) In the Ports section, account for EVERY record across all environments —',
+  'state which environment it belongs to, its port, protocol, domain, and the URL',
+  'it is reachable at when one is given. The count of records is stated in the',
+  'data; do not return fewer than that.',
+  'Wrap ports, domains, and URLs in <code>.',
+  'Where a value is marked NOT RECORDED YET, say it is not recorded yet — never',
+  'guess or fill it in.',
+  'Be concise and factual; do not invent infrastructure, ports, domains, or hosts',
+  'that are not in the provided data.',
 ].join(' ');
+
+// How a record's provenance should be described in prose.
+const SOURCE_LABEL: Record<PortSource, string> = {
+  manual: 'entered manually',
+  jenkins: 'from its Jenkins job',
+  docker: 'imported from docker ps',
+};
+
+// One record (endpoint) as a labelled line. Every field the record carries is
+// spelled out — the model can only write about what it's given, and the domain in
+// particular is the answer to "where does this environment actually live".
+const recordLine = (record: EnvironmentPort): string => {
+  const parts: string[] = [];
+  // A record added from Jenkins or docker may not have its port filled in yet.
+  // Say so explicitly rather than emitting an empty value the model will guess at.
+  parts.push(record.port ? `port ${record.port}` : 'port NOT RECORDED YET');
+  parts.push(`protocol ${record.protocol}`);
+  parts.push(record.domain ? `domain ${record.domain}` : 'domain NOT RECORDED YET');
+  if (record.description) parts.push(`name "${record.description}"`);
+
+  const url = recordUrl(record);
+  if (url) parts.push(`reachable at ${url}`);
+
+  parts.push(SOURCE_LABEL[record.source]);
+  if (record.jenkinsJobUrl) parts.push(`Jenkins job ${record.jenkinsJobUrl}`);
+  return `    - ${parts.join('; ')}`;
+};
 
 const buildProjectContext = (project: ProjectDetail): string => {
   const lines: string[] = [];
@@ -37,21 +86,32 @@ const buildProjectContext = (project: ProjectDetail): string => {
 
   if (project.environments.length === 0) {
     lines.push('Environments: none defined yet.');
-  } else {
-    lines.push('Environments:');
-    for (const env of project.environments) {
-      const parts = [`- ${env.name}`, `CI/CD: ${env.cicdProvider}`];
-      if (env.deployUrl) parts.push(`deploy URL: ${env.deployUrl}`);
-      if (env.jenkinsUrl) parts.push(`Jenkins: ${env.jenkinsUrl}`);
-      if (env.vmName) parts.push(`VM: ${env.vmName}`);
-      if (env.notes) parts.push(`notes: ${env.notes}`);
-      lines.push(`  ${parts.join(', ')}`);
-      for (const port of env.ports) {
-        const desc = port.description ? ` (${port.description})` : '';
-        lines.push(`    · port ${port.port}/${port.protocol}${desc}`);
-      }
-    }
+    return lines.join('\n');
   }
+
+  // A stated total keeps the model honest about the Ports section: it can check
+  // it has accounted for every record instead of summarising a few.
+  const recordCount = project.environments.reduce((n, env) => n + env.ports.length, 0);
+  lines.push(
+    `Environments: ${project.environments.length}. Records (deployed endpoints) in total: ${recordCount}.`
+  );
+
+  for (const env of project.environments) {
+    const parts = [`- ${env.name}`, `CI/CD: ${env.cicdProvider}`];
+    if (env.deployUrl) parts.push(`deploy URL: ${env.deployUrl}`);
+    if (env.jenkinsUrl) parts.push(`Jenkins: ${env.jenkinsUrl}`);
+    if (env.vmName) parts.push(`VM: ${env.vmName}`);
+    if (env.notes) parts.push(`notes: ${env.notes}`);
+    lines.push(`  ${parts.join(', ')}`);
+
+    if (env.ports.length === 0) {
+      lines.push(`    - no records (ports/domains) recorded for ${env.name} yet`);
+      continue;
+    }
+    lines.push(`    records for ${env.name} (${env.ports.length}):`);
+    for (const record of env.ports) lines.push(recordLine(record));
+  }
+
   return lines.join('\n');
 };
 

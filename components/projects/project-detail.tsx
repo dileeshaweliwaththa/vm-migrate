@@ -42,6 +42,17 @@ export function ProjectDetail({
   const router = useRouter();
   const [view, setView] = useState<'environments' | 'documentation'>('environments');
 
+  // Keyed off `projectId` rather than the loaded project, so it's usable above the
+  // loading/error early-returns.
+  const setArchived = (archived: boolean) =>
+    archive.mutate(
+      { id: projectId, archived },
+      {
+        onSuccess: () => toast.success(archived ? 'Archived.' : 'Restored.'),
+        onError: (e) => toast.error(e instanceof Error ? e.message : 'Failed.'),
+      }
+    );
+
   if (isLoading) {
     return (
       <div className="mx-auto w-full max-w-7xl space-y-4 px-4 py-8 sm:px-6">
@@ -88,21 +99,39 @@ export function ProjectDetail({
                   </Button>
                 }
               />
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  archive.mutate(
-                    { id: project.id, archived: !project.archived },
-                    {
-                      onSuccess: () => toast.success(project.archived ? 'Restored.' : 'Archived.'),
-                      onError: (e) => toast.error(e instanceof Error ? e.message : 'Failed.'),
-                    }
-                  )
-                }
-              >
-                <Archive className="mr-2 h-4 w-4" /> {project.archived ? 'Restore' : 'Archive'}
-              </Button>
+              {/* Restore is harmless, so it stays one click. Archiving is confirmed:
+                  it removes the project from everyone's list, and only an admin can
+                  see or undo it — losing a project to a stray click is too easy
+                  otherwise. */}
+              {project.archived ? (
+                <Button variant="outline" size="sm" onClick={() => setArchived(false)}>
+                  <Archive className="mr-2 h-4 w-4" /> Restore
+                </Button>
+              ) : (
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="outline" size="sm">
+                      <Archive className="mr-2 h-4 w-4" /> Archive
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Archive “{project.name}”?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        It disappears from the Projects list. Only an admin can see archived
+                        projects — via <strong>Show Archived</strong> on that page — or restore
+                        it. Nothing is deleted.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction onClick={() => setArchived(true)}>
+                        Archive
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              )}
               {isAdmin ? (
                 <AlertDialog>
                   <AlertDialogTrigger asChild>

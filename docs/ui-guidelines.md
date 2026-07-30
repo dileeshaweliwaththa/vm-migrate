@@ -54,6 +54,41 @@ The same reasoning applies to any generated primitive that sets a responsive
 utility — check the primitive's own classes before overriding. Editing the file in
 `components/ui/` to "fix" it is not the answer (rule 3).
 
+## Generated primitives target Radix 2.x — this project is on 1.4.3
+
+The biggest source of "the class is right there and does nothing" in this codebase.
+The generated files in `components/ui/` were produced for a shadcn style that
+assumes **Radix 2.x**, which emits *boolean* data attributes. `package.json` pins
+`radix-ui@^1.4.3`, which emits *valued* ones:
+
+| Generated file styles on | Radix 1.4.3 actually emits |
+| ------------------------ | -------------------------- |
+| `data-checked` / `data-unchecked` | `data-state="checked"` / `"unchecked"` |
+| `data-horizontal` / `data-vertical` | `data-orientation="horizontal"` / `"vertical"` |
+| `data-active` | `data-state="active"` |
+
+In Tailwind v4, `data-checked:` compiles to `&[data-checked]` — attribute
+*presence*. Radix never sets that attribute, so the utility never applies. Nothing
+errors; the element just renders unstyled.
+
+**Known casualties:**
+
+- `ui/switch.tsx` — the track's `data-unchecked:bg-input` never lands, so the track
+  is transparent and the thumb is `bg-background`: an **invisible switch** that
+  still occupies its 32px. Don't use it; use `Toggle`, which styles on
+  `data-[state=on]` and `aria-pressed` (both emitted by 1.4.3) and sizes itself
+  unconditionally.
+- `ui/tabs.tsx` — the `data-horizontal` / `group-data-horizontal` paths don't
+  resolve, so the tab list renders as an empty block. Use `toggle-group` for
+  segmented switches.
+
+**Before reaching for a primitive from `components/ui/`,** check whether its
+classes depend on a boolean `data-*` variant. If they do, it will render wrong.
+Prefer one that keys off `data-[state=…]` or `aria-*`.
+
+Do **not** hand-edit the file to fix it (rule 3). The real fix is to upgrade
+`radix-ui` to 2.x and re-verify every primitive — tracked separately.
+
 ## Three more silent traps in dialogs
 
 **`Textarea` sizes itself to its content.** `components/ui/textarea.tsx` sets
