@@ -17,6 +17,7 @@ import type {
   EnvironmentInput,
   EnvironmentPort,
   EnvironmentPortInput,
+  PortSource,
 } from '@/types/common/project';
 
 // Service layer: environments and their ports. Reuses the VM tracker's
@@ -92,11 +93,13 @@ export const addPort = async (
   environmentId: string,
   input: EnvironmentPortInput
 ): Promise<EnvironmentPort> => {
+  // Provenance: an explicit source wins (the docker import sets 'docker'),
+  // otherwise a record carrying a Jenkins job is 'jenkins' and anything else is a
+  // hand-added 'manual' row.
+  const source: PortSource = input.source ?? (input.jenkinsJobUrl ? 'jenkins' : 'manual');
   const row = await insertPort({
     environment_id: environmentId,
-    // A record created from a Jenkins job is provenance 'jenkins'; a hand-added
-    // port is 'manual'.
-    source: input.jenkinsJobUrl ? 'jenkins' : 'manual',
+    source,
     ...portInputToColumns(input),
   });
   return rowToPort(row);

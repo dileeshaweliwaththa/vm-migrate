@@ -3,7 +3,18 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
-import { ExternalLink, ListChecks, Pencil, Play, Plus, RefreshCw, Server, Settings2, Trash2 } from 'lucide-react';
+import {
+  Container,
+  ExternalLink,
+  ListChecks,
+  Pencil,
+  Play,
+  Plus,
+  RefreshCw,
+  Server,
+  Settings2,
+  Trash2,
+} from 'lucide-react';
 import type { Environment, EnvironmentPort, ProjectDetail } from '@/types/common/project';
 import type { JenkinsJobSummary } from '@/types/common/jenkins';
 import { useEnvironmentMutations } from '@/hooks/environments/useEnvironments';
@@ -39,6 +50,7 @@ import {
 import { EnvironmentForm } from '@/components/environments/environment-form';
 import { JenkinsConfigDialog } from '@/components/environments/jenkins-config-dialog';
 import { JenkinsJobsDialog } from '@/components/environments/jenkins-jobs-dialog';
+import { DockerImportDialog } from '@/components/environments/docker-import-dialog';
 
 export function EnvironmentsSection({
   project,
@@ -291,6 +303,7 @@ function EnvironmentCard({
   const [domain, setDomain] = useState('');
   const [jenkinsOpen, setJenkinsOpen] = useState(false);
   const [jobsOpen, setJobsOpen] = useState(false);
+  const [dockerOpen, setDockerOpen] = useState(false);
   const isJenkins = env.cicdProvider === 'jenkins';
 
   // Live Jenkins status/last-build for records that link a job — one request per
@@ -432,6 +445,25 @@ function EnvironmentCard({
                   ) : null}
                 </>
               ) : null}
+              {/* Not Jenkins-specific — any environment can have records imported
+                  from a `docker ps` paste, so this sits outside the isJenkins block. */}
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Import records from docker ps"
+                title="Import from docker ps"
+                onClick={() => setDockerOpen(true)}
+              >
+                <Container className="h-4 w-4" />
+              </Button>
+              <DockerImportDialog
+                projectId={projectId}
+                envId={env.id}
+                envName={env.name}
+                portCount={env.ports.length}
+                open={dockerOpen}
+                onOpenChange={setDockerOpen}
+              />
               <EnvironmentForm
                 projectId={projectId}
                 environment={env}

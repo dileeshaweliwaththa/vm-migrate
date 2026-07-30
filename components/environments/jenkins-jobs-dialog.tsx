@@ -102,7 +102,12 @@ export function JenkinsJobsDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-4xl">
+        {/* `sm:` prefix required — dialog.tsx's own `sm:max-w-sm` beats an
+            unprefixed max-w-* here. No overflow-* on the dialog: the job list
+            below already scrolls itself, and overflow-y here would also enable
+            overflow-x, which displaces the close button. See
+            docker-import-dialog.tsx. */}
+        <DialogContent className="sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle>Jenkins jobs — {envName}</DialogTitle>
             <DialogDescription>

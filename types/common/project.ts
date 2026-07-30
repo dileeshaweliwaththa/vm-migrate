@@ -6,8 +6,10 @@ import type { Protocol } from '@/types/common/vm';
 export const CICD_PROVIDERS = ['jenkins', 'aws', 'azure', 'amplify', 'other', 'none'] as const;
 export type CicdProvider = (typeof CICD_PROVIDERS)[number];
 
-// Provenance of a port row (mirrors the `port_source` DB enum).
-export const PORT_SOURCES = ['manual', 'jenkins'] as const;
+// Provenance of a port row (mirrors the `port_source` DB enum — same values, same
+// order). 'docker' rows come from pasted `docker ps` output; see
+// docs/docker-import.md.
+export const PORT_SOURCES = ['manual', 'jenkins', 'docker'] as const;
 export type PortSource = (typeof PORT_SOURCES)[number];
 
 // Fixed environment names (mirrors the `environment_name` DB enum).
@@ -84,5 +86,8 @@ export type EnvironmentInput = Partial<
 > & { newVm?: InlineVmInput };
 
 export type EnvironmentPortInput = Partial<
-  Pick<EnvironmentPort, 'port' | 'protocol' | 'description' | 'domain' | 'position' | 'jenkinsJobUrl'>
+  Pick<
+    EnvironmentPort,
+    'port' | 'protocol' | 'description' | 'domain' | 'position' | 'jenkinsJobUrl' | 'source'
+  >
 >;

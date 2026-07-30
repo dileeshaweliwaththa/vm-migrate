@@ -135,8 +135,9 @@ role-based RLS as `projects` (writes = `editor`/`admin`).
 ## `environment_ports`
 
 Phase 2. One row per deployed record (mirrors `vm_urls`). `source` records
-provenance (`manual`, or `jenkins` when the row came from the Phase 2b sync or
-from "Use" in the browse-jobs dialog).
+provenance: `manual` (typed by hand), `jenkins` (the Phase 2b sync, or "Use" in
+the browse-jobs dialog), or `docker` (imported from a pasted `docker ps` — see
+[docker-import.md](./docker-import.md)).
 
 | column           | type          | notes                                   |
 | ---------------- | ------------- | --------------------------------------- |
@@ -146,7 +147,7 @@ from "Use" in the browse-jobs dialog).
 | `protocol`       | `text`        | HTTP/HTTPS/TCP/UDP/WS/WSS               |
 | `description`    | `text`        | the record's label — surfaced as the **Name** column (a Jenkins job name, or hand-typed) |
 | `domain`         | `text`        | assigned domain/host, e.g. `dev.imaui.upview.tech` |
-| `source`         | `text`        | `manual` \| `jenkins`                   |
+| `source`         | `port_source` | `manual` \| `jenkins` \| `docker`        |
 | `jenkins_job_url`| `text`        | Jenkins job this record represents (non-secret; powers per-record "Run build") |
 | `position`       | `integer`     | display order                           |
 | `created_at` / `updated_at` | `timestamptz` | `set_updated_at` trigger     |
@@ -248,6 +249,8 @@ In `supabase/migrations/`, applied in timestamp order:
   per-record "Run build").
 - `…_add_domain_to_environment_ports.sql` — adds `environment_ports.domain`, the
   assigned domain/host for a record.
+- `…_add_docker_port_source.sql` — adds `docker` to the `port_source` enum, for
+  records imported from a pasted `docker ps`.
 
 ## Deploying migrations
 

@@ -31,6 +31,53 @@ Tailwind when a shadcn equivalent exists.
    hardcoded colors.
 6. **No other component libraries.** Don't introduce MUI, Chakra,
    Ant Design, react-bootstrap, etc.
+7. **Override a responsive utility at the same breakpoint it was set.** See
+   below — this one silently doesn't work if you get it wrong.
+
+## Overriding widths on a primitive (a real trap)
+
+`components/ui/dialog.tsx` sets **`sm:max-w-sm`** on `DialogContent`. Passing an
+unprefixed `max-w-4xl` through `className` does **nothing** above 640px: both
+utilities have the same specificity, Tailwind emits `sm:` variants *after* base
+utilities, so the primitive's `sm:max-w-sm` wins and the dialog renders 384px
+wide. `cn()`/tailwind-merge can't save you either — it treats `max-w-4xl` and
+`sm:max-w-sm` as different keys (different variant) and keeps both.
+
+**Always match the breakpoint:**
+
+```tsx
+<DialogContent className="sm:max-w-5xl">   {/* ✅ replaces sm:max-w-sm */}
+<DialogContent className="max-w-5xl">      {/* ❌ silently ignored ≥640px */}
+```
+
+The same reasoning applies to any generated primitive that sets a responsive
+utility — check the primitive's own classes before overriding. Editing the file in
+`components/ui/` to "fix" it is not the answer (rule 3).
+
+## Three more silent traps in dialogs
+
+**`Textarea` sizes itself to its content.** `components/ui/textarea.tsx` sets
+**`field-sizing-content`**, so the control grows to fit what's in it. Give it
+`wrap="off"` and it grows as wide as the longest line — enough to push a dialog
+past its own `max-w` and give the whole thing a horizontal scrollbar. For a
+fixed-size scrollable box, override it:
+
+```tsx
+<Textarea className="field-sizing-fixed h-32 w-full min-w-0 overflow-auto" wrap="off" />
+```
+
+**Don't put `overflow-y-auto` on `DialogContent`.** Per CSS, if one axis isn't
+`visible` the other computes to `auto`, so `overflow-y-auto` silently enables
+*horizontal* scrolling too. The close button is `absolute right-2` against the
+padding box, so the moment the dialog scrolls sideways the button drifts off with
+it. Let each inner region scroll instead — a bounded list wrapper
+(`max-h-* overflow-auto`), the paste box, and so on.
+
+**`DialogContent` is a `grid`.** Its children are grid items with
+`min-width: auto`, so they refuse to shrink below their content's min-content
+width — a wide table (`min-w-[36rem]`) or an unwrapped textarea stretches the
+dialog from the inside. Put `min-w-0` on the wrapper so `overflow-auto` on the
+inner scroll container actually does its job.
 
 ## Where shadcn fits in the architecture
 

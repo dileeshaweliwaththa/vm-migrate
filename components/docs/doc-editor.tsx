@@ -125,7 +125,9 @@ export function DocEditorDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl gap-4">
+      {/* `sm:` prefix required — dialog.tsx's own `sm:max-w-sm` beats an
+          unprefixed max-w-* here. See docker-import-dialog.tsx. */}
+      <DialogContent className="gap-4 sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>Documentation</DialogTitle>
           <DialogDescription>

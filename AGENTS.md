@@ -36,6 +36,10 @@ Before implementing any feature, request, or fix, read and follow:
 - [docs/auth.md](docs/auth.md) — the email sign-in flow and how to extend it.
 - [docs/tracker.md](docs/tracker.md) — the VM tracker feature, its layers, and
   its API.
+- [docs/jenkins-sync.md](docs/jenkins-sync.md) — per-environment Jenkins config,
+  port sync, and how a triggered build is followed to completion.
+- [docs/docker-import.md](docs/docker-import.md) — importing environment records
+  from pasted `docker ps` output.
 
 ## Database / migration workflow
 
