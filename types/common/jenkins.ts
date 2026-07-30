@@ -50,7 +50,43 @@ export interface JenkinsJobSummary {
 
 export interface TriggerBuildResult {
   queued: boolean;
-  message: string;
+  // The Jenkins queue item for the build just triggered, taken from the trigger
+  // response's `Location` header. This is the only handle on *this* run as
+  // opposed to any other run of the same job — it's what the run poller follows.
+  // Empty when Jenkins accepted the build but sent no Location.
+  queueUrl: string;
+}
+
+// Where a triggered run currently is. QUEUED = accepted, waiting for an executor;
+// RUNNING = an executor picked it up and a build number exists; DONE = finished
+// with a result; CANCELLED = removed from the queue before starting; UNKNOWN =
+// Jenkins no longer knows about it (queue items are only retained for a few
+// minutes after they leave the queue).
+export const JENKINS_RUN_PHASES = ['QUEUED', 'RUNNING', 'DONE', 'CANCELLED', 'UNKNOWN'] as const;
+export type JenkinsRunPhase = (typeof JENKINS_RUN_PHASES)[number];
+
+// Phases the poller should stop on — nothing further will change.
+export const TERMINAL_RUN_PHASES: readonly JenkinsRunPhase[] = ['DONE', 'CANCELLED', 'UNKNOWN'];
+
+export const isTerminalRunPhase = (phase: JenkinsRunPhase): boolean =>
+  TERMINAL_RUN_PHASES.includes(phase);
+
+// A single poll of a triggered run, flattened for the UI. The service resolves
+// Jenkins' two-phase queue→build model into this one shape so neither the hook
+// nor the component has to know about it.
+export interface JenkinsRunState {
+  phase: JenkinsRunPhase;
+  // Why it's still queued ("Waiting for next available executor…") — QUEUED only.
+  reason: string;
+  // Build number, once an executor has assigned one (RUNNING and DONE).
+  buildNumber: number | null;
+  // The build's own URL — the poller follows this once the queue item resolves,
+  // because queue items expire but builds don't.
+  buildUrl: string;
+  // Final result, DONE only. Reuses the shared status set.
+  result: JenkinsBuildStatus | null;
+  // 0-100 while RUNNING when Jenkins reports an estimate, else null.
+  progress: number | null;
 }
 
 // A port/CI-CD hint extracted best-effort from a job's config (D3).

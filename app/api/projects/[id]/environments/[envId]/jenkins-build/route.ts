@@ -18,7 +18,8 @@ export async function POST(request: Request, context: Context) {
       const status = result.message === 'Editor access required.' ? 403 : 400;
       return NextResponse.json({ error: result.message }, { status });
     }
-    return NextResponse.json({ message: result.message });
+    // `data.queueUrl` is the handle the client polls to follow this run.
+    return NextResponse.json({ message: result.message, data: result.data });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to trigger the build.' },

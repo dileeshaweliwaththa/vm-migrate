@@ -7,7 +7,12 @@ import { ExternalLink, ListChecks, Pencil, Play, Plus, RefreshCw, Server, Settin
 import type { Environment, EnvironmentPort, ProjectDetail } from '@/types/common/project';
 import type { JenkinsJobSummary } from '@/types/common/jenkins';
 import { useEnvironmentMutations } from '@/hooks/environments/useEnvironments';
-import { useTriggerJenkinsBuild, useJenkinsJobs } from '@/hooks/environments/useEnvironmentJenkins';
+import {
+  useTriggerJenkinsBuild,
+  useJenkinsJobs,
+  useJenkinsRun,
+} from '@/hooks/environments/useEnvironmentJenkins';
+import { isTerminalRunPhase } from '@/types/common/jenkins';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -105,16 +110,68 @@ function PortRow({
   const [portVal, setPortVal] = useState(port.port);
   const [descVal, setDescVal] = useState(port.description);
   const [domainVal, setDomainVal] = useState(port.domain);
+  // Set when this row triggers a build; drives the run poll below.
+  const [queueUrl, setQueueUrl] = useState<string | null>(null);
+  const { data: run } = useJenkinsRun(projectId, env.id, queueUrl);
 
   const onError = (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed.');
   const save = (input: Parameters<typeof updatePort.mutate>[0]['input']) =>
     updatePort.mutate({ envId: env.id, portId: port.id, input }, { onError });
 
-  const status = job ? (
-    <JenkinsStatusBadge status={job.status} building={job.building} />
-  ) : (
-    <span className="text-muted-foreground">—</span>
-  );
+  // A run is "live" from the moment the trigger returns until the poll reports a
+  // terminal phase — used to block a second trigger on the same row.
+  const runActive = Boolean(queueUrl) && (!run || !isTerminalRunPhase(run.phase));
+
+  // Status cell: the live run wins while one is in flight, since it knows about
+  // *this* build; otherwise fall back to the job list's last-known state.
+  const liveStatus = (() => {
+    // Optimistic: the trigger succeeded but the first poll hasn't landed yet.
+    if (queueUrl && !run) {
+      return <JenkinsStatusBadge status="PENDING" building={false} label="QUEUED" />;
+    }
+    if (!run) return null;
+    switch (run.phase) {
+      case 'QUEUED':
+        return (
+          <JenkinsStatusBadge
+            status="PENDING"
+            building={false}
+            label="QUEUED"
+            title={run.reason}
+          />
+        );
+      case 'RUNNING':
+        return (
+          <div className="space-y-0.5">
+            <JenkinsStatusBadge status="BUILDING" building />
+            <span className="block text-xs text-muted-foreground">
+              {run.buildUrl && run.buildNumber ? (
+                <a href={run.buildUrl} target="_blank" rel="noreferrer" className="hover:underline">
+                  #{run.buildNumber}
+                </a>
+              ) : null}
+              {run.progress !== null ? ` · ${run.progress}%` : null}
+            </span>
+          </div>
+        );
+      case 'DONE':
+        return <JenkinsStatusBadge status={run.result ?? 'UNKNOWN'} building={false} />;
+      case 'CANCELLED':
+        return <JenkinsStatusBadge status="ABORTED" building={false} label="CANCELLED" />;
+      // Jenkins no longer knows about the run (expired queue item) — fall back to
+      // the job list rather than showing a dead-end state.
+      case 'UNKNOWN':
+        return null;
+    }
+  })();
+
+  const status =
+    liveStatus ??
+    (job ? (
+      <JenkinsStatusBadge status={job.status} building={job.building} />
+    ) : (
+      <span className="text-muted-foreground">—</span>
+    ));
 
   // Name cell: for a Jenkins record, the job name as a link to the job; for a
   // manual record, an editable label.
@@ -186,14 +243,20 @@ function PortRow({
                 variant="ghost"
                 size="icon-sm"
                 aria-label="Run build"
-                title="Run build"
+                title={runActive ? 'A build is already in progress' : 'Run build'}
                 onClick={() =>
                   trigger.mutate(port.jenkinsJobUrl, {
-                    onSuccess: (msg) => toast.success(msg),
+                    onSuccess: ({ message, queueUrl: url }) => {
+                      toast.success(message);
+                      // Start following this run. Jenkins occasionally accepts a
+                      // build without a Location header; then there's nothing to
+                      // follow and the row falls back to the job list's state.
+                      if (url) setQueueUrl(url);
+                    },
                     onError,
                   })
                 }
-                disabled={trigger.isPending}
+                disabled={trigger.isPending || runActive}
               >
                 <Play className="h-4 w-4" />
               </Button>
@@ -230,10 +293,20 @@ function EnvironmentCard({
   const [jobsOpen, setJobsOpen] = useState(false);
   const isJenkins = env.cicdProvider === 'jenkins';
 
-  // Live Jenkins status/last-build for records that link a job — fetched once
-  // per card (only when there are jenkins-linked records) and matched by URL.
+  // Live Jenkins status/last-build for records that link a job — one request per
+  // card (not per row) covering every record, matched by URL.
+  //
+  // Kept on a slow refresh while the card has jenkins-linked records so a build
+  // started by someone else, or straight from Jenkins, still shows up. It has to
+  // be time-based: nothing tells us a foreign build began. Builds triggered from
+  // *this* row are followed precisely by useJenkinsRun instead.
   const hasJenkinsRecords = env.ports.some((p) => p.jenkinsJobUrl);
-  const { data: jenkinsJobs } = useJenkinsJobs(projectId, env.id, hasJenkinsRecords);
+  const { data: jenkinsJobs } = useJenkinsJobs(
+    projectId,
+    env.id,
+    hasJenkinsRecords,
+    hasJenkinsRecords
+  );
   const jobByUrl = useMemo(() => {
     const map = new Map<string, JenkinsJobSummary>();
     for (const j of jenkinsJobs ?? []) map.set(j.url, j);

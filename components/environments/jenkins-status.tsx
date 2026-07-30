@@ -17,16 +17,26 @@ const STATUS_CLASS: Record<JenkinsBuildStatus, string> = {
 export function JenkinsStatusBadge({
   status,
   building,
+  label,
+  title,
 }: {
   status: JenkinsBuildStatus;
   building: boolean;
+  // Overrides the text for states Jenkins' own status set doesn't name — a run
+  // waiting in the queue, or one cancelled before it started. Colour still comes
+  // from `status`, so the pill stays consistent with the rest.
+  label?: string;
+  title?: string;
 }) {
-  const label = building ? 'BUILDING' : status;
+  const text = label ?? (building ? 'BUILDING' : status);
   const cls = building ? STATUS_CLASS.BUILDING : STATUS_CLASS[status];
   return (
-    <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${cls}`}>
+    <span
+      className={`inline-flex items-center gap-1.5 text-xs font-medium ${cls}`}
+      title={title}
+    >
       <span className={`size-2 rounded-full bg-current ${building ? 'animate-pulse' : ''}`} />
-      {label}
+      {text}
     </span>
   );
 }

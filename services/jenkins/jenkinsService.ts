@@ -2,7 +2,9 @@ import { getCurrentRole } from '@/services/auth/authService';
 import { getProject } from '@/services/projects/projectService';
 import { extractPorts } from '@/services/jenkins/extraction';
 import {
+  fetchBuild,
   fetchJobConfigXml,
+  fetchQueueItem,
   listAllJobs,
   triggerBuild,
 } from '@/repositories/jenkins/jenkinsRepository';
@@ -14,7 +16,7 @@ import {
 } from '@/repositories/environmentSecrets/environmentSecretRepository';
 import { insertPort, deletePort } from '@/repositories/environmentPorts/environmentPortRepository';
 import { canEdit } from '@/lib/rbac';
-import type { ApiResponse, ApiSingleResponse } from '@/types/common';
+import type { ApiSingleResponse } from '@/types/common';
 import type {
   EnvironmentJenkinsConfig,
   EnvironmentJenkinsInput,
@@ -23,6 +25,8 @@ import type {
   JenkinsBuildStatus,
   JenkinsJobSummary,
   JenkinsRawJob,
+  JenkinsRunState,
+  TriggerBuildResult,
 } from '@/types/common/jenkins';
 import type { Environment } from '@/types/common/project';
 
@@ -307,35 +311,162 @@ export const triggerJenkinsBuild = async (
   projectId: string,
   envId: string,
   jobUrl: string
-): Promise<ApiResponse> => {
+): Promise<ApiSingleResponse<TriggerBuildResult>> => {
   const role = await getCurrentRole();
-  if (!canEdit(role)) return { success: false, message: 'Editor access required.' };
+  if (!canEdit(role)) return { success: false, message: 'Editor access required.', data: null };
 
   try {
     const resolved = await resolveEnvJenkins(projectId, envId);
-    if (!resolved.ok) return { success: false, message: resolved.message };
+    if (!resolved.ok) return { success: false, message: resolved.message, data: null };
 
     const { auth, base } = resolved.value;
     if (!jobUrl || !jobUrl.startsWith(base)) {
-      return { success: false, message: 'That job URL doesn’t belong to this Jenkins server.' };
+      return {
+        success: false,
+        message: 'That job URL doesn’t belong to this Jenkins server.',
+        data: null,
+      };
     }
 
     const res = await triggerBuild(auth, base, jobUrl);
     if (!res.ok) {
-      if (res.status === 403) {
-        return { success: false, message: 'Jenkins denied the build (403). The token’s user needs “Job → Build” permission.' };
-      }
-      if (res.status === 409) {
-        return { success: false, message: 'Jenkins refused the build (409) — the job may be disabled.' };
-      }
-      if (res.status === 0) {
-        return { success: false, message: `Couldn’t reach Jenkins${res.error ? ` — ${res.error}` : ''}.` };
-      }
-      return { success: false, message: `Jenkins returned HTTP ${res.status} triggering the build.` };
+      const message =
+        res.status === 403
+          ? 'Jenkins denied the build (403). The token’s user needs “Job → Build” permission.'
+          : res.status === 409
+            ? 'Jenkins refused the build (409) — the job may be disabled.'
+            : res.status === 0
+              ? `Couldn’t reach Jenkins${res.error ? ` — ${res.error}` : ''}.`
+              : `Jenkins returned HTTP ${res.status} triggering the build.`;
+      return { success: false, message, data: null };
     }
-    return { success: true, message: 'Build queued in Jenkins.' };
+    // The queue URL is what lets the caller follow *this* run. Jenkins normally
+    // sends it; if it didn't, the build still queued — the caller just can't
+    // track it individually and falls back to the job list's coarse state.
+    return {
+      success: true,
+      message: 'Build queued in Jenkins.',
+      data: { queued: true, queueUrl: res.queueUrl },
+    };
   } catch (error) {
-    return { success: false, message: asMsg(error, 'Failed to trigger the build.') };
+    return { success: false, message: asMsg(error, 'Failed to trigger the build.'), data: null };
+  }
+};
+
+// Percentage complete while a build runs, from Jenkins' own estimate. Capped at
+// 99 so a long-running build never sits at a misleading 100%.
+const runProgress = (timestamp: number | null, estimatedDuration: number | null): number | null => {
+  if (!timestamp || !estimatedDuration || estimatedDuration <= 0) return null;
+  const elapsed = Date.now() - timestamp;
+  if (elapsed <= 0) return 0;
+  return Math.min(99, Math.round((elapsed / estimatedDuration) * 100));
+};
+
+const unknownRun: JenkinsRunState = {
+  phase: 'UNKNOWN',
+  reason: '',
+  buildNumber: null,
+  buildUrl: '',
+  result: null,
+  progress: null,
+};
+
+// Reads one build and maps it to a run state. Shared by both entry paths (a
+// build URL passed straight in, and a queue item that has resolved to one).
+const buildRunState = async (
+  auth: JenkinsAuth,
+  buildUrl: string,
+  buildNumber: number | null
+): Promise<JenkinsRunState> => {
+  const build = await fetchBuild(auth, buildUrl);
+  // A build that has vanished (404) or an unreachable server is UNKNOWN — the
+  // poller stops rather than retrying forever.
+  if (!build.ok) return { ...unknownRun, buildUrl };
+
+  const number = build.number ?? buildNumber;
+  if (build.building || !build.result) {
+    return {
+      phase: 'RUNNING',
+      reason: '',
+      buildNumber: number,
+      buildUrl,
+      result: null,
+      progress: runProgress(build.timestamp, build.estimatedDuration),
+    };
+  }
+  return {
+    phase: 'DONE',
+    reason: '',
+    buildNumber: number,
+    buildUrl,
+    result: RESULT_MAP[build.result] ?? 'UNKNOWN',
+    progress: null,
+  };
+};
+
+// Where a triggered run currently is (editor+). Collapses Jenkins' two-phase
+// queue→build model into one JenkinsRunState so the client polls a single
+// endpoint and never has to know about queue items.
+//
+// Pass `buildUrl` once known — queue items are only retained for a few minutes
+// after they leave the queue, whereas a build URL stays valid indefinitely.
+export const getJenkinsRunState = async (
+  projectId: string,
+  envId: string,
+  ref: { queueUrl?: string; buildUrl?: string }
+): Promise<ApiSingleResponse<JenkinsRunState>> => {
+  const role = await getCurrentRole();
+  if (!canEdit(role)) return { success: false, message: 'Editor access required.', data: null };
+
+  try {
+    const resolved = await resolveEnvJenkins(projectId, envId);
+    if (!resolved.ok) return { success: false, message: resolved.message, data: null };
+    const { auth, base } = resolved.value;
+
+    // The URLs arrive from the client, so both are checked against this
+    // environment's own Jenkins root before any request is made with the token
+    // attached — otherwise this endpoint would fetch arbitrary URLs on request.
+    const belongs = (url?: string): boolean => Boolean(url && url.startsWith(base));
+
+    if (belongs(ref.buildUrl)) {
+      const data = await buildRunState(auth, ref.buildUrl as string, null);
+      return { success: true, message: 'OK', data };
+    }
+
+    if (!belongs(ref.queueUrl)) {
+      return {
+        success: false,
+        message: 'That build reference doesn’t belong to this Jenkins server.',
+        data: null,
+      };
+    }
+
+    const item = await fetchQueueItem(auth, ref.queueUrl as string);
+    // 404 = the queue item has already expired. Nothing further to follow.
+    if (!item.ok) return { success: true, message: 'OK', data: unknownRun };
+    if (item.cancelled) {
+      return { success: true, message: 'OK', data: { ...unknownRun, phase: 'CANCELLED' } };
+    }
+
+    const buildUrl = item.executable?.url ?? '';
+    if (!buildUrl || !belongs(buildUrl)) {
+      return {
+        success: true,
+        message: 'OK',
+        data: {
+          ...unknownRun,
+          phase: 'QUEUED',
+          reason: item.why ?? 'Waiting for an available executor…',
+        },
+      };
+    }
+
+    // It has an executor. Read the build in the same request so the first poll
+    // after start already carries the number and progress — no extra round trip.
+    const data = await buildRunState(auth, buildUrl, item.executable?.number ?? null);
+    return { success: true, message: 'OK', data };
+  } catch (error) {
+    return { success: false, message: asMsg(error, 'Failed to read the build state.'), data: null };
   }
 };
 

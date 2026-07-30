@@ -98,11 +98,17 @@ const getCrumb = async (
 export interface TriggerResult {
   ok: boolean;
   status: number;
+  // The queue item URL from the response's `Location` header — the handle on this
+  // specific run. '' when Jenkins accepted the build but sent no Location.
+  queueUrl: string;
   error?: string;
 }
 
 // Triggers a build of a job (POST {jobUrl}/build), attaching a CSRF crumb when
 // the server issues one. 201/302 mean the build was queued.
+//
+// `redirect: 'manual'` is deliberate: it keeps the 3xx unfollowed so `Location`
+// stays readable, which is where the queue item URL comes from.
 export const triggerBuild = async (
   auth: JenkinsAuth,
   baseUrl: string,
@@ -121,8 +127,122 @@ export const triggerBuild = async (
     });
     // Jenkins returns 201 (Created) or a 3xx redirect to the queue item.
     const ok = res.status === 201 || (res.status >= 300 && res.status < 400) || res.status === 200;
-    return { ok, status: res.status };
+    return { ok, status: res.status, queueUrl: ok ? (res.headers.get('location') ?? '') : '' };
   } catch (error) {
-    return { ok: false, status: 0, error: error instanceof Error ? error.message : 'network error' };
+    return {
+      ok: false,
+      status: 0,
+      queueUrl: '',
+      error: error instanceof Error ? error.message : 'network error',
+    };
+  }
+};
+
+// A queue item as Jenkins reports it. `executable` appears once an executor picks
+// the item up, and carries the assigned build number. `cancelled` is set when the
+// item was dropped before starting.
+export interface QueueItemResult {
+  ok: boolean;
+  status: number;
+  why: string | null;
+  cancelled: boolean;
+  executable: { number?: number; url?: string } | null;
+  error?: string;
+}
+
+// Fetches a queue item. A 404 is expected and not an error condition: Jenkins
+// only retains queue items for a few minutes after they leave the queue, so the
+// caller treats it as "follow the build instead".
+export const fetchQueueItem = async (
+  auth: JenkinsAuth,
+  queueUrl: string
+): Promise<QueueItemResult> => {
+  const empty = { why: null, cancelled: false, executable: null };
+  try {
+    const res = await fetch(`${stripTrailingSlash(queueUrl)}/api/json`, {
+      headers: { Authorization: authHeader(auth), Accept: 'application/json' },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      cache: 'no-store',
+    });
+    if (!res.ok) return { ok: false, status: res.status, ...empty };
+    const json = (await res.json()) as {
+      why?: string | null;
+      cancelled?: boolean;
+      executable?: { number?: number; url?: string } | null;
+    };
+    return {
+      ok: true,
+      status: res.status,
+      why: json.why ?? null,
+      cancelled: Boolean(json.cancelled),
+      executable: json.executable ?? null,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: 0,
+      ...empty,
+      error: error instanceof Error ? error.message : 'network error',
+    };
+  }
+};
+
+// A single build's live state.
+export interface BuildResult {
+  ok: boolean;
+  status: number;
+  number: number | null;
+  building: boolean;
+  result: string | null;
+  timestamp: number | null;
+  estimatedDuration: number | null;
+  error?: string;
+}
+
+// Fetches one build's state. `tree` keeps the payload to the six fields the run
+// poller needs rather than Jenkins' full build document — this endpoint is polled
+// repeatedly, so the response size matters.
+export const fetchBuild = async (auth: JenkinsAuth, buildUrl: string): Promise<BuildResult> => {
+  const empty = {
+    number: null,
+    building: false,
+    result: null,
+    timestamp: null,
+    estimatedDuration: null,
+  };
+  try {
+    const tree = 'number,building,result,timestamp,estimatedDuration';
+    const res = await fetch(
+      `${stripTrailingSlash(buildUrl)}/api/json?tree=${encodeURIComponent(tree)}`,
+      {
+        headers: { Authorization: authHeader(auth), Accept: 'application/json' },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        cache: 'no-store',
+      }
+    );
+    if (!res.ok) return { ok: false, status: res.status, ...empty };
+    const json = (await res.json()) as {
+      number?: number;
+      building?: boolean;
+      result?: string | null;
+      timestamp?: number;
+      estimatedDuration?: number;
+    };
+    return {
+      ok: true,
+      status: res.status,
+      number: json.number ?? null,
+      building: Boolean(json.building),
+      result: json.result ?? null,
+      timestamp: json.timestamp ?? null,
+      estimatedDuration: json.estimatedDuration ?? null,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: 0,
+      ...empty,
+      error: error instanceof Error ? error.message : 'network error',
+    };
   }
 };

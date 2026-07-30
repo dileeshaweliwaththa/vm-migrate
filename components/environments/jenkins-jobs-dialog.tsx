@@ -68,7 +68,7 @@ export function JenkinsJobsDialog({
     const job = pendingRun;
     setPendingRun(null);
     trigger.mutate(job.url, {
-      onSuccess: (msg) => toast.success(msg),
+      onSuccess: ({ message }) => toast.success(message),
       onError: (e) => toast.error(e instanceof Error ? e.message : 'Failed to trigger build.'),
     });
   };
