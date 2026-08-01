@@ -146,6 +146,7 @@ function PortRow({
   const [domainVal, setDomainVal] = useState(port.domain);
   // Set when this row triggers a build; drives the run poll below.
   const [queueUrl, setQueueUrl] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const { data: run } = useJenkinsRun(projectId, env.id, queueUrl);
 
   const onError = (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed.');
@@ -282,6 +283,29 @@ function PortRow({
                 <Play className="h-4 w-4" />
               </Button>
             ) : null}
+            {/* This record's own build history — who ran it, and how each run
+                ended. Alongside Run, because they're the same unit of work. */}
+            {port.jenkinsJobUrl && canBuild ? (
+              <>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Build history"
+                  title="Build history"
+                  onClick={() => setHistoryOpen(true)}
+                >
+                  <History className="h-4 w-4" />
+                </Button>
+                <JenkinsHistoryDialog
+                  projectId={projectId}
+                  envId={env.id}
+                  portId={port.id}
+                  title={port.description || 'record'}
+                  open={historyOpen}
+                  onOpenChange={setHistoryOpen}
+                />
+              </>
+            ) : null}
             {canEdit ? (
               <Button
                 variant="ghost"
@@ -317,7 +341,6 @@ function EnvironmentCard({
   const [jenkinsOpen, setJenkinsOpen] = useState(false);
   const [jobsOpen, setJobsOpen] = useState(false);
   const [dockerOpen, setDockerOpen] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
   const isJenkins = env.cicdProvider === 'jenkins';
 
   // Live Jenkins status/last-build for records that link a job — one request per
@@ -406,28 +429,6 @@ function EnvironmentCard({
             >
               Live <ExternalLink className="h-3 w-3" />
             </a>
-          ) : null}
-          {/* Outside the canEdit block: the trail of who ran what is for everyone
-              who can run a build, which now includes viewers. */}
-          {isJenkins && canBuild ? (
-            <>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Build history"
-                title="Build history"
-                onClick={() => setHistoryOpen(true)}
-              >
-                <History className="h-4 w-4" />
-              </Button>
-              <JenkinsHistoryDialog
-                projectId={projectId}
-                envId={env.id}
-                envName={env.name}
-                open={historyOpen}
-                onOpenChange={setHistoryOpen}
-              />
-            </>
           ) : null}
           {canEdit ? (
             <>
@@ -557,7 +558,8 @@ function EnvironmentCard({
               <TableHead>Domain</TableHead>
               <TableHead className="w-28">Status</TableHead>
               <TableHead className="w-40">Last build</TableHead>
-              {showActions ? <TableHead className="w-20" /> : null}
+              {/* Room for up to three actions: Run · History · Delete. */}
+              {showActions ? <TableHead className="w-32" /> : null}
             </TableRow>
           </TableHeader>
           <TableBody>

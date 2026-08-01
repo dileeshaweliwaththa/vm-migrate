@@ -170,7 +170,7 @@ whoever started it; delete = `admin`. Nobody can rewrite someone else's row.
 | -------------------- | ----------------------- | ---------------------------------------------------- |
 | `id`                 | `uuid`                  | primary key                                          |
 | `environment_id`     | `uuid`                  | FK → `environments.id`, `on delete cascade`          |
-| `port_id`            | `uuid`                  | FK → `environment_ports.id`, `on delete set null` — the record it was run from, if any |
+| `port_id`            | `uuid`                  | FK → `environment_ports.id`, `on delete set null` — the record it was run from; what the per-record history filters on |
 | `job_url`            | `text`                  | the Jenkins job that was built                       |
 | `job_name`           | `text`                  | label snapshot (the record's name, else derived from the URL) |
 | `queue_url`          | `text`                  | Jenkins queue item — the handle on *this* run at trigger time |

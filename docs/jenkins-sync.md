@@ -37,8 +37,8 @@ re-derives them from role strings.
 
 | Layer      | File                                                        |
 | ---------- | ----------------------------------------------------------- |
-| Routing    | `app/api/projects/[id]/environments/[envId]/jenkins-config/route.ts` (GET/PUT), `.../jenkins-sync/route.ts` (POST), `.../jenkins-jobs/route.ts` (GET), `.../jenkins-build/route.ts` (POST), `.../jenkins-link/route.ts` (POST), `.../jenkins-run/route.ts` (GET — build progress), `.../jenkins-runs/route.ts` (GET — build history) |
-| UI         | `components/environments/jenkins-config-dialog.tsx` (modal), `jenkins-jobs-dialog.tsx` (browse), `jenkins-history-dialog.tsx` (build history), `jenkins-status.tsx` (status + run pills), per-env buttons + record rows in `components/environments/environments-section.tsx` |
+| Routing    | `app/api/projects/[id]/environments/[envId]/jenkins-config/route.ts` (GET/PUT), `.../jenkins-sync/route.ts` (POST), `.../jenkins-jobs/route.ts` (GET), `.../jenkins-build/route.ts` (POST), `.../jenkins-link/route.ts` (POST), `.../jenkins-run/route.ts` (GET — build progress), `.../jenkins-runs/route.ts` (GET — build history, `?portId=` for one record) |
+| UI         | `components/environments/jenkins-config-dialog.tsx` (modal), `jenkins-jobs-dialog.tsx` (browse), `jenkins-history-dialog.tsx` (per-record build history), `jenkins-status.tsx` (status + run pills), per-env buttons + record rows in `components/environments/environments-section.tsx` |
 | Hook       | `hooks/environments/useEnvironmentJenkins.ts` (config, job list, trigger, run progress, history), `hooks/environments/useEnvironments.ts` (`syncFromJenkins`) |
 | Service    | `services/jenkins/jenkinsService.ts`, `services/jenkins/extraction.ts` |
 | Repository | `repositories/jenkins/jenkinsRepository.ts` (external HTTP), `repositories/environmentSecrets/environmentSecretRepository.ts` (service-role), `repositories/environmentBuildRuns/environmentBuildRunRepository.ts` (build history) |
@@ -72,9 +72,10 @@ On a project page, each environment whose CI/CD provider is **Jenkins** shows
    and the live Status / Last build columns are visible to **any** signed-in
    role; inline editing and delete stay editor+. A viewer's row therefore shows
    the actions column only when there is a job to run in it.
-5. **Build history** (🕘, any signed-in role) — the recorded runs for this
-   environment, newest first: job, build number, status, **who started it**, when,
-   and how long it took.
+5. **Build history** (🕘 per record, any signed-in role) — that record's own runs,
+   newest first: build number, status, **who started it**, when, and how long it
+   took. It sits next to ▶ Run because they are the same unit of work: one record,
+   one job, one history.
 
 ## Build history
 
@@ -83,6 +84,12 @@ Every trigger writes a row to `environment_build_runs` (see
 handle, and the user who ran it. Each poll of that run then mirrors its phase,
 build number, and result onto the same row, so a finished run reads as
 `#31 SUCCESS · started by …` instead of sitting at QUEUED.
+
+The history is **per record**: `GET .../jenkins-runs?portId=…` filters to the runs
+started from one row, and the dialog drops its Job column because every row is the
+same job. The same endpoint without `portId` returns the whole environment's runs —
+that's the shape that would also cover builds started from the browse-jobs dialog,
+which have no record (`port_id` is null) and so appear in no per-record list.
 
 Design notes:
 
@@ -99,6 +106,9 @@ Design notes:
 - **The history list refreshes itself** while it holds an unfinished run, but only
   while the dialog is open and only for runs started within the last hour: a run
   whose poller died (tab closed mid-build) must not keep an interval alive.
+- **Query keys keep the environment prefix** (`['env-jenkins-runs', projectId,
+  envId, portId]`), so one invalidate after a trigger or a finished run refreshes
+  every record's history in that environment.
 - Builds started **directly in Jenkins**, or by an older version of this app, have
   no row here. The coarse job status in the records table still covers those.
 
