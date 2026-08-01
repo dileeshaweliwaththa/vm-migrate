@@ -30,10 +30,14 @@ import { DocumentationSection } from '@/components/docs/documentation-section';
 export function ProjectDetail({
   projectId,
   canEdit,
+  canBuild,
   isAdmin,
 }: {
   projectId: string;
   canEdit: boolean;
+  // Running a Jenkins build (and reading its history) is open to viewers too —
+  // separate from canEdit, which gates configuration. See lib/rbac.ts.
+  canBuild: boolean;
   isAdmin: boolean;
 }) {
   const { data: project, isLoading, error } = useProject(projectId);
@@ -205,7 +209,7 @@ export function ProjectDetail({
         </ToggleGroup>
 
         {view === 'environments' ? (
-          <EnvironmentsSection project={project} canEdit={canEdit} />
+          <EnvironmentsSection project={project} canEdit={canEdit} canBuild={canBuild} />
         ) : (
           <DocumentationSection projectId={project.id} canEdit={canEdit} />
         )}

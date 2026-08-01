@@ -28,10 +28,11 @@ update all profiles, which powers the admin user-management flow.
 Fixed-value columns use Postgres **enum types** (not `text` + `CHECK`):
 `user_role` (`profiles.role`), `cicd_provider` (`projects`/`environments`),
 `net_protocol` (`environment_ports.protocol`), `port_source`
-(`environment_ports.source`), and `environment_name` (`environments.name` —
-`DEV`/`STAGE`/`PRODUCTION`). Each mirrors a TS constant of the same values
+(`environment_ports.source`), `environment_name` (`environments.name` —
+`DEV`/`STAGE`/`PRODUCTION`), and `jenkins_run_phase` / `jenkins_build_status`
+(`environment_build_runs`). Each mirrors a TS constant of the same values
 (`USER_ROLES`, `CICD_PROVIDERS`, `PROTOCOLS`, `PORT_SOURCES`,
-`ENVIRONMENT_NAMES`). The legacy
+`ENVIRONMENT_NAMES`, `JENKINS_RUN_PHASES`, `JENKINS_STATUSES`). The legacy
 `vm_urls.proto` remains `text` for tracker-data compatibility.
 
 `public.current_user_role()` is a `SECURITY DEFINER` helper that returns the
@@ -152,6 +153,36 @@ the browse-jobs dialog), or `docker` (imported from a pasted `docker ps` — see
 | `position`       | `integer`     | display order                           |
 | `created_at` / `updated_at` | `timestamptz` | `set_updated_at` trigger     |
 
+## `environment_build_runs`
+
+Phase 2b · build history. One row per Jenkins build **triggered from this app**:
+which job, who started it, and how it ended. This is what makes running a build
+attributable — and why triggering one is open to **viewers** (see
+[jenkins-sync.md](./jenkins-sync.md) and `canRunBuild` in
+[`lib/rbac.ts`](../lib/rbac.ts)).
+
+RLS: read = any authenticated user (the trail is for the team); insert = any
+authenticated user but **only as themselves** (`triggered_by = auth.uid()`);
+update = **own rows only**, since the poller that follows a run belongs to
+whoever started it; delete = `admin`. Nobody can rewrite someone else's row.
+
+| column               | type                    | notes                                                |
+| -------------------- | ----------------------- | ---------------------------------------------------- |
+| `id`                 | `uuid`                  | primary key                                          |
+| `environment_id`     | `uuid`                  | FK → `environments.id`, `on delete cascade`          |
+| `port_id`            | `uuid`                  | FK → `environment_ports.id`, `on delete set null` — the record it was run from, if any |
+| `job_url`            | `text`                  | the Jenkins job that was built                       |
+| `job_name`           | `text`                  | label snapshot (the record's name, else derived from the URL) |
+| `queue_url`          | `text`                  | Jenkins queue item — the handle on *this* run at trigger time |
+| `build_url`          | `text`                  | filled in once an executor picks the run up          |
+| `build_number`       | `integer`               | nullable until the build exists                      |
+| `phase`              | `jenkins_run_phase`     | enum: `QUEUED`/`RUNNING`/`DONE`/`CANCELLED`/`UNKNOWN` (mirrors `JENKINS_RUN_PHASES`) |
+| `result`             | `jenkins_build_status`  | enum, `DONE` only (mirrors `JENKINS_STATUSES`)       |
+| `triggered_by`       | `uuid`                  | FK → `auth.users`, `on delete set null`              |
+| `triggered_by_email` / `triggered_by_name` | `text`    | who ran it, **denormalised**: `profiles` is only readable by its owner, so a join would hide other users' names from a viewer |
+| `finished_at`        | `timestamptz`           | set when the run reaches a terminal phase            |
+| `created_at` / `updated_at` | `timestamptz`    | `set_updated_at` trigger; `created_at` is the run's start |
+
 ## `project_docs`
 
 Phase 2 · M2. One row per project (1-to-1, `project_id` is the PK and cascades
@@ -251,6 +282,9 @@ In `supabase/migrations/`, applied in timestamp order:
   assigned domain/host for a record.
 - `…_add_docker_port_source.sql` — adds `docker` to the `port_source` enum, for
   records imported from a pasted `docker ps`.
+- `…_create_environment_build_runs.sql` — the `jenkins_run_phase` and
+  `jenkins_build_status` enums plus `environment_build_runs`, the audit trail of
+  triggered builds (insert/update restricted to the run's own user).
 
 ## Deploying migrations
 

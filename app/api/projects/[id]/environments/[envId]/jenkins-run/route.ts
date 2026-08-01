@@ -28,7 +28,7 @@ export async function GET(request: NextRequest, context: Context) {
 
     const result = await getJenkinsRunState(id, envId, { queueUrl, buildUrl });
     if (!result.success) {
-      const status = result.message === 'Editor access required.' ? 403 : 400;
+      const status = result.message.endsWith('access required.') ? 403 : 400;
       return NextResponse.json({ error: result.message }, { status });
     }
     return NextResponse.json({ data: result.data });

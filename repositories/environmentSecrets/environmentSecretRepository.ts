@@ -4,8 +4,9 @@ import { createServiceClient } from '@/lib/supabase/service';
 //
 // This table has RLS enabled with NO policies, so no authenticated client can
 // touch it. Only this repository — via the service-role client, from server code
-// behind an editor/admin check in the service layer — ever reads or writes it.
-// The token is never returned to the browser.
+// behind a role check in the service layer (editor+ to configure, any signed-in
+// role to run a build) — ever reads or writes it. The token is never returned to
+// the browser, so a viewer can trigger a build without seeing the credentials.
 
 export const getEnvironmentToken = async (environmentId: string): Promise<string> => {
   const supabase = createServiceClient();

@@ -15,15 +15,33 @@ client can read or write it. Only server code touches it, via the service-role
 client, behind an editor/admin check. See [schema.md](./schema.md) and
 AGENTS.md §6.
 
+## Who can do what
+
+Two levels, not one:
+
+| Action                                                   | Required        |
+| -------------------------------------------------------- | --------------- |
+| Jenkins settings, browse-jobs dialog, "Use", port sync, linking a job, deleting a record | `canEdit` (editor/admin) |
+| **Run a build**, follow it, see job status / last build, read the build history | `canRunBuild` — **every** signed-in role, viewers included |
+
+Triggering a deploy job is an everyday action for the whole team, so it isn't
+editor-only. What replaces that gate is attribution: every trigger writes a row
+to `environment_build_runs` recording the user who started it, so a build is
+never anonymous. Configuration — anything that changes credentials, records, or
+ports — stays editor+.
+
+Both helpers live in [`lib/rbac.ts`](../lib/rbac.ts); no route or component
+re-derives them from role strings.
+
 ## Layers
 
 | Layer      | File                                                        |
 | ---------- | ----------------------------------------------------------- |
-| Routing    | `app/api/projects/[id]/environments/[envId]/jenkins-config/route.ts` (GET/PUT), `.../jenkins-sync/route.ts` (POST), `.../jenkins-jobs/route.ts` (GET), `.../jenkins-build/route.ts` (POST), `.../jenkins-link/route.ts` (POST), `.../jenkins-run/route.ts` (GET — build progress) |
-| UI         | `components/environments/jenkins-config-dialog.tsx` (modal), `jenkins-jobs-dialog.tsx` (browse), `jenkins-status.tsx` (status pill), per-env buttons + record rows in `components/environments/environments-section.tsx` |
-| Hook       | `hooks/environments/useEnvironmentJenkins.ts` (config, job list, trigger, run progress), `hooks/environments/useEnvironments.ts` (`syncFromJenkins`) |
+| Routing    | `app/api/projects/[id]/environments/[envId]/jenkins-config/route.ts` (GET/PUT), `.../jenkins-sync/route.ts` (POST), `.../jenkins-jobs/route.ts` (GET), `.../jenkins-build/route.ts` (POST), `.../jenkins-link/route.ts` (POST), `.../jenkins-run/route.ts` (GET — build progress), `.../jenkins-runs/route.ts` (GET — build history) |
+| UI         | `components/environments/jenkins-config-dialog.tsx` (modal), `jenkins-jobs-dialog.tsx` (browse), `jenkins-history-dialog.tsx` (build history), `jenkins-status.tsx` (status + run pills), per-env buttons + record rows in `components/environments/environments-section.tsx` |
+| Hook       | `hooks/environments/useEnvironmentJenkins.ts` (config, job list, trigger, run progress, history), `hooks/environments/useEnvironments.ts` (`syncFromJenkins`) |
 | Service    | `services/jenkins/jenkinsService.ts`, `services/jenkins/extraction.ts` |
-| Repository | `repositories/jenkins/jenkinsRepository.ts` (external HTTP), `repositories/environmentSecrets/environmentSecretRepository.ts` (service-role) |
+| Repository | `repositories/jenkins/jenkinsRepository.ts` (external HTTP), `repositories/environmentSecrets/environmentSecretRepository.ts` (service-role), `repositories/environmentBuildRuns/environmentBuildRunRepository.ts` (build history) |
 
 `jenkinsRepository` is the **one external-HTTP data source** — the documented
 exception to "repositories only touch Supabase" (architecture.md / AGENTS.md §2).
@@ -31,7 +49,7 @@ exception to "repositories only touch Supabase" (architecture.md / AGENTS.md §2
 ## Flow
 
 On a project page, each environment whose CI/CD provider is **Jenkins** shows
-(editor+):
+(editor+ unless noted):
 
 1. **Jenkins settings** (⚙) — opens a modal to set the **Job URL** (a specific
    job, or just the server base URL), **Username**, and **API token**
@@ -50,7 +68,39 @@ On a project page, each environment whose CI/CD provider is **Jenkins** shows
    the `jenkins`-sourced ports (manual entries preserved).
 4. **Records** — each row in the ports table is editable inline (fill in the
    **port** and **domain** later, tweak the name) and, when it carries a Jenkins
-   job, shows a **Run build** ▶ action and a deep link to the job.
+   job, shows a **Run build** ▶ action and a deep link to the job. The ▶ action
+   and the live Status / Last build columns are visible to **any** signed-in
+   role; inline editing and delete stay editor+. A viewer's row therefore shows
+   the actions column only when there is a job to run in it.
+5. **Build history** (🕘, any signed-in role) — the recorded runs for this
+   environment, newest first: job, build number, status, **who started it**, when,
+   and how long it took.
+
+## Build history
+
+Every trigger writes a row to `environment_build_runs` (see
+[schema.md](./schema.md)) with the job, the record it was started from, the queue
+handle, and the user who ran it. Each poll of that run then mirrors its phase,
+build number, and result onto the same row, so a finished run reads as
+`#31 SUCCESS · started by …` instead of sitting at QUEUED.
+
+Design notes:
+
+- **The user label is denormalised** (`triggered_by_email` / `triggered_by_name`)
+  rather than joined from `profiles`, which is only readable by its owner and
+  admins — a join would show a viewer "—" for everyone else's runs. It also
+  survives the user being deleted.
+- **RLS makes the trail append-only per user**: insert only as yourself, update
+  only your own rows (the poller following a run belongs to whoever started it),
+  delete admin-only.
+- **Recording is best-effort at trigger time.** Jenkins has already accepted the
+  build by then, so a failed audit write must not report a running build as
+  failed. Same for the progress mirror — the poll's job is to answer the client.
+- **The history list refreshes itself** while it holds an unfinished run, but only
+  while the dialog is open and only for runs started within the last hour: a run
+  whose poller died (tab closed mid-build) must not keep an interval alive.
+- Builds started **directly in Jenkins**, or by an older version of this app, have
+  no row here. The coarse job status in the records table still covers those.
 
 ## Following a triggered build
 
@@ -93,18 +143,20 @@ Polling rules, all in `useJenkinsRun`:
   else started has begun. Builds triggered from a row are followed precisely by
   `useJenkinsRun` instead.
 
-The run reference is client-side only (TanStack cache). A reload mid-build
-degrades to the job list's coarse `building` state rather than losing everything.
-Persisting the last build number on `environment_ports` would make a run visible
-to other users and survive reloads — deliberately out of scope.
+The *live* run reference is client-side (TanStack cache), so a reload mid-build
+stops the precise poll and degrades to the job list's coarse `building` state.
+What survives the reload is the history row: it already holds the build number,
+and the last poll before the reload recorded the phase it had reached. Another
+user sees the same row — that's the point of persisting it.
 
 Polling is the right mechanism here, not a fallback: Jenkins offers no usable push
 without the Notification plugin plus a publicly reachable callback URL, which an
 authenticated internal tool can't provide.
 
 The token is read server-side only (service-role), so a non-admin **editor** can
-configure, browse, run, and sync without ever seeing it — mirrors the AI
-"Generate by AI" flow. Build triggers, job links, **and the queue/build URLs the
+configure, browse, run, and sync — and a **viewer** can run and follow a build —
+without either ever seeing it. Mirrors the AI "Generate by AI" flow. Build
+triggers, job links, **and the queue/build URLs the
 run poller follows** are all SSRF-guarded: every URL that arrives from the client
 is checked against the environment's own Jenkins root before any request is made
 with the token attached.

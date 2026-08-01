@@ -1,4 +1,4 @@
-import { getCurrentRole } from '@/services/auth/authService';
+import { getCurrentActor, getCurrentRole, type CurrentActor } from '@/services/auth/authService';
 import { getProject } from '@/services/projects/projectService';
 import { extractPorts } from '@/services/jenkins/extraction';
 import {
@@ -15,9 +15,16 @@ import {
   hasEnvironmentToken,
 } from '@/repositories/environmentSecrets/environmentSecretRepository';
 import { insertPort, deletePort } from '@/repositories/environmentPorts/environmentPortRepository';
-import { canEdit } from '@/lib/rbac';
+import {
+  findBuildRuns,
+  insertBuildRun,
+  updateBuildRunByRef,
+  type BuildRunWriteColumns,
+} from '@/repositories/environmentBuildRuns/environmentBuildRunRepository';
+import { canEdit, canRunBuild } from '@/lib/rbac';
 import type { ApiSingleResponse } from '@/types/common';
 import type {
+  EnvironmentBuildRun,
   EnvironmentJenkinsConfig,
   EnvironmentJenkinsInput,
   EnvironmentSyncResult,
@@ -25,21 +32,38 @@ import type {
   JenkinsBuildStatus,
   JenkinsJobSummary,
   JenkinsRawJob,
+  JenkinsRunPhase,
   JenkinsRunState,
   TriggerBuildResult,
 } from '@/types/common/jenkins';
+import { isTerminalRunPhase } from '@/types/common/jenkins';
+import type { EnvironmentBuildRunRow } from '@/types/supabase/response/environmentBuildRuns';
 import type { Environment } from '@/types/common/project';
 
-// Service layer: per-environment Jenkins integration (Phase 2b · M3). Editor+.
+// Service layer: per-environment Jenkins integration (Phase 2b · M3).
+//
+// Two access levels live here. **Configuration** (credentials, linking a job,
+// syncing ports) is editor+. **Running** a build — triggering it, following it,
+// and reading job status/history — is open to every signed-in role, viewers
+// included, because each run is recorded against the user who started it in
+// `environment_build_runs`. See lib/rbac.ts and docs/jenkins-sync.md.
 //
 // Non-secret config (job URL, username) is stored on the environment; the secret
 // API token is stored in environment_secrets and only ever read/written here via
 // the service-role repository — it is never returned to the browser. The sync
 // reads the environment's own job config and refreshes its jenkins-sourced ports
-// (manual ports are preserved). See docs/jenkins-sync.md.
+// (manual ports are preserved).
 
 const asMsg = (error: unknown, fallback: string): string =>
   (error instanceof Error && error.message) || fallback;
+
+// Denial messages. Routes map anything ending in "access required." to a 403.
+const EDITOR_REQUIRED = 'Editor access required.';
+const SIGN_IN_REQUIRED = 'Authenticated access required.';
+
+// Newest-first history is a list, not a feed — a card only ever shows the recent
+// runs of one environment, so it is bounded here rather than paginated.
+const BUILD_HISTORY_LIMIT = 50;
 
 // Turns a config.xml fetch outcome into a precise, actionable message.
 const configErrorMessage = (status: number, error?: string, username?: string): string => {
@@ -156,7 +180,7 @@ export const getEnvironmentJenkinsConfig = async (
   envId: string
 ): Promise<ApiSingleResponse<EnvironmentJenkinsConfig>> => {
   const role = await getCurrentRole();
-  if (!canEdit(role)) return { success: false, message: 'Editor access required.', data: null };
+  if (!canEdit(role)) return { success: false, message: EDITOR_REQUIRED, data: null };
 
   const env = await findEnv(projectId, envId);
   if (!env) return { success: false, message: 'Environment not found.', data: null };
@@ -179,7 +203,7 @@ export const saveEnvironmentJenkinsConfig = async (
   input: EnvironmentJenkinsInput
 ): Promise<ApiSingleResponse<EnvironmentJenkinsConfig>> => {
   const role = await getCurrentRole();
-  if (!canEdit(role)) return { success: false, message: 'Editor access required.', data: null };
+  if (!canEdit(role)) return { success: false, message: EDITOR_REQUIRED, data: null };
 
   const env = await findEnv(projectId, envId);
   if (!env) return { success: false, message: 'Environment not found.', data: null };
@@ -219,7 +243,7 @@ export const syncEnvironmentPorts = async (
   envId: string
 ): Promise<ApiSingleResponse<EnvironmentSyncResult>> => {
   const role = await getCurrentRole();
-  if (!canEdit(role)) return { success: false, message: 'Editor access required.', data: null };
+  if (!canEdit(role)) return { success: false, message: EDITOR_REQUIRED, data: null };
 
   const env = await findEnv(projectId, envId);
   if (!env) return { success: false, message: 'Environment not found.', data: null };
@@ -279,15 +303,19 @@ export const syncEnvironmentPorts = async (
   }
 };
 
-// Lists all jobs on the environment's Jenkins server (editor+). The server root
-// is derived from the environment's Jenkins URL, so setting just the base URL is
-// enough to browse and then pick a specific job.
+// Lists all jobs on the environment's Jenkins server (any signed-in role). The
+// server root is derived from the environment's Jenkins URL, so setting just the
+// base URL is enough to browse and then pick a specific job.
+//
+// Open to viewers because this listing is also what fills the Status and Last
+// build columns of the records table — read-only information about jobs the
+// environment already points at.
 export const listJenkinsJobs = async (
   projectId: string,
   envId: string
 ): Promise<ApiSingleResponse<JenkinsJobSummary[]>> => {
   const role = await getCurrentRole();
-  if (!canEdit(role)) return { success: false, message: 'Editor access required.', data: null };
+  if (!canRunBuild(role)) return { success: false, message: SIGN_IN_REQUIRED, data: null };
 
   try {
     const resolved = await resolveEnvJenkins(projectId, envId);
@@ -305,21 +333,65 @@ export const listJenkinsJobs = async (
   }
 };
 
-// Triggers a build of a job on the environment's Jenkins server (editor+). The
-// jobUrl must belong to that same server (SSRF guard).
+// Derives a display name for a job from its URL — the last `/job/<name>` segment,
+// URL-decoded. Used when a build wasn't started from a record that already
+// carries the job's name.
+const jobNameFromUrl = (jobUrl: string): string => {
+  const parts = jobUrl.replace(/\/+$/, '').split('/job/');
+  const last = parts[parts.length - 1] ?? '';
+  return decodeURIComponent(last.split('/')[0] ?? '') || jobUrl;
+};
+
+// Writes the history row for a build that Jenkins has just accepted: who ran it,
+// which job, and the queue handle the poller will follow.
+//
+// Best-effort on purpose. The build is *already queued in Jenkins* by the time
+// this runs, so a failed audit write must not turn a successful trigger into an
+// error — that would tell the user their (running) build didn't start.
+const recordTriggeredRun = async (
+  actor: CurrentActor,
+  env: Environment,
+  jobUrl: string,
+  queueUrl: string
+): Promise<void> => {
+  const port = env.ports.find((p) => p.jenkinsJobUrl === jobUrl);
+  try {
+    await insertBuildRun({
+      environment_id: env.id,
+      port_id: port?.id ?? null,
+      job_url: jobUrl,
+      job_name: port?.description || jobNameFromUrl(jobUrl),
+      queue_url: queueUrl,
+      phase: 'QUEUED',
+      triggered_by: actor.id,
+      triggered_by_email: actor.email,
+      triggered_by_name: actor.name,
+    });
+  } catch {
+    // Nothing the caller can do about it, and nothing to report.
+  }
+};
+
+// Triggers a build of a job on the environment's Jenkins server. Open to any
+// signed-in role — the run is attributed in `environment_build_runs`. The jobUrl
+// must belong to that same server (SSRF guard).
 export const triggerJenkinsBuild = async (
   projectId: string,
   envId: string,
   jobUrl: string
 ): Promise<ApiSingleResponse<TriggerBuildResult>> => {
-  const role = await getCurrentRole();
-  if (!canEdit(role)) return { success: false, message: 'Editor access required.', data: null };
+  // One session read: the trigger both gates on the role and stamps the run with
+  // the user who started it.
+  const actor = await getCurrentActor();
+  if (!actor || !canRunBuild(actor.role)) {
+    return { success: false, message: SIGN_IN_REQUIRED, data: null };
+  }
 
   try {
     const resolved = await resolveEnvJenkins(projectId, envId);
     if (!resolved.ok) return { success: false, message: resolved.message, data: null };
 
-    const { auth, base } = resolved.value;
+    const { env, auth, base } = resolved.value;
     if (!jobUrl || !jobUrl.startsWith(base)) {
       return {
         success: false,
@@ -342,7 +414,11 @@ export const triggerJenkinsBuild = async (
     }
     // The queue URL is what lets the caller follow *this* run. Jenkins normally
     // sends it; if it didn't, the build still queued — the caller just can't
-    // track it individually and falls back to the job list's coarse state.
+    // track it individually and falls back to the job list's coarse state. The
+    // history row is written either way: who ran what is worth recording even
+    // when the run itself can't be followed to a result.
+    await recordTriggeredRun(actor, env, jobUrl, res.queueUrl);
+
     return {
       success: true,
       message: 'Build queued in Jenkins.',
@@ -404,9 +480,45 @@ const buildRunState = async (
   };
 };
 
-// Where a triggered run currently is (editor+). Collapses Jenkins' two-phase
-// queue→build model into one JenkinsRunState so the client polls a single
-// endpoint and never has to know about queue items.
+// Mirrors a poll of a live run onto its history row, so the record ends up with
+// the build number and the final result instead of sitting at QUEUED — that's
+// what makes the history readable after a reload, and by other users.
+//
+// Matched by whichever handle the poller currently holds. UNKNOWN is skipped: it
+// means Jenkins no longer knows about the run (an expired queue item), which
+// teaches us nothing and would erase a result already recorded.
+const syncRunHistory = async (
+  ref: { queueUrl?: string; buildUrl?: string },
+  state: JenkinsRunState
+): Promise<void> => {
+  if (state.phase === 'UNKNOWN') return;
+  // Empty strings would match every row that has no such handle yet.
+  const match = ref.buildUrl
+    ? ({ build_url: ref.buildUrl } as const)
+    : ref.queueUrl
+      ? ({ queue_url: ref.queueUrl } as const)
+      : null;
+  if (!match) return;
+
+  const values: BuildRunWriteColumns = {
+    phase: state.phase,
+    result: state.result,
+    build_number: state.buildNumber,
+    finished_at: isTerminalRunPhase(state.phase) ? new Date().toISOString() : null,
+    // Recorded as soon as the queue item resolves, so later polls (and the
+    // history list) can find the run by its build.
+    ...(state.buildUrl ? { build_url: state.buildUrl } : {}),
+  };
+  try {
+    await updateBuildRunByRef(match, values);
+  } catch {
+    // History is a side-effect of the poll, never its purpose.
+  }
+};
+
+// Where a triggered run currently is (any signed-in role). Collapses Jenkins'
+// two-phase queue→build model into one JenkinsRunState so the client polls a
+// single endpoint and never has to know about queue items.
 //
 // Pass `buildUrl` once known — queue items are only retained for a few minutes
 // after they leave the queue, whereas a build URL stays valid indefinitely.
@@ -416,7 +528,7 @@ export const getJenkinsRunState = async (
   ref: { queueUrl?: string; buildUrl?: string }
 ): Promise<ApiSingleResponse<JenkinsRunState>> => {
   const role = await getCurrentRole();
-  if (!canEdit(role)) return { success: false, message: 'Editor access required.', data: null };
+  if (!canRunBuild(role)) return { success: false, message: SIGN_IN_REQUIRED, data: null };
 
   try {
     const resolved = await resolveEnvJenkins(projectId, envId);
@@ -428,9 +540,15 @@ export const getJenkinsRunState = async (
     // attached — otherwise this endpoint would fetch arbitrary URLs on request.
     const belongs = (url?: string): boolean => Boolean(url && url.startsWith(base));
 
-    if (belongs(ref.buildUrl)) {
-      const data = await buildRunState(auth, ref.buildUrl as string, null);
+    // Every successful poll below also lands on the run's history row, so a
+    // record ends with the build number and result it actually reached.
+    const ok = async (data: JenkinsRunState): Promise<ApiSingleResponse<JenkinsRunState>> => {
+      await syncRunHistory(ref, data);
       return { success: true, message: 'OK', data };
+    };
+
+    if (belongs(ref.buildUrl)) {
+      return ok(await buildRunState(auth, ref.buildUrl as string, null));
     }
 
     if (!belongs(ref.queueUrl)) {
@@ -443,30 +561,70 @@ export const getJenkinsRunState = async (
 
     const item = await fetchQueueItem(auth, ref.queueUrl as string);
     // 404 = the queue item has already expired. Nothing further to follow.
-    if (!item.ok) return { success: true, message: 'OK', data: unknownRun };
-    if (item.cancelled) {
-      return { success: true, message: 'OK', data: { ...unknownRun, phase: 'CANCELLED' } };
-    }
+    if (!item.ok) return ok(unknownRun);
+    if (item.cancelled) return ok({ ...unknownRun, phase: 'CANCELLED' });
 
     const buildUrl = item.executable?.url ?? '';
     if (!buildUrl || !belongs(buildUrl)) {
-      return {
-        success: true,
-        message: 'OK',
-        data: {
-          ...unknownRun,
-          phase: 'QUEUED',
-          reason: item.why ?? 'Waiting for an available executor…',
-        },
-      };
+      return ok({
+        ...unknownRun,
+        phase: 'QUEUED',
+        reason: item.why ?? 'Waiting for an available executor…',
+      });
     }
 
     // It has an executor. Read the build in the same request so the first poll
     // after start already carries the number and progress — no extra round trip.
-    const data = await buildRunState(auth, buildUrl, item.executable?.number ?? null);
-    return { success: true, message: 'OK', data };
+    return ok(await buildRunState(auth, buildUrl, item.executable?.number ?? null));
   } catch (error) {
     return { success: false, message: asMsg(error, 'Failed to read the build state.'), data: null };
+  }
+};
+
+const rowToBuildRun = (row: EnvironmentBuildRunRow): EnvironmentBuildRun => ({
+  id: row.id,
+  environmentId: row.environment_id,
+  portId: row.port_id,
+  jobName: row.job_name,
+  jobUrl: row.job_url,
+  buildNumber: row.build_number,
+  buildUrl: row.build_url,
+  phase: row.phase as JenkinsRunPhase,
+  result: (row.result as JenkinsBuildStatus | null) ?? null,
+  triggeredBy: row.triggered_by,
+  // Snapshotted at trigger time — see the migration for why this isn't a join.
+  triggeredByLabel: row.triggered_by_name || row.triggered_by_email || 'Unknown user',
+  startedAt: row.created_at,
+  finishedAt: row.finished_at,
+});
+
+// Recent builds, newest first: which job, who started it, and how it ended.
+// Scoped to one **record** when `portId` is given — that's how the UI surfaces it,
+// since a run belongs to the row it was started from — and to the whole
+// environment otherwise. Readable by any signed-in role: the point of the trail is
+// that the whole team can see who ran what. No Jenkins call; this is our own data.
+export const listEnvironmentBuildRuns = async (
+  projectId: string,
+  envId: string,
+  portId?: string
+): Promise<ApiSingleResponse<EnvironmentBuildRun[]>> => {
+  const role = await getCurrentRole();
+  if (!canRunBuild(role)) return { success: false, message: SIGN_IN_REQUIRED, data: null };
+
+  // Scopes the read to an environment of *this* project, so a valid envId from
+  // another project can't be read through this project's route.
+  const env = await findEnv(projectId, envId);
+  if (!env) return { success: false, message: 'Environment not found.', data: null };
+  // Same for the record: it has to be one of this environment's own.
+  if (portId && !env.ports.some((p) => p.id === portId)) {
+    return { success: false, message: 'Record not found.', data: null };
+  }
+
+  try {
+    const rows = await findBuildRuns(envId, BUILD_HISTORY_LIMIT, portId);
+    return { success: true, message: 'OK', data: rows.map(rowToBuildRun) };
+  } catch (error) {
+    return { success: false, message: asMsg(error, 'Failed to load the build history.'), data: null };
   }
 };
 
@@ -480,7 +638,7 @@ export const linkJenkinsJob = async (
   description: string
 ): Promise<ApiSingleResponse<{ jenkinsUrl: string }>> => {
   const role = await getCurrentRole();
-  if (!canEdit(role)) return { success: false, message: 'Editor access required.', data: null };
+  if (!canEdit(role)) return { success: false, message: EDITOR_REQUIRED, data: null };
 
   const env = await findEnv(projectId, envId);
   if (!env) return { success: false, message: 'Environment not found.', data: null };

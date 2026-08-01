@@ -5,7 +5,8 @@ import {
   signOut,
   verifyEmailOtp,
 } from '@/repositories/auth/authRepository';
-import { findRoleById } from '@/repositories/profiles/profileRepository';
+import { findProfileById, findRoleById } from '@/repositories/profiles/profileRepository';
+import { DEFAULT_ROLE } from '@/lib/rbac';
 import type { UserRole } from '@/types/common';
 
 // Service layer: business logic and use-case orchestration. Calls the
@@ -99,5 +100,27 @@ export const getCurrentRole = async (): Promise<UserRole | null> => {
   const user = await getAuthenticatedUser();
   if (!user) return null;
   const role = await findRoleById(user.id);
-  return (role as UserRole | null) ?? 'viewer';
+  return (role as UserRole | null) ?? DEFAULT_ROLE;
+};
+
+// Who is acting, for audit records: identity *and* role in one read, so a service
+// that both gates on a role and stamps a row (e.g. recording who ran a build)
+// doesn't resolve the session twice. The label is what a UI should display.
+export interface CurrentActor {
+  id: string;
+  email: string;
+  name: string;
+  role: UserRole;
+}
+
+export const getCurrentActor = async (): Promise<CurrentActor | null> => {
+  const user = await getAuthenticatedUser();
+  if (!user) return null;
+  const profile = await findProfileById(user.id);
+  return {
+    id: user.id,
+    email: user.email ?? '',
+    name: profile?.name ?? '',
+    role: (profile?.role as UserRole | null) ?? DEFAULT_ROLE,
+  };
 };

@@ -4,8 +4,9 @@ import { triggerJenkinsBuild } from '@/services/jenkins/jenkinsService';
 
 type Context = { params: Promise<{ id: string; envId: string }> };
 
-// POST — trigger a build of a job on this environment's Jenkins server
-// (editor/admin). Body: { jobUrl }. State-changing; guarded by a confirm in UI.
+// POST — trigger a build of a job on this environment's Jenkins server. Open to
+// any signed-in role, viewers included; the service records who started the run.
+// Body: { jobUrl }. State-changing; guarded by a confirm in UI.
 export async function POST(request: Request, context: Context) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
@@ -15,7 +16,7 @@ export async function POST(request: Request, context: Context) {
     const { jobUrl } = (await request.json().catch(() => ({}))) as { jobUrl?: string };
     const result = await triggerJenkinsBuild(id, envId, jobUrl ?? '');
     if (!result.success) {
-      const status = result.message === 'Editor access required.' ? 403 : 400;
+      const status = result.message.endsWith('access required.') ? 403 : 400;
       return NextResponse.json({ error: result.message }, { status });
     }
     // `data.queueUrl` is the handle the client polls to follow this run.

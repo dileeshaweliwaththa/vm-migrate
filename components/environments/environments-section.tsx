@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import {
   Container,
   ExternalLink,
+  History,
   ListChecks,
   Pencil,
   Play,
@@ -35,7 +36,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { JenkinsStatusBadge } from '@/components/environments/jenkins-status';
+import { JenkinsRunBadge, JenkinsStatusBadge } from '@/components/environments/jenkins-status';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -50,14 +51,21 @@ import {
 import { EnvironmentForm } from '@/components/environments/environment-form';
 import { JenkinsConfigDialog } from '@/components/environments/jenkins-config-dialog';
 import { JenkinsJobsDialog } from '@/components/environments/jenkins-jobs-dialog';
+import { JenkinsHistoryDialog } from '@/components/environments/jenkins-history-dialog';
 import { DockerImportDialog } from '@/components/environments/docker-import-dialog';
 
+// `canEdit` gates configuration (records, ports, credentials, deletes).
+// `canBuild` gates running a job and seeing its history — true for every
+// signed-in role, viewers included, because each run is recorded against the user
+// who started it (see lib/rbac.ts and docs/jenkins-sync.md).
 export function EnvironmentsSection({
   project,
   canEdit,
+  canBuild,
 }: {
   project: ProjectDetail;
   canEdit: boolean;
+  canBuild: boolean;
 }) {
   return (
     <section className="space-y-4">
@@ -82,7 +90,13 @@ export function EnvironmentsSection({
       ) : (
         <div className="space-y-4">
           {project.environments.map((env) => (
-            <EnvironmentCard key={env.id} projectId={project.id} env={env} canEdit={canEdit} />
+            <EnvironmentCard
+              key={env.id}
+              projectId={project.id}
+              env={env}
+              canEdit={canEdit}
+              canBuild={canBuild}
+            />
           ))}
         </div>
       )}
@@ -104,17 +118,25 @@ function LastBuild({ job }: { job?: JenkinsJobSummary }) {
 // A single record row: Port · Name · Domain · Status · Last build (+ Run/Delete).
 // Status and last build come live from Jenkins (matched by job URL); port, name,
 // and domain are editable inline so they can be filled in later.
+//
+// Run is a `canBuild` action (viewers included); Delete is `canEdit`. Whether the
+// actions column exists at all is the card's call — `showActions` — so the header
+// and the cells can't disagree about the column count.
 function PortRow({
   projectId,
   env,
   port,
   canEdit,
+  canBuild,
+  showActions,
   job,
 }: {
   projectId: string;
   env: Environment;
   port: EnvironmentPort;
   canEdit: boolean;
+  canBuild: boolean;
+  showActions: boolean;
   job?: JenkinsJobSummary;
 }) {
   const { updatePort, removePort } = useEnvironmentMutations(projectId);
@@ -138,43 +160,30 @@ function PortRow({
   // *this* build; otherwise fall back to the job list's last-known state.
   const liveStatus = (() => {
     // Optimistic: the trigger succeeded but the first poll hasn't landed yet.
-    if (queueUrl && !run) {
-      return <JenkinsStatusBadge status="PENDING" building={false} label="QUEUED" />;
-    }
+    if (queueUrl && !run) return <JenkinsRunBadge phase="QUEUED" result={null} />;
     if (!run) return null;
-    switch (run.phase) {
-      case 'QUEUED':
-        return (
-          <JenkinsStatusBadge
-            status="PENDING"
-            building={false}
-            label="QUEUED"
-            title={run.reason}
-          />
-        );
-      case 'RUNNING':
-        return (
-          <div className="space-y-0.5">
-            <JenkinsStatusBadge status="BUILDING" building />
-            <span className="block text-xs text-muted-foreground">
-              {run.buildUrl && run.buildNumber ? (
-                <a href={run.buildUrl} target="_blank" rel="noreferrer" className="hover:underline">
-                  #{run.buildNumber}
-                </a>
-              ) : null}
-              {run.progress !== null ? ` · ${run.progress}%` : null}
-            </span>
-          </div>
-        );
-      case 'DONE':
-        return <JenkinsStatusBadge status={run.result ?? 'UNKNOWN'} building={false} />;
-      case 'CANCELLED':
-        return <JenkinsStatusBadge status="ABORTED" building={false} label="CANCELLED" />;
-      // Jenkins no longer knows about the run (expired queue item) — fall back to
-      // the job list rather than showing a dead-end state.
-      case 'UNKNOWN':
-        return null;
+    // Jenkins no longer knows about the run (an expired queue item) — fall back to
+    // the job list rather than showing a dead-end state.
+    if (run.phase === 'UNKNOWN') return null;
+    // Only RUNNING carries more than a pill: the build number and progress.
+    if (run.phase === 'RUNNING') {
+      return (
+        <div className="space-y-0.5">
+          <JenkinsRunBadge phase="RUNNING" result={null} />
+          <span className="block text-xs text-muted-foreground">
+            {run.buildUrl && run.buildNumber ? (
+              <a href={run.buildUrl} target="_blank" rel="noreferrer" className="hover:underline">
+                #{run.buildNumber}
+              </a>
+            ) : null}
+            {run.progress !== null ? ` · ${run.progress}%` : null}
+          </span>
+        </div>
+      );
     }
+    return (
+      <JenkinsRunBadge phase={run.phase} result={run.result} title={run.reason || undefined} />
+    );
   })();
 
   const status =
@@ -247,10 +256,10 @@ function PortRow({
       <TableCell>
         <LastBuild job={job} />
       </TableCell>
-      {canEdit ? (
+      {showActions ? (
         <TableCell className="text-right">
           <div className="flex justify-end gap-1">
-            {port.jenkinsJobUrl ? (
+            {port.jenkinsJobUrl && canBuild ? (
               <Button
                 variant="ghost"
                 size="icon-sm"
@@ -273,14 +282,16 @@ function PortRow({
                 <Play className="h-4 w-4" />
               </Button>
             ) : null}
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Delete record"
-              onClick={() => removePort.mutate({ envId: env.id, portId: port.id }, { onError })}
-            >
-              <Trash2 className="h-4 w-4 text-destructive" />
-            </Button>
+            {canEdit ? (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Delete record"
+                onClick={() => removePort.mutate({ envId: env.id, portId: port.id }, { onError })}
+              >
+                <Trash2 className="h-4 w-4 text-destructive" />
+              </Button>
+            ) : null}
           </div>
         </TableCell>
       ) : null}
@@ -292,10 +303,12 @@ function EnvironmentCard({
   projectId,
   env,
   canEdit,
+  canBuild,
 }: {
   projectId: string;
   env: Environment;
   canEdit: boolean;
+  canBuild: boolean;
 }) {
   const { removeEnvironment, addPort, syncFromJenkins } = useEnvironmentMutations(projectId);
   const [port, setPort] = useState('');
@@ -304,6 +317,7 @@ function EnvironmentCard({
   const [jenkinsOpen, setJenkinsOpen] = useState(false);
   const [jobsOpen, setJobsOpen] = useState(false);
   const [dockerOpen, setDockerOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const isJenkins = env.cicdProvider === 'jenkins';
 
   // Live Jenkins status/last-build for records that link a job — one request per
@@ -325,6 +339,10 @@ function EnvironmentCard({
     for (const j of jenkinsJobs ?? []) map.set(j.url, j);
     return map;
   }, [jenkinsJobs]);
+
+  // An editor always has row actions (delete); a viewer only gets the column when
+  // there is actually something to run in it.
+  const showActions = canEdit || (canBuild && hasJenkinsRecords);
 
   const handleSyncJenkins = () => {
     syncFromJenkins.mutate(env.id, {
@@ -388,6 +406,28 @@ function EnvironmentCard({
             >
               Live <ExternalLink className="h-3 w-3" />
             </a>
+          ) : null}
+          {/* Outside the canEdit block: the trail of who ran what is for everyone
+              who can run a build, which now includes viewers. */}
+          {isJenkins && canBuild ? (
+            <>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Build history"
+                title="Build history"
+                onClick={() => setHistoryOpen(true)}
+              >
+                <History className="h-4 w-4" />
+              </Button>
+              <JenkinsHistoryDialog
+                projectId={projectId}
+                envId={env.id}
+                envName={env.name}
+                open={historyOpen}
+                onOpenChange={setHistoryOpen}
+              />
+            </>
           ) : null}
           {canEdit ? (
             <>
@@ -517,7 +557,7 @@ function EnvironmentCard({
               <TableHead>Domain</TableHead>
               <TableHead className="w-28">Status</TableHead>
               <TableHead className="w-40">Last build</TableHead>
-              {canEdit ? <TableHead className="w-20" /> : null}
+              {showActions ? <TableHead className="w-20" /> : null}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -528,12 +568,14 @@ function EnvironmentCard({
                 env={env}
                 port={p}
                 canEdit={canEdit}
+                canBuild={canBuild}
+                showActions={showActions}
                 job={p.jenkinsJobUrl ? jobByUrl.get(p.jenkinsJobUrl) : undefined}
               />
             ))}
             {env.ports.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={canEdit ? 6 : 5} className="text-center text-sm text-muted-foreground">
+                <TableCell colSpan={showActions ? 6 : 5} className="text-center text-sm text-muted-foreground">
                   No records yet.
                 </TableCell>
               </TableRow>

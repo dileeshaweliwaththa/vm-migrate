@@ -89,6 +89,29 @@ export interface JenkinsRunState {
   progress: number | null;
 }
 
+// One recorded run of a Jenkins job — the persisted history behind the
+// client-side `JenkinsRunState`. Every trigger writes one of these, so a build is
+// attributable and survives a reload. See docs/jenkins-sync.md.
+export interface EnvironmentBuildRun {
+  id: string;
+  environmentId: string;
+  // The record the build was started from, when it was started from one.
+  portId: string | null;
+  jobName: string;
+  jobUrl: string;
+  buildNumber: number | null;
+  buildUrl: string;
+  phase: JenkinsRunPhase;
+  result: JenkinsBuildStatus | null;
+  // The user id, for callers that need identity rather than a label.
+  triggeredBy: string | null;
+  // Who ran it, ready to render: name, else email, else "Unknown". Snapshotted at
+  // trigger time because `profiles` is not readable across users.
+  triggeredByLabel: string;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
 // A port/CI-CD hint extracted best-effort from a job's config (D3).
 export interface ExtractedPort {
   port: string;

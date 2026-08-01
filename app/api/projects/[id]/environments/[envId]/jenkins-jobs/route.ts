@@ -5,9 +5,11 @@ import { listJenkinsJobs } from '@/services/jenkins/jenkinsService';
 type Context = { params: Promise<{ id: string; envId: string }> };
 
 const statusFor = (message: string): number =>
-  message === 'Editor access required.' ? 403 : message === 'Environment not found.' ? 404 : 400;
+  message.endsWith('access required.') ? 403 : message === 'Environment not found.' ? 404 : 400;
 
 // GET — all jobs on this environment's Jenkins server, with status + last build.
+// Any signed-in role: this listing also feeds the Status / Last build columns of
+// the records table, which viewers see.
 export async function GET(_request: Request, context: Context) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });

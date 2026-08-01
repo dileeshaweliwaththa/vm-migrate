@@ -1,5 +1,5 @@
 import { getCurrentRole } from '@/services/auth/authService';
-import { canEdit, isAdmin } from '@/lib/rbac';
+import { canEdit, canRunBuild, isAdmin } from '@/lib/rbac';
 import { ProjectDetail } from '@/components/projects/project-detail';
 
 export default async function ProjectDetailPage({
@@ -10,5 +10,14 @@ export default async function ProjectDetailPage({
   const { id } = await params;
   const role = await getCurrentRole();
 
-  return <ProjectDetail projectId={id} canEdit={canEdit(role)} isAdmin={isAdmin(role)} />;
+  // canBuild is separate from canEdit: viewers may run builds and read the build
+  // history, but not change any configuration. See lib/rbac.ts.
+  return (
+    <ProjectDetail
+      projectId={id}
+      canEdit={canEdit(role)}
+      canBuild={canRunBuild(role)}
+      isAdmin={isAdmin(role)}
+    />
+  );
 }

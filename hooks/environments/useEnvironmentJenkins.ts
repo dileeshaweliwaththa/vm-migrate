@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { projectDetailKey } from '@/hooks/projects/useProjects';
 import { isTerminalRunPhase } from '@/types/common/jenkins';
 import type {
+  EnvironmentBuildRun,
   EnvironmentJenkinsConfig,
   EnvironmentJenkinsInput,
   JenkinsJobSummary,
@@ -28,6 +29,17 @@ const runKey = (projectId: string, envId: string, queueUrl: string) => [
 ];
 
 const jobsKey = (projectId: string, envId: string) => ['env-jenkins-jobs', projectId, envId];
+
+// Scoped by record (`portId`), with the environment-level prefix left intact so a
+// single invalidate refreshes every record's history at once.
+const runsKey = (projectId: string, envId: string, portId?: string | null) => [
+  'env-jenkins-runs',
+  projectId,
+  envId,
+  portId ?? 'all',
+];
+
+const runsScopeKey = (projectId: string, envId: string) => ['env-jenkins-runs', projectId, envId];
 
 // Polling cadence for a triggered run: fast while the queue pickup is the thing
 // you're waiting on, then backing off, because a flat 2s across a 20-minute build
@@ -122,10 +134,54 @@ export const useJenkinsJobs = (
     },
   });
 
+// Build history — who ran which job, and how it ended — read from our own table
+// rather than Jenkins. Pass `portId` for one record's runs (what the row-level
+// history shows), or null for the whole environment.
+//
+// Refreshes while it holds a run that hasn't finished, so a history panel opened
+// mid-build catches up on its own. Two bounds keep that from becoming a permanent
+// interval: it only runs while `enabled` (the panel is open), and a run older than
+// HISTORY_LIVE_WINDOW_MS no longer counts as live — a run whose poller died (the
+// tab was closed before it finished) would otherwise sit unfinished forever.
+const HISTORY_POLL_INTERVAL_MS = 10_000;
+const HISTORY_LIVE_WINDOW_MS = 60 * 60 * 1_000;
+
+export const useJenkinsBuildHistory = (
+  projectId: string,
+  envId: string,
+  portId: string | null,
+  enabled: boolean
+) =>
+  useQuery({
+    queryKey: runsKey(projectId, envId, portId),
+    enabled,
+    retry: false,
+    queryFn: async (): Promise<EnvironmentBuildRun[]> => {
+      const query = portId ? `?portId=${encodeURIComponent(portId)}` : '';
+      const res = await fetch(`${base(projectId, envId)}/jenkins-runs${query}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'Failed to load the build history.');
+      return (json.data ?? []) as EnvironmentBuildRun[];
+    },
+    refetchInterval: (q) => {
+      const runs = q.state.data ?? [];
+      const live = runs.some(
+        (r) =>
+          !isTerminalRunPhase(r.phase) &&
+          Date.now() - new Date(r.startedAt).getTime() < HISTORY_LIVE_WINDOW_MS
+      );
+      return live ? HISTORY_POLL_INTERVAL_MS : false;
+    },
+  });
+
 // Triggers a build of a job. Returns the server message plus the queue URL —
 // the handle `useJenkinsRun` follows to report this run's progress.
-export const useTriggerJenkinsBuild = (projectId: string, envId: string) =>
-  useMutation({
+//
+// Available to every role, viewers included; the server records who ran it, which
+// is why the history is invalidated here as well.
+export const useTriggerJenkinsBuild = (projectId: string, envId: string) => {
+  const qc = useQueryClient();
+  return useMutation({
     mutationFn: async (jobUrl: string): Promise<{ message: string; queueUrl: string }> => {
       const res = await fetch(`${base(projectId, envId)}/jenkins-build`, {
         method: 'POST',
@@ -137,7 +193,11 @@ export const useTriggerJenkinsBuild = (projectId: string, envId: string) =>
       const data = json.data as TriggerBuildResult | undefined;
       return { message: json.message ?? 'Build queued.', queueUrl: data?.queueUrl ?? '' };
     },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: runsScopeKey(projectId, envId) });
+    },
   });
+};
 
 // Follows one triggered run from queued through to its result.
 //
@@ -176,11 +236,13 @@ export const useJenkinsRun = (projectId: string, envId: string, queueUrl: string
   });
 
   // When the run finishes, refresh the job list and the project so the row's
-  // Status and Last build columns catch up to the result.
+  // Status and Last build columns catch up to the result — and the history, whose
+  // row the poll has just closed out with the build number and result.
   const phase = query.data?.phase;
   useEffect(() => {
     if (!phase || !isTerminalRunPhase(phase)) return;
     qc.invalidateQueries({ queryKey: jobsKey(projectId, envId) });
+    qc.invalidateQueries({ queryKey: runsScopeKey(projectId, envId) });
     qc.invalidateQueries({ queryKey: projectDetailKey(projectId) });
   }, [phase, projectId, envId, qc]);
 
