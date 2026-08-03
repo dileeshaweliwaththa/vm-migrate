@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/services/auth/authService';
+import { isForbidden } from '@/lib/errors';
 import { clearTrash } from '@/services/vms/vmService';
 import type { TrashType } from '@/types/common/vm';
 
@@ -25,7 +26,7 @@ export async function DELETE(request: NextRequest) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to clear trash.' },
-      { status: 500 }
+      { status: isForbidden(error) ? 403 : 500 }
     );
   }
 }

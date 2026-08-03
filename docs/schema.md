@@ -43,8 +43,15 @@ admin). See [phase-2-plan.md](./phase-2-plan.md) §2–§3.
 ## `vms`
 
 One row per virtual machine tracked through a migration. **Shared across all
-authenticated users** — this is an internal team tool, so RLS grants any
-signed-in user full access (not per-user ownership).
+authenticated users** — this is an internal team tool, so there is no per-user
+ownership: every signed-in user sees the same rows.
+
+RLS follows the same role split as the Phase 2 tables: read = any authenticated
+user (**viewers included, read-only**), insert/update = `editor`/`admin`,
+delete = `admin`. Delete is admin-only because the destructive tracker actions
+(purge, clear-trash, replace-all import) all bottom out in a row delete. The
+table originally shipped with full write access for any authenticated user;
+`…_restrict_vm_tracker_writes.sql` brought it under RBAC.
 
 | column             | type          | notes                                              |
 | ------------------ | ------------- | -------------------------------------------------- |
@@ -67,7 +74,13 @@ signed-in user full access (not per-user ownership).
 ## `vm_urls`
 
 Endpoints belonging to a VM (port + protocol + domain). Deleting a VM cascades
-to its URLs. Same shared-access RLS as `vms`.
+to its URLs (a cascade is not subject to RLS on this table, so an admin purge
+is never blocked by the policy below).
+
+RLS: read = any authenticated user; insert/update/**delete** =
+`editor`/`admin`. Delete sits at editor+ here, unlike `vms`, because removing a
+URL row is ordinary editing work — its VM-level equivalent (moving a VM to the
+trash) is an update an editor can already make.
 
 | column       | type          | notes                                    |
 | ------------ | ------------- | ---------------------------------------- |
@@ -248,9 +261,10 @@ In `supabase/migrations/`, applied in timestamp order:
 - `…_create_profiles_table.sql` — `profiles` table, RLS "read own profile"
   policy, the `handle_new_user` trigger, and a backfill from `auth.users`.
 - `…_create_vms_table.sql` — `vms` table, shared-access RLS, `set_updated_at`
-  trigger.
+  trigger. (RLS later tightened — see
+  `…_restrict_vm_tracker_writes.sql` below.)
 - `…_create_vm_urls_table.sql` — `vm_urls` table, FK to `vms` (cascade),
-  shared-access RLS, `set_updated_at` trigger.
+  shared-access RLS, `set_updated_at` trigger. (RLS later tightened, as above.)
 - `…_add_profiles_role.sql` — Phase 2 RBAC: `profiles.role`
   (`admin`/`editor`/`viewer`), the `current_user_role()` helper, and admin
   read/update policies on `profiles`.
@@ -288,6 +302,10 @@ In `supabase/migrations/`, applied in timestamp order:
 - `…_create_environment_build_runs.sql` — the `jenkins_run_phase` and
   `jenkins_build_status` enums plus `environment_build_runs`, the audit trail of
   triggered builds (insert/update restricted to the run's own user).
+- `…_restrict_vm_tracker_writes.sql` — replaces the Phase 1 "any authenticated
+  user has full access" policies on `vms` and `vm_urls` with the standard role
+  split, making the tracker **read-only for viewers**. See
+  [`vms`](#vms) and [`vm_urls`](#vm_urls).
 
 ## Deploying migrations
 

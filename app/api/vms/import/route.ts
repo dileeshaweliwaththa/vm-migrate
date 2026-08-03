@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/services/auth/authService';
+import { isForbidden } from '@/lib/errors';
 import { importTracker } from '@/services/vms/vmService';
 import type { TrackerData } from '@/types/common/vm';
 
@@ -23,7 +24,7 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to import data.' },
-      { status: 500 }
+      { status: isForbidden(error) ? 403 : 500 }
     );
   }
 }

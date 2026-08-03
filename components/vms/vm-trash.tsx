@@ -20,9 +20,22 @@ interface TrashSectionProps {
   onRestore: (id: string) => void;
   onPurge: (id: string) => void;
   onClearTrash: (type: TrashType) => void;
+  // Editor+ may restore; only an admin may permanently delete. A viewer sees the
+  // trash contents and no actions at all.
+  canWrite: boolean;
+  canPurge: boolean;
 }
 
-function TrashSection({ type, label, items, onRestore, onPurge, onClearTrash }: TrashSectionProps) {
+function TrashSection({
+  type,
+  label,
+  items,
+  onRestore,
+  onPurge,
+  onClearTrash,
+  canWrite,
+  canPurge,
+}: TrashSectionProps) {
   const [open, setOpen] = useState(false);
   if (items.length === 0) return null;
 
@@ -41,14 +54,16 @@ function TrashSection({ type, label, items, onRestore, onPurge, onClearTrash }: 
             {items.length}
           </span>
         </button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => onClearTrash(type)}
-          className="text-red-600 hover:text-red-700"
-        >
-          Clear all
-        </Button>
+        {canPurge ? (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onClearTrash(type)}
+            className="text-red-600 hover:text-red-700"
+          >
+            Clear all
+          </Button>
+        ) : null}
       </div>
       {open && (
         <Table>
@@ -78,17 +93,24 @@ function TrashSection({ type, label, items, onRestore, onPurge, onClearTrash }: 
                 <TableCell className="text-muted-foreground">{vm.notes || '—'}</TableCell>
                 <TableCell>
                   <div className="flex justify-end gap-2">
-                    <Button variant="outline" size="sm" onClick={() => onRestore(vm.id)}>
-                      <RotateCcw className="size-3.5" /> Restore
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => onPurge(vm.id)}
-                      className="text-red-600 hover:text-red-700"
-                    >
-                      <X className="size-3.5" /> Delete
-                    </Button>
+                    {canWrite ? (
+                      <Button variant="outline" size="sm" onClick={() => onRestore(vm.id)}>
+                        <RotateCcw className="size-3.5" /> Restore
+                      </Button>
+                    ) : null}
+                    {canPurge ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onPurge(vm.id)}
+                        className="text-red-600 hover:text-red-700"
+                      >
+                        <X className="size-3.5" /> Delete
+                      </Button>
+                    ) : null}
+                    {!canWrite && !canPurge ? (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    ) : null}
                   </div>
                 </TableCell>
               </TableRow>
@@ -105,11 +127,15 @@ export function VmTrash({
   onRestore,
   onPurge,
   onClearTrash,
+  canWrite,
+  canPurge,
 }: {
   deleted: Vm[];
   onRestore: (id: string) => void;
   onPurge: (id: string) => void;
   onClearTrash: (type: TrashType) => void;
+  canWrite: boolean;
+  canPurge: boolean;
 }) {
   const upview = deleted.filter((v) => !v.isClient);
   const client = deleted.filter((v) => v.isClient);
@@ -123,6 +149,8 @@ export function VmTrash({
         onRestore={onRestore}
         onPurge={onPurge}
         onClearTrash={onClearTrash}
+        canWrite={canWrite}
+        canPurge={canPurge}
       />
       <TrashSection
         type="client"
@@ -131,6 +159,8 @@ export function VmTrash({
         onRestore={onRestore}
         onPurge={onPurge}
         onClearTrash={onClearTrash}
+        canWrite={canWrite}
+        canPurge={canPurge}
       />
     </>
   );

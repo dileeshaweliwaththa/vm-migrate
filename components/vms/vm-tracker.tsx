@@ -13,6 +13,8 @@ import {
 } from '@/components/ui/table';
 import { PageHeader } from '@/components/layout/page-header';
 import { computeStats } from '@/lib/vm-utils';
+import { canEdit, isAdmin } from '@/lib/rbac';
+import type { UserRole } from '@/types/common';
 import type { TrackerData, Vm, VmUrl, TrashType } from '@/types/common/vm';
 import {
   useTrackerData,
@@ -54,7 +56,15 @@ const SECTIONS: { label: string; isClient: boolean }[] = [
   { label: '👤 Client VMs', isClient: true },
 ];
 
-export function VmTracker() {
+// The tracker is readable by every signed-in role. Editors and admins can edit
+// it; the irreversible actions — permanent delete, empty trash, and the
+// replace-all import — are admin-only. These flags only decide which controls
+// render: `vmService` re-checks the role and RLS enforces it in Postgres, so a
+// hidden button is convenience, never the boundary.
+export function VmTracker({ role }: { role: UserRole }) {
+  const canWrite = canEdit(role);
+  const canPurge = isAdmin(role);
+
   const { data: loaded, isLoading, error, refetch } = useTrackerData();
   const [data, setData] = useState<TrackerData | null>(null);
 
@@ -284,21 +294,30 @@ export function VmTracker() {
         }
         actions={
           <>
+            {/* Export is a read of data already on screen — open to viewers. */}
             <Button variant="outline" size="sm" onClick={handleExport}>
               <Download className="size-4" /> Export
             </Button>
-            <Button variant="outline" size="sm" onClick={handleImport}>
-              <Upload className="size-4" /> Import
-            </Button>
+            {canPurge ? (
+              <Button variant="outline" size="sm" onClick={handleImport}>
+                <Upload className="size-4" /> Import
+              </Button>
+            ) : null}
             <Button variant="outline" size="sm" onClick={() => setAllExpanded(true)}>
               Expand All
             </Button>
             <Button variant="outline" size="sm" onClick={() => setAllExpanded(false)}>
               Collapse All
             </Button>
-            <Button size="sm" onClick={handleAddVm}>
-              <Plus className="size-4" /> Add VM
-            </Button>
+            {canWrite ? (
+              <Button size="sm" onClick={handleAddVm}>
+                <Plus className="size-4" /> Add VM
+              </Button>
+            ) : (
+              <span className="rounded-full border border-border px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+                Read-only
+              </span>
+            )}
           </>
         }
       />
@@ -341,22 +360,25 @@ export function VmTracker() {
                         allVms={data.vms}
                         allDeleted={data.deleted}
                         h={handlers}
+                        canWrite={canWrite}
                       />
                     ))}
                   </Fragment>
                 );
               })}
-              <TableRow className="hover:bg-transparent">
-                <TableCell colSpan={TRACKER_COLUMNS} className="p-3">
-                  <button
-                    type="button"
-                    onClick={handleAddVm}
-                    className="w-full rounded-lg border-2 border-dashed border-primary/40 py-2.5 text-sm font-semibold text-primary hover:bg-primary/5"
-                  >
-                    + Add New VM
-                  </button>
-                </TableCell>
-              </TableRow>
+              {canWrite && (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell colSpan={TRACKER_COLUMNS} className="p-3">
+                    <button
+                      type="button"
+                      onClick={handleAddVm}
+                      className="w-full rounded-lg border-2 border-dashed border-primary/40 py-2.5 text-sm font-semibold text-primary hover:bg-primary/5"
+                    >
+                      + Add New VM
+                    </button>
+                  </TableCell>
+                </TableRow>
+              )}
             </TableBody>
           </Table>
         </div>
@@ -366,6 +388,8 @@ export function VmTracker() {
           onRestore={handleRestore}
           onPurge={handlePurge}
           onClearTrash={handleClearTrash}
+          canWrite={canWrite}
+          canPurge={canPurge}
         />
       </main>
     </div>

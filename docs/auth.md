@@ -71,16 +71,17 @@ and `environmentSecretRepository`. Each is reached only through a service that
 calls `requireAdmin()` or a `canEdit`/`canRunBuild` gate first — keep it that
 way when adding to them.
 
-Two deliberate asymmetries worth knowing:
+One deliberate asymmetry worth knowing: triggering a Jenkins build is open to
+viewers by design, because each run is attributed in `environment_build_runs`.
+Changing Jenkins *configuration* is editor+. Anything built from a
+client-supplied Jenkins URL goes through `isSameJenkinsServer` first, since those
+requests carry the environment's API token.
 
-- `vms` / `vm_urls` grant **write access to every signed-in role**, viewers
-  included (see [schema.md](./schema.md#vms)) — the tracker predates RBAC and is
-  intentionally shared. Neither the routes nor the tracker UI gate on role.
-- Triggering a Jenkins build is open to viewers by design; each run is attributed
-  in `environment_build_runs`. Changing Jenkins *configuration* is editor+.
-  Anything built from a client-supplied Jenkins URL goes through
-  `isSameJenkinsServer` first, because those requests carry the environment's
-  API token.
+The VM tracker is read-only for viewers, editor+ to edit, and admin-only for the
+irreversible actions — see [tracker.md](./tracker.md#permissions). It is the one
+place a service signals denial by *throwing* (`ForbiddenError` in
+`lib/errors.ts`) rather than returning an `ApiResponse`, because its service
+functions return bare domain types; routes map it to 403 with `isForbidden`.
 
 ## Extending this
 

@@ -31,19 +31,38 @@ export interface VmRowHandlers {
 }
 
 // A borderless, transparent cell editor composed from the shadcn Input.
+//
+// `readOnly` renders the value as plain text rather than a disabled input: a
+// viewer gets a clean grid instead of a form full of dead fields.
 function CellInput({
   value,
   onChange,
   onCommit,
   placeholder,
   className,
+  readOnly = false,
 }: {
   value: string;
   onChange: (v: string) => void;
   onCommit: (v: string) => void;
   placeholder?: string;
   className?: string;
+  readOnly?: boolean;
 }) {
+  if (readOnly) {
+    return (
+      <div
+        className={cn(
+          'flex h-7 items-center px-1 text-sm',
+          !value && 'text-muted-foreground/50',
+          className
+        )}
+      >
+        {value || '—'}
+      </div>
+    );
+  }
+
   return (
     <Input
       value={value}
@@ -167,12 +186,18 @@ export function VmRow({
   allVms,
   allDeleted,
   h,
+  canWrite,
 }: {
   vm: Vm;
   allVms: Vm[];
   allDeleted: Vm[];
   h: VmRowHandlers;
+  // Editor+ — false for a viewer, who sees the grid but no editing controls.
+  // Expand/collapse stays available either way: it is local view state, not data.
+  canWrite: boolean;
 }) {
+  const readOnly = !canWrite;
+
   return (
     <>
       {/* VM row */}
@@ -195,6 +220,7 @@ export function VmRow({
             onChange={(v) => h.onVmLocalChange(vm.id, { name: v })}
             onCommit={(v) => h.onVmCommit(vm.id, { name: v })}
             className="font-semibold"
+            readOnly={readOnly}
           />
         </TableCell>
         <TableCell className="py-1">
@@ -204,6 +230,7 @@ export function VmRow({
             onChange={(v) => h.onVmLocalChange(vm.id, { oldIp: v })}
             onCommit={(v) => h.onVmCommit(vm.id, { oldIp: v })}
             className="text-center text-amber-600 dark:text-amber-400"
+            readOnly={readOnly}
           />
         </TableCell>
         <TableCell className="py-1">
@@ -213,6 +240,7 @@ export function VmRow({
             onChange={(v) => h.onVmLocalChange(vm.id, { newIp: v })}
             onCommit={(v) => h.onVmCommit(vm.id, { newIp: v })}
             className="text-center text-emerald-600 dark:text-emerald-400"
+            readOnly={readOnly}
           />
         </TableCell>
         <TableCell className="text-center text-xs text-muted-foreground">
@@ -220,16 +248,25 @@ export function VmRow({
         </TableCell>
         <TableCell colSpan={5} />
         <TableCell className="text-center">
-          <YesNoToggle value={vm.migrated} onChange={(v) => h.onVmCommit(vm.id, { migrated: v })} />
+          <YesNoToggle
+            value={vm.migrated}
+            onChange={(v) => h.onVmCommit(vm.id, { migrated: v })}
+            readOnly={readOnly}
+          />
         </TableCell>
         <TableCell className="text-center">
           <YesNoToggle
             value={vm.isSupabase}
             onChange={(v) => h.onVmCommit(vm.id, { isSupabase: v })}
+            readOnly={readOnly}
           />
         </TableCell>
         <TableCell className="text-center">
-          <YesNoToggle value={vm.keep} onChange={(v) => h.onVmCommit(vm.id, { keep: v })} />
+          <YesNoToggle
+            value={vm.keep}
+            onChange={(v) => h.onVmCommit(vm.id, { keep: v })}
+            readOnly={readOnly}
+          />
         </TableCell>
         <TableCell className="text-center">
           <StatusPill vm={vm} />
@@ -241,44 +278,53 @@ export function VmRow({
             onChange={(v) => h.onVmLocalChange(vm.id, { notes: v })}
             onCommit={(v) => h.onVmCommit(vm.id, { notes: v })}
             className="text-muted-foreground"
+            readOnly={readOnly}
           />
         </TableCell>
         <TableCell>
-          <div className="flex items-center justify-center gap-1">
-            <button
-              type="button"
-              onClick={() => h.onAddUrl(vm.id)}
-              title="Add URL row"
-              className="inline-flex size-7 items-center justify-center rounded-md bg-emerald-600 text-white hover:bg-emerald-700"
-            >
-              <Plus className="size-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => h.onToggleClient(vm)}
-              title={
-                vm.isClient
-                  ? 'Client VM — click to move to UPVIEW'
-                  : 'UPVIEW VM — click to move to Client'
-              }
-              className={cn(
-                'inline-flex h-7 items-center justify-center rounded-md border px-2 text-xs font-bold',
-                vm.isClient
-                  ? 'border-purple-400 bg-purple-100 text-purple-700 dark:border-purple-700 dark:bg-purple-950/60 dark:text-purple-300'
-                  : 'border-sky-400 bg-sky-100 text-sky-700 dark:border-sky-700 dark:bg-sky-950/60 dark:text-sky-300'
-              )}
-            >
+          {canWrite ? (
+            <div className="flex items-center justify-center gap-1">
+              <button
+                type="button"
+                onClick={() => h.onAddUrl(vm.id)}
+                title="Add URL row"
+                className="inline-flex size-7 items-center justify-center rounded-md bg-emerald-600 text-white hover:bg-emerald-700"
+              >
+                <Plus className="size-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => h.onToggleClient(vm)}
+                title={
+                  vm.isClient
+                    ? 'Client VM — click to move to UPVIEW'
+                    : 'UPVIEW VM — click to move to Client'
+                }
+                className={cn(
+                  'inline-flex h-7 items-center justify-center rounded-md border px-2 text-xs font-bold',
+                  vm.isClient
+                    ? 'border-purple-400 bg-purple-100 text-purple-700 dark:border-purple-700 dark:bg-purple-950/60 dark:text-purple-300'
+                    : 'border-sky-400 bg-sky-100 text-sky-700 dark:border-sky-700 dark:bg-sky-950/60 dark:text-sky-300'
+                )}
+              >
+                {vm.isClient ? 'C' : 'UV'}
+              </button>
+              <button
+                type="button"
+                onClick={() => h.onTrash(vm.id)}
+                title="Delete VM"
+                className="inline-flex size-7 items-center justify-center rounded-md bg-muted text-muted-foreground hover:bg-red-100 hover:text-red-700 dark:hover:bg-red-950/60"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+          ) : (
+            // Keep the section badge readable at a glance even without the
+            // move-to-Client button that normally shows it.
+            <div className="text-center text-xs font-bold text-muted-foreground">
               {vm.isClient ? 'C' : 'UV'}
-            </button>
-            <button
-              type="button"
-              onClick={() => h.onTrash(vm.id)}
-              title="Delete VM"
-              className="inline-flex size-7 items-center justify-center rounded-md bg-muted text-muted-foreground hover:bg-red-100 hover:text-red-700 dark:hover:bg-red-950/60"
-            >
-              <X className="size-4" />
-            </button>
-          </div>
+            </div>
+          )}
         </TableCell>
       </TableRow>
 
@@ -301,24 +347,32 @@ export function VmRow({
                 onChange={(v) => h.onUrlLocalChange(vm.id, u.id, { port: v })}
                 onCommit={(v) => h.onUrlCommit(vm.id, u.id, { port: v })}
                 className="text-center font-semibold text-sky-600 dark:text-sky-400"
+                readOnly={readOnly}
               />
             </TableCell>
             <TableCell className="py-0.5">
-              <Select
-                value={u.proto}
-                onValueChange={(v) => h.onUrlCommit(vm.id, u.id, { proto: v as Protocol })}
-              >
-                <SelectTrigger size="sm" className="h-7 w-full border-0 bg-transparent shadow-none">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PROTOCOLS.map((p) => (
-                    <SelectItem key={p} value={p}>
-                      {p}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {canWrite ? (
+                <Select
+                  value={u.proto}
+                  onValueChange={(v) => h.onUrlCommit(vm.id, u.id, { proto: v as Protocol })}
+                >
+                  <SelectTrigger
+                    size="sm"
+                    className="h-7 w-full border-0 bg-transparent shadow-none"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PROTOCOLS.map((p) => (
+                      <SelectItem key={p} value={p}>
+                        {p}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <div className="flex h-7 items-center px-1 text-sm">{u.proto}</div>
+              )}
             </TableCell>
             <TableCell className="py-0.5">
               <CellInput
@@ -326,6 +380,7 @@ export function VmRow({
                 placeholder="https://example.com"
                 onChange={(v) => h.onUrlLocalChange(vm.id, u.id, { url: v })}
                 onCommit={(v) => h.onUrlCommit(vm.id, u.id, { url: v })}
+                readOnly={readOnly}
               />
             </TableCell>
             <TableCell className="text-xs font-medium">
@@ -334,12 +389,17 @@ export function VmRow({
               )}
             </TableCell>
             <TableCell className="text-center">
-              <YesNoToggle value={u.dns} onChange={(v) => h.onUrlCommit(vm.id, u.id, { dns: v })} />
+              <YesNoToggle
+                value={u.dns}
+                onChange={(v) => h.onUrlCommit(vm.id, u.id, { dns: v })}
+                readOnly={readOnly}
+              />
             </TableCell>
             <TableCell className="text-center">
               <YesNoToggle
                 value={u.tested}
                 onChange={(v) => h.onUrlCommit(vm.id, u.id, { tested: v })}
+                readOnly={readOnly}
               />
             </TableCell>
             <TableCell colSpan={4} />
@@ -350,23 +410,26 @@ export function VmRow({
                 onChange={(v) => h.onUrlLocalChange(vm.id, u.id, { notes: v })}
                 onCommit={(v) => h.onUrlCommit(vm.id, u.id, { notes: v })}
                 className="text-muted-foreground"
+                readOnly={readOnly}
               />
             </TableCell>
             <TableCell className="text-center">
-              <button
-                type="button"
-                onClick={() => h.onDeleteUrl(vm.id, u.id)}
-                title="Delete URL"
-                className="inline-flex size-6 items-center justify-center rounded-md text-red-600 hover:bg-red-100 dark:hover:bg-red-950/60"
-              >
-                <X className="size-3.5" />
-              </button>
+              {canWrite ? (
+                <button
+                  type="button"
+                  onClick={() => h.onDeleteUrl(vm.id, u.id)}
+                  title="Delete URL"
+                  className="inline-flex size-6 items-center justify-center rounded-md text-red-600 hover:bg-red-100 dark:hover:bg-red-950/60"
+                >
+                  <X className="size-3.5" />
+                </button>
+              ) : null}
             </TableCell>
           </TableRow>
         ))}
 
       {/* Inline add-URL row */}
-      {vm.expanded && (
+      {vm.expanded && canWrite && (
         <TableRow className="hover:bg-transparent">
           <TableCell className="w-9 bg-primary/60" />
           <TableCell colSpan={TRACKER_COLUMNS - 1} className="py-1 pl-5">

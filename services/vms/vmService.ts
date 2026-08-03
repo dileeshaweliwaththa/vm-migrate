@@ -14,6 +14,9 @@ import {
   countUrlsForVm,
   type VmUrlWriteColumns,
 } from '@/repositories/vmUrls/vmUrlRepository';
+import { getCurrentRole } from '@/services/auth/authService';
+import { canEdit, isAdmin } from '@/lib/rbac';
+import { ForbiddenError } from '@/lib/errors';
 import type { VmRow } from '@/types/supabase/response/vms';
 import type { VmUrlRow } from '@/types/supabase/response/vmUrls';
 import type {
@@ -29,6 +32,29 @@ import type {
 // Service layer: business logic and orchestration for the VM tracker. Calls
 // repositories, maps raw rows into domain types, and owns all the rules
 // (soft delete, restore, purge-with-archive). No React dependency.
+
+// ---- authorization ---------------------------------------------------------
+
+// Reading is open to every signed-in role; writing is not. Editors and admins
+// may create, edit, trash and restore, while the irreversible operations —
+// purge, clear-trash, and the replace-all import — are admin-only.
+//
+// Role-based RLS on `vms`/`vm_urls` enforces the same split in Postgres and is
+// authoritative. These checks exist so a denied action fails as a clean 403
+// instead of surfacing a raw policy-violation error, and so the rule is stated
+// where the rest of the tracker's rules live.
+
+const requireEditor = async (action: string): Promise<void> => {
+  if (!canEdit(await getCurrentRole())) {
+    throw new ForbiddenError(`Editor access required to ${action}.`);
+  }
+};
+
+const requireAdmin = async (action: string): Promise<void> => {
+  if (!isAdmin(await getCurrentRole())) {
+    throw new ForbiddenError(`Admin access required to ${action}.`);
+  }
+};
 
 // ---- row -> domain mappers -------------------------------------------------
 
@@ -113,21 +139,25 @@ export const getTrackerData = async (): Promise<TrackerData> => {
 // ---- VM mutations ----------------------------------------------------------
 
 export const createVm = async (input: VmInput): Promise<Vm> => {
+  await requireEditor('add a VM');
   const row = await insertVm(vmInputToColumns(input));
   return rowToVm(row, []);
 };
 
 export const updateVm = async (id: string, input: VmInput): Promise<Vm> => {
+  await requireEditor('edit a VM');
   const row = await updateVmRow(id, vmInputToColumns(input));
   const urlRows = await findUrlsByVmIds([id]);
   return rowToVm(row, urlRows.map(rowToUrl));
 };
 
 export const trashVm = async (id: string): Promise<void> => {
+  await requireEditor('delete a VM');
   await updateVmRow(id, { deleted: true, deleted_at: new Date().toISOString() });
 };
 
 export const restoreVm = async (id: string): Promise<void> => {
+  await requireEditor('restore a VM');
   await updateVmRow(id, { deleted: false, deleted_at: null });
 };
 
@@ -136,6 +166,8 @@ export const restoreVm = async (id: string): Promise<void> => {
 // prefer the "primary" VM for that IP (old_ip === new_ip = the destination
 // server itself), else any other active VM sharing the new IP.
 export const purgeVm = async (id: string): Promise<void> => {
+  await requireAdmin('permanently delete a VM');
+
   const target = await findVmById(id);
   if (!target) return;
 
@@ -145,6 +177,8 @@ export const purgeVm = async (id: string): Promise<void> => {
 };
 
 export const clearTrash = async (type: TrashType): Promise<void> => {
+  await requireAdmin('empty the trash');
+
   const rows = await findAllVms();
   const trashed = rows.filter(
     (r) => r.deleted && (type === 'client' ? r.is_client : !r.is_client)
@@ -198,6 +232,7 @@ const archiveMigratedUrls = async (source: Vm): Promise<void> => {
 // ---- URL mutations ---------------------------------------------------------
 
 export const addUrl = async (vmId: string, input: VmUrlInput): Promise<VmUrl> => {
+  await requireEditor('add a URL');
   const position = await countUrlsForVm(vmId);
   const row = await insertUrl({ ...urlInputToColumns(input), vm_id: vmId, position });
   // Keep the VM expanded so the freshly added row is visible (parity with the
@@ -207,11 +242,13 @@ export const addUrl = async (vmId: string, input: VmUrlInput): Promise<VmUrl> =>
 };
 
 export const updateUrl = async (urlId: string, input: VmUrlInput): Promise<VmUrl> => {
+  await requireEditor('edit a URL');
   const row = await updateUrlRow(urlId, urlInputToColumns(input));
   return rowToUrl(row);
 };
 
 export const deleteUrl = async (urlId: string): Promise<void> => {
+  await requireEditor('delete a URL');
   await deleteUrlRow(urlId);
 };
 
@@ -221,6 +258,8 @@ export const deleteUrl = async (urlId: string): Promise<void> => {
 // with the uploaded backup. Wipes every VM (URLs cascade) then recreates the
 // active and trashed VMs, each with their URLs, from the payload.
 export const importTracker = async (payload: TrackerData): Promise<void> => {
+  await requireAdmin('import tracker data');
+
   const existing = await findAllVms();
   for (const row of existing) {
     await deleteVmRow(row.id);

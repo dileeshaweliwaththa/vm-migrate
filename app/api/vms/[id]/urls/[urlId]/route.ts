@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/services/auth/authService';
+import { isForbidden } from '@/lib/errors';
 import { updateUrl, deleteUrl } from '@/services/vms/vmService';
 import type { VmUrlInput } from '@/types/common/vm';
 
@@ -20,7 +21,7 @@ export async function PATCH(request: Request, context: Context) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to update URL.' },
-      { status: 500 }
+      { status: isForbidden(error) ? 403 : 500 }
     );
   }
 }
@@ -39,7 +40,7 @@ export async function DELETE(_request: Request, context: Context) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to delete URL.' },
-      { status: 500 }
+      { status: isForbidden(error) ? 403 : 500 }
     );
   }
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/services/auth/authService';
+import { isForbidden } from '@/lib/errors';
 import { getTrackerData, createVm } from '@/services/vms/vmService';
 import type { VmInput } from '@/types/common/vm';
 
@@ -35,7 +36,7 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to create VM.' },
-      { status: 500 }
+      { status: isForbidden(error) ? 403 : 500 }
     );
   }
 }

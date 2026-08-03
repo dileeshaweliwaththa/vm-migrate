@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/services/auth/authService';
+import { isForbidden } from '@/lib/errors';
 import { addUrl } from '@/services/vms/vmService';
 import type { VmUrlInput } from '@/types/common/vm';
 
@@ -20,7 +21,7 @@ export async function POST(request: Request, context: Context) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to add URL.' },
-      { status: 500 }
+      { status: isForbidden(error) ? 403 : 500 }
     );
   }
 }
