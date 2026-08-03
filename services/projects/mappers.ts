@@ -33,6 +33,7 @@ export const rowToPort = (row: EnvironmentPortRow): EnvironmentPort => ({
   id: row.id,
   environmentId: row.environment_id,
   port: row.port,
+  branch: row.branch ?? '',
   protocol: row.protocol as Protocol,
   description: row.description,
   domain: row.domain ?? '',

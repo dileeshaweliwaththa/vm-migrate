@@ -9,7 +9,13 @@ import { tiptapExtensions } from '@/lib/tiptap/extensions';
 import { interpretGeminiError } from '@/services/ai/errors';
 import type { ApiSingleResponse } from '@/types/common';
 import { recordUrl } from '@/lib/endpoints';
-import type { EnvironmentPort, PortSource, ProjectDetail } from '@/types/common/project';
+import type {
+  CicdProvider,
+  EnvironmentPort,
+  PortSource,
+  ProjectDetail,
+} from '@/types/common/project';
+import { providerHasBranch } from '@/types/common/project';
 import type { GeminiStatus } from '@/types/common/ai';
 
 // Service layer: AI documentation generation (Gemini). Reads the key server-side
@@ -61,11 +67,17 @@ const SOURCE_LABEL: Record<PortSource, string> = {
 // One record (endpoint) as a labelled line. Every field the record carries is
 // spelled out — the model can only write about what it's given, and the domain in
 // particular is the answer to "where does this environment actually live".
-const recordLine = (record: EnvironmentPort): string => {
+const recordLine = (record: EnvironmentPort, provider: CicdProvider): string => {
   const parts: string[] = [];
-  // A record added from Jenkins or docker may not have its port filled in yet.
-  // Say so explicitly rather than emitting an empty value the model will guess at.
-  parts.push(record.port ? `port ${record.port}` : 'port NOT RECORDED YET');
+  // On a managed platform a record is a *branch*, not a host port — demanding a
+  // port there would report a missing value that by definition doesn't exist.
+  if (providerHasBranch(provider)) {
+    parts.push(record.branch ? `branch ${record.branch}` : 'branch NOT RECORDED YET');
+  } else {
+    // A record added from Jenkins or docker may not have its port filled in yet.
+    // Say so explicitly rather than emitting an empty value the model will guess at.
+    parts.push(record.port ? `port ${record.port}` : 'port NOT RECORDED YET');
+  }
   parts.push(`protocol ${record.protocol}`);
   parts.push(record.domain ? `domain ${record.domain}` : 'domain NOT RECORDED YET');
   if (record.description) parts.push(`name "${record.description}"`);
@@ -109,7 +121,7 @@ const buildProjectContext = (project: ProjectDetail): string => {
       continue;
     }
     lines.push(`    records for ${env.name} (${env.ports.length}):`);
-    for (const record of env.ports) lines.push(recordLine(record));
+    for (const record of env.ports) lines.push(recordLine(record, env.cicdProvider));
   }
 
   return lines.join('\n');

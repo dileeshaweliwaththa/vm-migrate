@@ -17,6 +17,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import type { Environment, EnvironmentPort, ProjectDetail } from '@/types/common/project';
+import { providerHasBranch, providerHasPorts } from '@/types/common/project';
 import type { JenkinsJobSummary } from '@/types/common/jenkins';
 import { useEnvironmentMutations } from '@/hooks/environments/useEnvironments';
 import {
@@ -129,6 +130,9 @@ function PortRow({
   canEdit,
   canBuild,
   showActions,
+  showBuildColumns,
+  showPort,
+  showBranch,
   job,
 }: {
   projectId: string;
@@ -137,11 +141,17 @@ function PortRow({
   canEdit: boolean;
   canBuild: boolean;
   showActions: boolean;
+  // Which columns this provider warrants; see the card for why. Jenkins-only for
+  // the build pair, port-bearing providers only for Port.
+  showBuildColumns: boolean;
+  showPort: boolean;
+  showBranch: boolean;
   job?: JenkinsJobSummary;
 }) {
   const { updatePort, removePort } = useEnvironmentMutations(projectId);
   const trigger = useTriggerJenkinsBuild(projectId, env.id);
   const [portVal, setPortVal] = useState(port.port);
+  const [branchVal, setBranchVal] = useState(port.branch);
   const [descVal, setDescVal] = useState(port.description);
   const [domainVal, setDomainVal] = useState(port.domain);
   // Set when this row triggers a build; drives the run poll below.
@@ -237,26 +247,50 @@ function PortRow({
 
   return (
     <TableRow>
-      <TableCell>
-        {canEdit ? (
-          <Input
-            value={portVal}
-            onChange={(e) => setPortVal(e.target.value)}
-            onBlur={() => portVal !== port.port && save({ port: portVal })}
-            onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-            placeholder="port"
-            className="h-8 w-20 font-mono"
-          />
-        ) : (
-          <span className="font-mono">{port.port || '—'}</span>
-        )}
-      </TableCell>
+      {showPort ? (
+        <TableCell>
+          {canEdit ? (
+            <Input
+              value={portVal}
+              onChange={(e) => setPortVal(e.target.value)}
+              onBlur={() => portVal !== port.port && save({ port: portVal })}
+              onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+              placeholder="port"
+              className="h-8 w-20 font-mono"
+            />
+          ) : (
+            <span className="font-mono">{port.port || '—'}</span>
+          )}
+        </TableCell>
+      ) : null}
+      {/* Takes Port's place on a managed platform: what identifies the record
+          there is the branch that gets deployed. */}
+      {showBranch ? (
+        <TableCell>
+          {canEdit ? (
+            <Input
+              value={branchVal}
+              onChange={(e) => setBranchVal(e.target.value)}
+              onBlur={() => branchVal !== port.branch && save({ branch: branchVal })}
+              onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+              placeholder="main"
+              className="h-8 font-mono"
+            />
+          ) : (
+            <span className="font-mono">{port.branch || '—'}</span>
+          )}
+        </TableCell>
+      ) : null}
       <TableCell>{nameCell}</TableCell>
       <TableCell>{domainCell}</TableCell>
-      <TableCell>{status}</TableCell>
-      <TableCell>
-        <LastBuild job={job} />
-      </TableCell>
+      {showBuildColumns ? (
+        <>
+          <TableCell>{status}</TableCell>
+          <TableCell>
+            <LastBuild job={job} />
+          </TableCell>
+        </>
+      ) : null}
       {showActions ? (
         <TableCell className="text-right">
           <div className="flex justify-end gap-1">
@@ -336,6 +370,7 @@ function EnvironmentCard({
 }) {
   const { removeEnvironment, addPort, syncFromJenkins } = useEnvironmentMutations(projectId);
   const [port, setPort] = useState('');
+  const [branch, setBranch] = useState('');
   const [description, setDescription] = useState('');
   const [domain, setDomain] = useState('');
   const [jenkinsOpen, setJenkinsOpen] = useState(false);
@@ -350,7 +385,10 @@ function EnvironmentCard({
   // started by someone else, or straight from Jenkins, still shows up. It has to
   // be time-based: nothing tells us a foreign build began. Builds triggered from
   // *this* row are followed precisely by useJenkinsRun instead.
-  const hasJenkinsRecords = env.ports.some((p) => p.jenkinsJobUrl);
+  //
+  // Only for Jenkins environments: a record that kept a job URL after the provider
+  // was switched away shouldn't keep polling a server this card no longer uses.
+  const hasJenkinsRecords = isJenkins && env.ports.some((p) => p.jenkinsJobUrl);
   const { data: jenkinsJobs } = useJenkinsJobs(
     projectId,
     env.id,
@@ -367,6 +405,24 @@ function EnvironmentCard({
   // there is actually something to run in it.
   const showActions = canEdit || (canBuild && hasJenkinsRecords);
 
+  // Which columns this provider actually warrants:
+  //
+  // - Status / Last build are Jenkins concepts, read from a job's colour and its
+  //   last build. Nothing else has a job to read them from.
+  // - Port where the provider deploys onto a host port, Branch where it deploys a
+  //   *branch* instead (Amplify/AWS/Azure). Exactly one of the two, never both —
+  //   see providerHasPorts / providerHasBranch.
+  //
+  // All three are column-count inputs, so they're computed once here and passed
+  // down rather than re-derived per row, where header and body could drift apart.
+  const showBuildColumns = isJenkins;
+  const showPort = providerHasPorts(env.cicdProvider);
+  const showBranch = providerHasBranch(env.cicdProvider);
+
+  // Name · Domain are always there; Port/Branch is one leading column either way.
+  const leadingColumns = (showPort ? 1 : 0) + (showBranch ? 1 : 0) + 2;
+  const columnCount = leadingColumns + (showBuildColumns ? 2 : 0) + (showActions ? 1 : 0);
+
   const handleSyncJenkins = () => {
     syncFromJenkins.mutate(env.id, {
       onSuccess: (r) => toast.success(r.message),
@@ -374,16 +430,28 @@ function EnvironmentCard({
     });
   };
 
+  // A new record needs its identifying field filled in — the same leading column
+  // the table shows: a port where there are ports, a branch where there aren't.
+  const canAddRecord = showPort ? Boolean(port.trim()) : Boolean(branch.trim());
+
   const handleAddPort = () => {
-    if (!port.trim()) return;
+    if (!canAddRecord) return;
     addPort.mutate(
       {
         envId: env.id,
-        input: { port, protocol: 'HTTPS', description, domain, position: env.ports.length },
+        input: {
+          port: showPort ? port : '',
+          branch: showBranch ? branch : '',
+          protocol: 'HTTPS',
+          description,
+          domain,
+          position: env.ports.length,
+        },
       },
       {
         onSuccess: () => {
           setPort('');
+          setBranch('');
           setDescription('');
           setDomain('');
         },
@@ -486,25 +554,32 @@ function EnvironmentCard({
                   ) : null}
                 </>
               ) : null}
-              {/* Not Jenkins-specific — any environment can have records imported
-                  from a `docker ps` paste, so this sits outside the isJenkins block. */}
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Import records from docker ps"
-                title="Import from docker ps"
-                onClick={() => setDockerOpen(true)}
-              >
-                <Container className="h-4 w-4" />
-              </Button>
-              <DockerImportDialog
-                projectId={projectId}
-                envId={env.id}
-                envName={env.name}
-                portCount={env.ports.length}
-                open={dockerOpen}
-                onOpenChange={setDockerOpen}
-              />
+              {/* Not Jenkins-specific — any *port-bearing* environment can have
+                  records imported from a `docker ps` paste, so this sits outside
+                  the isJenkins block. It is hidden for the managed providers:
+                  `docker ps` is nothing but host ports, which those records don't
+                  have a column for. */}
+              {showPort ? (
+                <>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Import records from docker ps"
+                    title="Import from docker ps"
+                    onClick={() => setDockerOpen(true)}
+                  >
+                    <Container className="h-4 w-4" />
+                  </Button>
+                  <DockerImportDialog
+                    projectId={projectId}
+                    envId={env.id}
+                    envName={env.name}
+                    portCount={env.ports.length}
+                    open={dockerOpen}
+                    onOpenChange={setDockerOpen}
+                  />
+                </>
+              ) : null}
               <EnvironmentForm
                 projectId={projectId}
                 environment={env}
@@ -547,17 +622,24 @@ function EnvironmentCard({
         </div>
       </div>
 
-      {/* Five columns don't fit on a narrow viewport, so the table scrolls inside
-          its own card rather than making the page scroll sideways. */}
+      {/* A full Jenkins card doesn't fit on a narrow viewport, so the table scrolls
+          inside its own card rather than making the page scroll sideways. Without
+          the build columns it's four columns wide and needs far less room — the
+          same floor would force a pointless sideways scroll. */}
       <div className="overflow-x-auto px-4 py-3">
-        <Table className="min-w-[48rem]">
+        <Table className={showBuildColumns ? 'min-w-[48rem]' : 'min-w-[32rem]'}>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-24">Port</TableHead>
+              {showPort ? <TableHead className="w-24">Port</TableHead> : null}
+              {showBranch ? <TableHead className="w-40">Branch</TableHead> : null}
               <TableHead className="w-[22%]">Name</TableHead>
               <TableHead>Domain</TableHead>
-              <TableHead className="w-28">Status</TableHead>
-              <TableHead className="w-40">Last build</TableHead>
+              {showBuildColumns ? (
+                <>
+                  <TableHead className="w-28">Status</TableHead>
+                  <TableHead className="w-40">Last build</TableHead>
+                </>
+              ) : null}
               {/* Room for up to three actions: Run · History · Delete. */}
               {showActions ? <TableHead className="w-32" /> : null}
             </TableRow>
@@ -572,26 +654,42 @@ function EnvironmentCard({
                 canEdit={canEdit}
                 canBuild={canBuild}
                 showActions={showActions}
+                showBuildColumns={showBuildColumns}
+                showPort={showPort}
+                showBranch={showBranch}
                 job={p.jenkinsJobUrl ? jobByUrl.get(p.jenkinsJobUrl) : undefined}
               />
             ))}
             {env.ports.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={showActions ? 6 : 5} className="text-center text-sm text-muted-foreground">
+                <TableCell colSpan={columnCount} className="text-center text-sm text-muted-foreground">
                   No records yet.
                 </TableCell>
               </TableRow>
             ) : null}
             {canEdit ? (
               <TableRow>
-                <TableCell>
-                  <Input
-                    value={port}
-                    onChange={(e) => setPort(e.target.value)}
-                    placeholder="3000"
-                    className="h-8 w-20 font-mono"
-                  />
-                </TableCell>
+                {showPort ? (
+                  <TableCell>
+                    <Input
+                      value={port}
+                      onChange={(e) => setPort(e.target.value)}
+                      placeholder="3000"
+                      className="h-8 w-20 font-mono"
+                    />
+                  </TableCell>
+                ) : null}
+                {showBranch ? (
+                  <TableCell>
+                    <Input
+                      value={branch}
+                      onChange={(e) => setBranch(e.target.value)}
+                      placeholder="main"
+                      className="h-8 font-mono"
+                      onKeyDown={(e) => e.key === 'Enter' && handleAddPort()}
+                    />
+                  </TableCell>
+                ) : null}
                 <TableCell>
                   <Input
                     value={description}
@@ -610,8 +708,15 @@ function EnvironmentCard({
                     onKeyDown={(e) => e.key === 'Enter' && handleAddPort()}
                   />
                 </TableCell>
-                <TableCell colSpan={3}>
-                  <Button size="sm" variant="outline" onClick={handleAddPort} disabled={!port.trim()}>
+                {/* Everything after the input cells. Never zero: this row is
+                    editors-only, and an editor always has the actions column. */}
+                <TableCell colSpan={columnCount - leadingColumns}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleAddPort}
+                    disabled={!canAddRecord}
+                  >
                     <Plus className="mr-1 h-4 w-4" /> Add
                   </Button>
                 </TableCell>

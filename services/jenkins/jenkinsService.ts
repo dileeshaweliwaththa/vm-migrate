@@ -99,6 +99,40 @@ const deriveBase = (jobUrl: string): string => {
   return idx > -1 ? trimmed.slice(0, idx) : trimmed;
 };
 
+// Is `candidate` a URL on the *same* Jenkins server as `base` — same origin, at
+// or below its context path? Every request built from a client-supplied URL
+// carries this environment's Basic-auth token, so this is the guard that keeps
+// the token from being sent anywhere else.
+//
+// A plain `candidate.startsWith(base)` is not enough: with a base of
+// `https://jenkins.corp` the URL `https://jenkins.corp.attacker.test/job/x`
+// passes it, and the token would be handed to that host. Compare parsed origins
+// instead, which also pins the scheme and port.
+const isSameJenkinsServer = (candidate: string | undefined, base: string): boolean => {
+  if (!candidate || !base) return false;
+
+  let target: URL;
+  let root: URL;
+  try {
+    target = new URL(candidate);
+    root = new URL(base);
+  } catch {
+    return false; // not an absolute URL
+  }
+
+  if (target.protocol !== 'http:' && target.protocol !== 'https:') return false;
+  // `URL.origin` ignores userinfo, so reject it explicitly rather than let a
+  // `https://user:pass@host/` form through.
+  if (target.username || target.password) return false;
+  if (target.origin !== root.origin) return false;
+
+  // Honour a context path (e.g. https://host/jenkins): the target must sit at or
+  // under it, with a boundary check so `/jenkinsX` can't pass as `/jenkins`.
+  const rootPath = root.pathname.replace(/\/+$/, '');
+  const targetPath = target.pathname.replace(/\/+$/, '');
+  return targetPath === rootPath || targetPath.startsWith(`${rootPath}/`);
+};
+
 const RESULT_MAP: Record<string, JenkinsBuildStatus> = {
   SUCCESS: 'SUCCESS',
   FAILURE: 'FAILED',
@@ -392,7 +426,7 @@ export const triggerJenkinsBuild = async (
     if (!resolved.ok) return { success: false, message: resolved.message, data: null };
 
     const { env, auth, base } = resolved.value;
-    if (!jobUrl || !jobUrl.startsWith(base)) {
+    if (!isSameJenkinsServer(jobUrl, base)) {
       return {
         success: false,
         message: 'That job URL doesn’t belong to this Jenkins server.',
@@ -538,7 +572,7 @@ export const getJenkinsRunState = async (
     // The URLs arrive from the client, so both are checked against this
     // environment's own Jenkins root before any request is made with the token
     // attached — otherwise this endpoint would fetch arbitrary URLs on request.
-    const belongs = (url?: string): boolean => Boolean(url && url.startsWith(base));
+    const belongs = (url?: string): boolean => isSameJenkinsServer(url, base);
 
     // Every successful poll below also lands on the run's history row, so a
     // record ends with the build number and result it actually reached.
@@ -644,7 +678,7 @@ export const linkJenkinsJob = async (
   if (!env) return { success: false, message: 'Environment not found.', data: null };
 
   const base = deriveBase(env.jenkinsUrl);
-  if (!base || !jobUrl.startsWith(base)) {
+  if (!isSameJenkinsServer(jobUrl, base)) {
     return { success: false, message: 'That job URL doesn’t belong to this Jenkins server.', data: null };
   }
 

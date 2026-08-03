@@ -72,10 +72,56 @@ On a project page, each environment whose CI/CD provider is **Jenkins** shows
    and the live Status / Last build columns are visible to **any** signed-in
    role; inline editing and delete stay editor+. A viewer's row therefore shows
    the actions column only when there is a job to run in it.
+
+   **Status and Last build only exist on Jenkins cards.** They're read from a
+   job's colour and its last build, and no other provider has a job to read them
+   from, so those cards skip the two columns rather than showing permanent dashes.
+   The job-list poll is gated on the same condition, so a record that kept a stale
+   job URL after the provider was switched away stops polling a server the card no
+   longer uses. Which columns each provider gets is set out under
+   [Records by provider](#records-by-provider).
 5. **Build history** (🕘 per record, any signed-in role) — that record's own runs,
    newest first: build number, status, **who started it**, when, and how long it
    took. It sits next to ▶ Run because they are the same unit of work: one record,
    one job, one history.
+
+## Records by provider
+
+The records table isn't one fixed shape — a record means something different per
+provider, so the columns follow the provider:
+
+| Provider              | Columns                                        | Docker import |
+| --------------------- | ---------------------------------------------- | ------------- |
+| `jenkins`             | Port · Name · Domain · Status · Last build     | yes           |
+| `other` / `none`      | Port · Name · Domain                           | yes           |
+| `aws` / `azure` / `amplify` | **Branch** · Name · Domain               | no            |
+
+**Port and Branch are alternatives, never both.** A managed platform doesn't
+deploy a port on a host — an Amplify deployment is a *branch*, AWS/Azure ones are
+services behind their own endpoints — so the leading column there is the branch
+that gets deployed (`environment_ports.branch`), and `docker ps`, which is nothing
+but host-port mappings, has nothing to import into it. `other`/`none` keep ports:
+those are the hand-tracked, VM-hosted records the docker import was built for.
+
+The set lives in one place — `PORTLESS_PROVIDERS`, with `providerHasPorts` /
+`providerHasBranch`, in [`types/common/project.ts`](../types/common/project.ts)
+beside `CICD_PROVIDERS` — so no component re-lists provider names (AGENTS.md
+§types). Both the record rows and the Add row follow it, including what makes
+**Add** clickable: the leading column is the record's identity, so it's the port
+where there are ports and the branch where there aren't.
+
+The AI docs generator reads the same rule, so a generated doc describes a
+managed-platform record by its branch instead of reporting a `port NOT RECORDED
+YET` for a record that by definition has none (`recordLine` in
+`services/ai/aiService.ts`).
+
+Two consequences worth knowing:
+
+- **Column count is computed once per card**, not per row, so the header and the
+  body can't disagree about how many cells a row has.
+- **Switching a provider only changes which column is shown.** `port` and `branch`
+  both exist on every row, so a value hidden by a provider switch is still there
+  and reappears if the provider is switched back — nothing is deleted.
 
 ## Build history
 

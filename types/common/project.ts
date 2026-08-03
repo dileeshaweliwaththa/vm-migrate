@@ -6,6 +6,21 @@ import type { Protocol } from '@/types/common/vm';
 export const CICD_PROVIDERS = ['jenkins', 'aws', 'azure', 'amplify', 'other', 'none'] as const;
 export type CicdProvider = (typeof CICD_PROVIDERS)[number];
 
+// Managed platforms don't deploy *a port on a host* — an Amplify deployment is a
+// branch, AWS/Azure ones are services behind their own endpoints. A record there
+// is a name + domain, so the Port column (and the `docker ps` import, which is
+// nothing but host ports) doesn't apply. `other` and `none` keep ports: those are
+// the hand-tracked, VM-hosted records.
+export const PORTLESS_PROVIDERS: readonly CicdProvider[] = ['aws', 'azure', 'amplify'];
+
+export const providerHasPorts = (provider: CicdProvider): boolean =>
+  !PORTLESS_PROVIDERS.includes(provider);
+
+// The flip side: what a managed-platform record *does* identify itself by. Port
+// and branch are alternatives per provider, never both — one switch, two columns.
+export const providerHasBranch = (provider: CicdProvider): boolean =>
+  PORTLESS_PROVIDERS.includes(provider);
+
 // Provenance of a port row (mirrors the `port_source` DB enum — same values, same
 // order). 'docker' rows come from pasted `docker ps` output; see
 // docs/docker-import.md.
@@ -20,6 +35,10 @@ export interface EnvironmentPort {
   id: string;
   environmentId: string;
   port: string;
+  // The deployed branch — what identifies a record on a managed platform, where
+  // there is no host port. Empty on port-bearing providers. See
+  // providerHasBranch.
+  branch: string;
   protocol: Protocol;
   // The record's label — a Jenkins job name for jenkins-linked records, or a
   // hand-typed name for manual ones. Surfaced as the "Name" column.
@@ -88,6 +107,13 @@ export type EnvironmentInput = Partial<
 export type EnvironmentPortInput = Partial<
   Pick<
     EnvironmentPort,
-    'port' | 'protocol' | 'description' | 'domain' | 'position' | 'jenkinsJobUrl' | 'source'
+    | 'port'
+    | 'branch'
+    | 'protocol'
+    | 'description'
+    | 'domain'
+    | 'position'
+    | 'jenkinsJobUrl'
+    | 'source'
   >
 >;

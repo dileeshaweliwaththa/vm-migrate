@@ -4,8 +4,12 @@ Add environment records by pasting `docker ps` output from that environment's
 host. Published **host** ports become records; you pick which ones to keep. Same
 paste → preview → select shape as Jenkins **Browse jobs → Use**.
 
-Reach it from the **container icon** in any environment card header (editor+). It
-is not Jenkins-specific — any environment can import this way.
+Reach it from the **container icon** in an environment card header (editor+). It
+is not Jenkins-specific — any **port-bearing** environment can import this way
+(`jenkins`, `other`, `none`). It is hidden for the managed providers
+(`aws`/`azure`/`amplify`): those records have no Port column at all, so a paste of
+host-port mappings has nothing to land in. See
+[jenkins-sync.md § Records by provider](./jenkins-sync.md#records-by-provider).
 
 ## Layers
 

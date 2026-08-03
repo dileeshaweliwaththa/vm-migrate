@@ -144,7 +144,8 @@ the browse-jobs dialog), or `docker` (imported from a pasted `docker ps` — see
 | ---------------- | ------------- | --------------------------------------- |
 | `id`             | `uuid`        | primary key                             |
 | `environment_id` | `uuid`        | FK → `environments.id`, `on delete cascade` |
-| `port`           | `text`        | e.g. `3000`                             |
+| `port`           | `text`        | e.g. `3000` — shown for port-bearing providers |
+| `branch`         | `text`        | e.g. `main` — the deployed branch, shown **instead of** `port` on `aws`/`azure`/`amplify` (`providerHasBranch`) |
 | `protocol`       | `text`        | HTTP/HTTPS/TCP/UDP/WS/WSS               |
 | `description`    | `text`        | the record's label — surfaced as the **Name** column (a Jenkins job name, or hand-typed) |
 | `domain`         | `text`        | assigned domain/host, e.g. `dev.imaui.upview.tech` |
@@ -282,6 +283,8 @@ In `supabase/migrations/`, applied in timestamp order:
   assigned domain/host for a record.
 - `…_add_docker_port_source.sql` — adds `docker` to the `port_source` enum, for
   records imported from a pasted `docker ps`.
+- `…_add_branch_to_environment_ports.sql` — adds `environment_ports.branch`, the
+  deployed branch for managed-platform records that have no host port.
 - `…_create_environment_build_runs.sql` — the `jenkins_run_phase` and
   `jenkins_build_status` enums plus `environment_build_runs`, the audit trail of
   triggered builds (insert/update restricted to the run's own user).

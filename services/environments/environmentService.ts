@@ -79,6 +79,9 @@ export const removeEnvironment = async (id: string): Promise<void> => {
 const portInputToColumns = (input: EnvironmentPortInput): EnvironmentPortWriteColumns => {
   const cols: EnvironmentPortWriteColumns = {};
   if (input.port !== undefined) cols.port = input.port;
+  // Branch names can't contain whitespace, so a trailing space is always a typo
+  // (or a paste artefact) rather than part of the name.
+  if (input.branch !== undefined) cols.branch = input.branch.trim();
   if (input.protocol !== undefined) cols.protocol = input.protocol;
   if (input.description !== undefined) cols.description = input.description;
   // Domains are pasted as often as typed — trim so a stray space doesn't become

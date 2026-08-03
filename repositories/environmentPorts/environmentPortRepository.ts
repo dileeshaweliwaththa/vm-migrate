@@ -6,6 +6,7 @@ import type { EnvironmentPortRow } from '@/types/supabase/response/environmentPo
 export type EnvironmentPortWriteColumns = Partial<{
   environment_id: string;
   port: string;
+  branch: string;
   protocol: string;
   description: string;
   domain: string;

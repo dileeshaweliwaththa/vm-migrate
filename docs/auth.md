@@ -10,9 +10,15 @@ touches all five architecture layers (see [architecture.md](./architecture.md)).
    (`components/auth/login-page.tsx`). The `useEmailSignUp` hook POSTs to
    `/api/auth/signup`, which calls `emailSignUp` in
    `services/auth/authService.ts` → `signInWithOtp` with
-   `shouldCreateUser: true` (`repositories/auth/authRepository.ts`). Supabase
-   emails the code. On new accounts the `on_auth_user_created` trigger creates
-   the matching `profiles` row (`supabase/migrations/…_create_profiles_table.sql`).
+   `shouldCreateUser: false` (`repositories/auth/authRepository.ts`). Supabase
+   emails the code. **There is no self-signup:** only an account an admin has
+   already provisioned (`/admin/users` → `provisionUser`) can receive one, and
+   `on_auth_user_created` creates the matching `profiles` row at that point
+   (`supabase/migrations/…_create_profiles_table.sql`).
+
+   The response is the same whether or not the address is registered ("If your
+   email is registered, a 6-digit sign-in code is on its way."), so the endpoint
+   can't be used to enumerate accounts.
 2. **Enter the code.** The login page switches to a code input; the
    `useVerifyOtp` hook POSTs to `/api/auth/verify`, which calls `verifyOtp`
    (`repositories/auth/authRepository.ts` → `verifyOtp` with `type: 'email'`).
@@ -41,21 +47,44 @@ touches all five architecture layers (see [architecture.md](./architecture.md)).
 - `lib/supabase/session.ts` exposes `getUserEmail()` as a small server-side
   helper example.
 
+## Where access is enforced
+
+Three layers, each of which must hold on its own:
+
+1. **Page guard.** `app/(protected)/layout.tsx` calls `getCurrentUser()` and
+   redirects to `/login`. That is `supabase.auth.getUser()`, which validates the
+   token with Supabase — not a cookie-presence check. The root proxy
+   (`proxy.ts`) only *refreshes* the session; it guards nothing, so never rely on
+   it for access control.
+2. **Route handler.** Every handler under `app/api/` re-checks
+   `getCurrentUser()` and returns 401 itself. Handlers are not covered by the
+   layout guard.
+3. **Role + RLS.** Role checks live in the **service** layer (`getCurrentRole`
+   / `getCurrentActor` + the `lib/rbac.ts` helpers), and Postgres RLS enforces
+   the same rules independently. Services whose tables are fully covered by
+   role-based RLS (environments, ports, docs, tags) may lean on RLS alone.
+
+**Service-role paths bypass RLS**, so for those the service-layer check is the
+*only* enforcement and must be treated as load-bearing:
+`userRepository` (all of it), `appSettingsRepository.findAppSettingsServiceRole`,
+and `environmentSecretRepository`. Each is reached only through a service that
+calls `requireAdmin()` or a `canEdit`/`canRunBuild` gate first — keep it that
+way when adding to them.
+
+Two deliberate asymmetries worth knowing:
+
+- `vms` / `vm_urls` grant **write access to every signed-in role**, viewers
+  included (see [schema.md](./schema.md#vms)) — the tracker predates RBAC and is
+  intentionally shared. Neither the routes nor the tracker UI gate on role.
+- Triggering a Jenkins build is open to viewers by design; each run is attributed
+  in `environment_build_runs`. Changing Jenkins *configuration* is editor+.
+  Anything built from a client-supplied Jenkins URL goes through
+  `isSameJenkinsServer` first, because those requests carry the environment's
+  API token.
+
 ## Extending this
 
-Common next steps when building a real app on top of the starter:
-
-- Add a `verify` step/page and route handler if you want OTP-code entry
-  instead of magic links (the service already exposes `verifyOtp`).
-- Add a route guard in `app/(protected)/...` that redirects unauthenticated
-  users away, using `getCurrentUser` from the auth service.
 - Add roles/permissions by extending `profiles` with a new column (a new
   `supabase migration new` file) and reading it in the service layer.
-
-## Known limitation
-
-With RLS enabled on `profiles`, the anonymous email-existence check in
-`emailSignUp` (`findProfileByEmail`) returns `null` for callers without a
-session — so an existing user who hits sign-up simply receives a sign-in
-email instead of an "account already exists" message. Fixing this properly
-requires the service-role client (`lib/supabase/service.ts`) or an RPC.
+- New API routes: copy the `getCurrentUser()` → 401 preamble, and put the role
+  check in the service, not the handler.
