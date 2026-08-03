@@ -30,11 +30,17 @@ export function safeStatus(vm: Vm): VmStatus {
   return { label: 'Pending', tone: 'warning' };
 }
 
+// The app's whole status vocabulary, in one place. These resolve to the
+// `--tone-*` variables in globals.css, which are themed per mode — so a tone is
+// declared once here and never needs a `dark:` counterpart at the call site.
+//
+// `info` is the brand navy and `warning` the brand orange, so only success and
+// danger introduce a hue beyond the logo's two. See docs/ui-guidelines.md § Theme.
 export const STATUS_TONE_CLASS: Record<StatusTone, string> = {
-  success: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300',
-  info: 'bg-sky-100 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300',
-  warning: 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300',
-  danger: 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300',
+  success: 'bg-tone-success text-tone-success-fg',
+  info: 'bg-tone-info text-tone-info-fg',
+  warning: 'bg-tone-warning text-tone-warning-fg',
+  danger: 'bg-tone-danger text-tone-danger-fg',
 };
 
 export interface TrackerStats {

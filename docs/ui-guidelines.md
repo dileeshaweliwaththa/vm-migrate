@@ -114,6 +114,34 @@ width — a wide table (`min-w-[36rem]`) or an unwrapped textarea stretches the
 dialog from the inside. Put `min-w-0` on the wrapper so `overflow-auto` on the
 inner scroll container actually does its job.
 
+## Theme: navy chrome, light content
+
+The palette is the original tracker's brand: **navy `#162d47`** + **teal
+`#2e86ab`**, defined as `--color-brand` / `--color-brand-accent` in
+`app/globals.css`. The rule is **dark chrome, light content** — the sidebar is
+solid navy in *both* light and dark mode, while the content area stays light in
+light mode. Teal marks the **active** nav item.
+
+Two things to know before touching it:
+
+1. **`--primary` *is* the sidebar navy.** So inside the sidebar,
+   `bg-primary`/`text-primary-foreground` renders navy-on-navy and disappears.
+   Use the `--sidebar-*` tokens there (`bg-sidebar-primary`,
+   `text-sidebar-foreground`, `bg-sidebar-accent`) — never the global ones. The
+   same applies to `text-muted-foreground` and the default `AvatarFallback` tone:
+   both are tuned for a light surface and wash out on navy.
+2. **The sidebar primitive marks the active item with `--sidebar-accent`,** which
+   here is only a shade off the sidebar itself. `components/layout/app-sidebar.tsx`
+   overrides `data-active:bg-sidebar-primary` to get teal. Override in the feature
+   component (rule 3) — don't edit `components/ui/sidebar.tsx`.
+
+Chart tokens `--chart-1..5` are one cohesive teal→navy series plus amber/rose at
+the warn/bad end, so a **status** colour never collides with a **series** colour.
+For status pills reuse `STATUS_TONE_CLASS` from
+[`lib/vm-utils.ts`](../lib/vm-utils.ts) rather than picking new greens and reds —
+it is the shared vocabulary across the tracker, the build history, and the
+dashboard.
+
 ## Where shadcn fits in the architecture
 
 shadcn primitives live in `components/ui/` and are pure presentational

@@ -2,11 +2,13 @@ import type { ProjectRow } from '@/types/supabase/response/projects';
 import type { EnvironmentRow } from '@/types/supabase/response/environments';
 import type { EnvironmentPortRow } from '@/types/supabase/response/environmentPorts';
 import type { Protocol } from '@/types/common/vm';
+import { PORT_SOURCES } from '@/types/common/project';
 import type {
   CicdProvider,
   Environment,
   EnvironmentName,
   EnvironmentPort,
+  PortSource,
   Project,
 } from '@/types/common/project';
 
@@ -37,7 +39,12 @@ export const rowToPort = (row: EnvironmentPortRow): EnvironmentPort => ({
   protocol: row.protocol as Protocol,
   description: row.description,
   domain: row.domain ?? '',
-  source: row.source === 'jenkins' ? 'jenkins' : 'manual',
+  // Validate against the enum rather than testing for 'jenkins' alone — an
+  // explicit two-way check silently relabelled every `docker` row as `manual`,
+  // which hid imported records from any by-source count.
+  source: PORT_SOURCES.includes(row.source as PortSource)
+    ? (row.source as PortSource)
+    : 'manual',
   jenkinsJobUrl: row.jenkins_job_url ?? '',
   position: row.position,
 });

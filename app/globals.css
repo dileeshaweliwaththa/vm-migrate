@@ -46,37 +46,68 @@
   --radius-3xl: calc(var(--radius) + 12px);
   --radius-4xl: calc(var(--radius) + 16px);
  
-  /* Custom Colors */
-  --color-success: #7ef2a5;
-  --color-pending: #ffe710;
-  --color-error: #ee2b54;
-  --color-secondary-0: #ffffff;
-  --color-secondary-50: #fbfbfc;
-  --color-secondary-100: #eceff3;
-  --color-secondary-200: #dee2e9;
-  --color-secondary-300: #cfd6e0;
-  --color-secondary-400: #c1c9d7;
-  --color-secondary-500: #b3bdce;
-  --color-secondary-600: #8f97a4;
-  --color-secondary-700: #6b717b;
-  --color-secondary-800: #474b52;
-  --color-secondary-900: #232529;
-  --color-accent-50: #f3f7fe;
-  --color-accent-100: #c9d9fc;
-  --color-accent-200: #9fbcfb;
-  --color-accent-300: #749ef9;
-  --color-accent-400: #4a81f7;
-  --color-accent-500: #2064f6;
-  --color-accent-600: #1950c4;
-  --color-accent-700: #133c93;
-  --color-accent-800: #0c2862;
-  --color-accent-900: #061331;
+  /* ==========================================================================
+     BRAND — the logo, and nothing else.
+     ==========================================================================
+     Two hues and white. Everything below is one of these two hues at a
+     different lightness; nothing introduces a third hue. That is what makes it
+     match — the old palette mixed navy, teal, sky, emerald, amber, purple and
+     a stray blue scale, which is why every surface looked like it came from a
+     different design.
 
-  /* Brand — carried over from the original VM tracker:
-     navy #162d47 (base/chrome) + teal #2e86ab (accent). */
-  --color-brand: #162d47;
-  --color-brand-accent: #2e86ab;
+     ┌─────────────────────────────────────────────────────────────┐
+     │  THE ONLY TWO VALUES TO EDIT — sampled from the logo.        │
+     │  Every token in this file derives from them, so correcting a │
+     │  sampled hex is a one-line change.                           │
+     └─────────────────────────────────────────────────────────────┘ */
+  --color-brand: #141b6b; /* navy  — "are More Outsourcing" */
+  --color-brand-accent: #f36f21; /* orange — "Teams"            */
   --color-brand-foreground: #ffffff;
+
+  /* Navy ramp — one hue, eleven lightnesses. Chrome, text, borders, surfaces. */
+  --color-navy-50: #f2f3fb;
+  --color-navy-100: #e4e6f7;
+  --color-navy-200: #cdd0ee;
+  --color-navy-300: #a9aee1;
+  --color-navy-400: #7c83ce;
+  --color-navy-500: #4e57b8;
+  --color-navy-600: #363fa0;
+  --color-navy-700: #232b85;
+  --color-navy-800: #141b6b; /* = brand */
+  --color-navy-900: #101657;
+  --color-navy-950: #0b1043;
+
+  /* Orange ramp — the accent. Used sparingly: the active nav item, focus
+     rings, "needs attention". If everything is orange, nothing is. */
+  --color-orange-50: #fff4ec;
+  --color-orange-100: #fee8d9;
+  --color-orange-200: #fdd1b5;
+  --color-orange-300: #fcb183;
+  --color-orange-400: #f98f4e;
+  --color-orange-500: #f36f21; /* = brand-accent */
+  --color-orange-600: #d65d15;
+  --color-orange-700: #b44a0f;
+
+  /* Functional greens/reds. These are the only colours outside the two brand
+     hues, and they are here because they carry *meaning* a brand colour can't:
+     a failed build rendered in navy or orange stops being readable as failure.
+     Both are desaturated and deepened to sit with the navy rather than shout
+     over it — no neon. Warning reuses the brand orange, and info reuses the
+     brand navy, so only two extra hues exist in the whole app. */
+  --color-positive: #157347;
+  --color-negative: #c0263a;
+
+  /* Status pill tones, themed per mode in :root / .dark below. Exposed as
+     utilities (`bg-tone-success`, `text-tone-success-fg`) so STATUS_TONE_CLASS
+     in lib/vm-utils.ts is the only place that names them. */
+  --color-tone-success: var(--tone-success-bg);
+  --color-tone-success-fg: var(--tone-success-fg);
+  --color-tone-info: var(--tone-info-bg);
+  --color-tone-info-fg: var(--tone-info-fg);
+  --color-tone-warning: var(--tone-warning-bg);
+  --color-tone-warning-fg: var(--tone-warning-fg);
+  --color-tone-danger: var(--tone-danger-bg);
+  --color-tone-danger-fg: var(--tone-danger-fg);
 
   /* Custom Font Sizes */
   --font-size-heading-1: 48px;
@@ -94,87 +125,121 @@
  
 :root {
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: #162d47;
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: #2e86ab;
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: #162d47;
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: #162d47;
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+
+  /* Content: white page, navy ink. Body text is navy-950 rather than black —
+     black next to a navy logo reads as a third colour. */
+  --background: #ffffff;
+  --foreground: #0b1043;
+  --card: #ffffff;
+  --card-foreground: #0b1043;
+  --popover: #ffffff;
+  --popover-foreground: #0b1043;
+
+  --primary: #141b6b;
+  --primary-foreground: #ffffff;
+
+  /* Neutral surfaces are navy-tinted, not grey — a pure grey beside navy looks
+     dirty, the same tint looks deliberate. */
+  --secondary: #f2f3fb;
+  --secondary-foreground: #141b6b;
+  --muted: #f2f3fb;
+  --muted-foreground: #565d93;
+  --accent: #e4e6f7;
+  --accent-foreground: #141b6b;
+
+  --destructive: #c0263a;
+  --border: #dfe2f2;
+  --input: #dfe2f2;
+  /* Focus rings are orange: the one accent, and it never collides with the navy
+     it sits on. */
+  --ring: #f36f21;
+
+  /* Charts: the navy ramp, then orange. Two hues, five distinguishable steps —
+     a series colour can never be mistaken for a status colour. */
+  --chart-1: #141b6b;
+  --chart-2: #363fa0;
+  --chart-3: #7c83ce;
+  --chart-4: #f36f21;
+  --chart-5: #f98f4e;
+
+  /* Sidebar: deepest navy in light mode too — dark chrome, light content. The
+     active item is brand orange, which is the logo's own accent and the only
+     thing on the sidebar that isn't navy. */
+  --sidebar: #0b1043;
+  --sidebar-foreground: #cdd0ee;
+  --sidebar-primary: #f36f21;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #232b85;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #232b85;
+  --sidebar-ring: #f36f21;
+
+  /* Status pill tones. The single source of truth for STATUS_TONE_CLASS in
+     lib/vm-utils.ts — info is brand navy, warning is brand orange, so only
+     positive/negative add a hue. */
+  --tone-success-bg: #dcf2e6;
+  --tone-success-fg: #0f5233;
+  --tone-info-bg: #e4e6f7;
+  --tone-info-fg: #232b85;
+  --tone-warning-bg: #fee8d9;
+  --tone-warning-fg: #b44a0f;
+  --tone-danger-bg: #fbdfe3;
+  --tone-danger-fg: #97182a;
 }
  
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: #4fa3c4;
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: #4fa3c4;
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: #4fa3c4;
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: #4fa3c4;
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.439 0 0);
+  /* Dark mode is the same two hues, inverted: navy surfaces instead of neutral
+     greys, so nothing turns into a third colour when the theme flips. */
+  --background: #080c33;
+  --foreground: #e4e6f7;
+  --card: #0b1043;
+  --card-foreground: #e4e6f7;
+  --popover: #0b1043;
+  --popover-foreground: #e4e6f7;
+
+  /* Navy-800 has too little contrast against a navy page, so `primary` steps up
+     the ramp rather than switching hue. */
+  --primary: #7c83ce;
+  --primary-foreground: #080c33;
+
+  --secondary: #101657;
+  --secondary-foreground: #e4e6f7;
+  --muted: #101657;
+  --muted-foreground: #a9aee1;
+  --accent: #232b85;
+  --accent-foreground: #ffffff;
+
+  --destructive: #e4677a;
+  --border: #232b85;
+  --input: #2b3494;
+  --ring: #f98f4e;
+
+  --chart-1: #7c83ce;
+  --chart-2: #a9aee1;
+  --chart-3: #4e57b8;
+  --chart-4: #f98f4e;
+  --chart-5: #fcb183;
+
+  /* Deeper than the page, same hue — the sidebar stays the same surface it is in
+     light mode, and the active item stays orange. */
+  --sidebar: #0b1043;
+  --sidebar-foreground: #cdd0ee;
+  --sidebar-primary: #f36f21;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #232b85;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #232b85;
+  --sidebar-ring: #f98f4e;
+
+  /* Status tones: dark translucent-looking fills with lifted text. */
+  --tone-success-bg: #123b28;
+  --tone-success-fg: #7fd6a4;
+  --tone-info-bg: #1d2578;
+  --tone-info-fg: #a9aee1;
+  --tone-warning-bg: #55290c;
+  --tone-warning-fg: #fcb183;
+  --tone-danger-bg: #571320;
+  --tone-danger-fg: #f2a3ae;
 }
  
 @layer base {

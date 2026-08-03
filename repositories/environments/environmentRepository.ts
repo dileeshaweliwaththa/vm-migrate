@@ -15,6 +15,21 @@ export type EnvironmentWriteColumns = Partial<{
   position: number;
 }>;
 
+// Every environment in the workspace, with its ports, in one query — what the
+// dashboard summary aggregates over. Deliberately not per-project
+// (`findProjectEnvironments`): the dashboard counts across all of them, and
+// looping that call would be one round trip per project.
+export const findAllEnvironments = async (): Promise<EnvironmentRow[]> => {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('environments')
+    .select('*, environment_ports(*), vms(name)')
+    .order('project_id', { ascending: true })
+    .order('position', { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as EnvironmentRow[];
+};
+
 export const insertEnvironment = async (
   values: EnvironmentWriteColumns
 ): Promise<EnvironmentRow> => {

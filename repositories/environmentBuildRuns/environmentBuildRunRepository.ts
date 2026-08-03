@@ -45,6 +45,25 @@ export const updateBuildRunByRef = async (
   if (error) throw new Error(error.message);
 };
 
+// Newest-first runs across **every** environment — what the dashboard summary
+// reads. `since` (an ISO timestamp) bounds it to a window so the caller can both
+// aggregate the period and slice a short feed off the front of the same result,
+// without a second query. Read-only for any signed-in role, same as the
+// per-environment history.
+export const findRecentBuildRuns = async (
+  limit: number,
+  since?: string
+): Promise<EnvironmentBuildRunRow[]> => {
+  const supabase = await createClient();
+  const query = supabase.from('environment_build_runs').select('*');
+  if (since) query.gte('created_at', since);
+  const { data, error } = await query
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(error.message);
+  return (data ?? []) as EnvironmentBuildRunRow[];
+};
+
 // Newest-first runs of an environment, or of a single record within it when
 // `portId` is given (the per-record history).
 export const findBuildRuns = async (

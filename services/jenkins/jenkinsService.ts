@@ -21,6 +21,7 @@ import {
   updateBuildRunByRef,
   type BuildRunWriteColumns,
 } from '@/repositories/environmentBuildRuns/environmentBuildRunRepository';
+import { rowToBuildRun } from '@/services/jenkins/mappers';
 import { canEdit, canRunBuild } from '@/lib/rbac';
 import type { ApiSingleResponse } from '@/types/common';
 import type {
@@ -32,12 +33,10 @@ import type {
   JenkinsBuildStatus,
   JenkinsJobSummary,
   JenkinsRawJob,
-  JenkinsRunPhase,
   JenkinsRunState,
   TriggerBuildResult,
 } from '@/types/common/jenkins';
 import { isTerminalRunPhase } from '@/types/common/jenkins';
-import type { EnvironmentBuildRunRow } from '@/types/supabase/response/environmentBuildRuns';
 import type { Environment } from '@/types/common/project';
 
 // Service layer: per-environment Jenkins integration (Phase 2b · M3).
@@ -614,23 +613,6 @@ export const getJenkinsRunState = async (
     return { success: false, message: asMsg(error, 'Failed to read the build state.'), data: null };
   }
 };
-
-const rowToBuildRun = (row: EnvironmentBuildRunRow): EnvironmentBuildRun => ({
-  id: row.id,
-  environmentId: row.environment_id,
-  portId: row.port_id,
-  jobName: row.job_name,
-  jobUrl: row.job_url,
-  buildNumber: row.build_number,
-  buildUrl: row.build_url,
-  phase: row.phase as JenkinsRunPhase,
-  result: (row.result as JenkinsBuildStatus | null) ?? null,
-  triggeredBy: row.triggered_by,
-  // Snapshotted at trigger time — see the migration for why this isn't a join.
-  triggeredByLabel: row.triggered_by_name || row.triggered_by_email || 'Unknown user',
-  startedAt: row.created_at,
-  finishedAt: row.finished_at,
-});
 
 // Recent builds, newest first: which job, who started it, and how it ended.
 // Scoped to one **record** when `portId` is given — that's how the UI surfaces it,

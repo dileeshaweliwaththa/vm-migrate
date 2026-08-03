@@ -31,11 +31,15 @@ Before implementing any feature, request, or fix, read and follow:
   architecture (routing → UI → hooks → services → repositories).
 - [docs/ui-guidelines.md](docs/ui-guidelines.md) — shadcn/ui is the only
   allowed component library; install primitives via the shadcn CLI and
-  compose feature components from them.
+  compose feature components from them. Also the **theme** (navy chrome, light
+  content) and the Radix 1.4.3 traps — read it before using a primitive.
 - [docs/schema.md](docs/schema.md) — database schema and the migration workflow.
-- [docs/auth.md](docs/auth.md) — the email sign-in flow and how to extend it.
-- [docs/tracker.md](docs/tracker.md) — the VM tracker feature, its layers, and
-  its API.
+- [docs/auth.md](docs/auth.md) — the sign-in flow, and **where access is
+  enforced** (page guard / route handler / role + RLS).
+- [docs/tracker.md](docs/tracker.md) — the VM tracker feature, its layers, its
+  API, and its per-role permissions.
+- [docs/dashboard.md](docs/dashboard.md) — the `/dashboard` summary and its
+  aggregation rules.
 - [docs/jenkins-sync.md](docs/jenkins-sync.md) — per-environment Jenkins config,
   port sync, and how a triggered build is followed to completion.
 - [docs/docker-import.md](docs/docker-import.md) — importing environment records

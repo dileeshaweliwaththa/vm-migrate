@@ -13,6 +13,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { cn } from '@/lib/utils';
 import { isAdmin } from '@/lib/rbac';
 import type { UserRole } from '@/types/common';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -80,7 +81,9 @@ export function AppSidebar({ role, email }: { role: UserRole; email: string }) {
           <SidebarMenuItem>
             <SidebarMenuButton asChild size="lg">
               <Link href="/dashboard">
-                <span className="grid aspect-square size-8 place-items-center rounded-md bg-primary text-xs font-bold text-primary-foreground">
+                {/* Teal, not `bg-primary` — primary *is* the navy the sidebar is
+                    painted with, so the mark would disappear into it. */}
+                <span className="grid aspect-square size-8 place-items-center rounded-md bg-sidebar-primary text-xs font-bold text-sidebar-primary-foreground">
                   UV
                 </span>
                 <span className="font-semibold">UPVIEW Deploy</span>
@@ -104,7 +107,27 @@ export function AppSidebar({ role, email }: { role: UserRole; email: string }) {
                       asChild
                       isActive={active}
                       tooltip={item.label}
-                      className="h-11 gap-3 text-[15px] [&>svg]:size-5"
+                      className={cn(
+                        'h-11 gap-3 text-[15px] [&>svg]:size-5',
+                        // The primitive styles the active item with
+                        // `data-active:bg-sidebar-accent`, but it renders
+                        // `data-active={isActive}` *unconditionally* — and React
+                        // stringifies a `data-*` false, so the attribute is always
+                        // present as "false". Tailwind's `data-active:` compiles to
+                        // `[data-active]`, i.e. attribute presence, so that rule
+                        // matched every item and the entire nav rendered filled.
+                        // (Same family as the Radix boolean-attribute trap in
+                        // docs/ui-guidelines.md.)
+                        //
+                        // Restating the same variant lets tailwind-merge drop the
+                        // primitive's version, neutralising it for every item…
+                        'data-active:bg-transparent data-active:font-normal data-active:text-sidebar-foreground',
+                        // …then the real active item is styled from React state.
+                        // `!` because both rules land at equal specificity and
+                        // emission order shouldn't decide which one wins.
+                        active &&
+                          'bg-sidebar-primary! font-semibold text-sidebar-primary-foreground! hover:bg-sidebar-primary! hover:text-sidebar-primary-foreground!'
+                      )}
                     >
                       <Link href={item.href}>
                         <item.icon />
@@ -129,13 +152,16 @@ export function AppSidebar({ role, email }: { role: UserRole; email: string }) {
                   className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
                 >
                   <Avatar className="size-8 rounded-md">
-                    <AvatarFallback className="rounded-md text-xs uppercase">
+                    {/* The default fallback tone is tuned for a light surface. */}
+                    <AvatarFallback className="rounded-md bg-sidebar-accent text-xs font-semibold uppercase text-sidebar-foreground">
                       {email.charAt(0)}
                     </AvatarFallback>
                   </Avatar>
                   <div className="grid flex-1 text-left text-sm leading-tight">
                     <span className="truncate">{email}</span>
-                    <span className="truncate text-xs capitalize text-muted-foreground">{role}</span>
+                    <span className="truncate text-xs capitalize text-sidebar-foreground/70">
+                      {role}
+                    </span>
                   </div>
                   <ChevronsUpDown className="ml-auto size-4" />
                 </SidebarMenuButton>
