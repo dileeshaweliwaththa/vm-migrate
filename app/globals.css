@@ -54,15 +54,16 @@
      OKLCH form the rest of this file uses. Nothing here is hand-mixed, so the
      ramps are the perceptually-even, contrast-checked ones shadcn ships.
 
-     ONE family. `mauve`, eleven steps, and nothing else — no orange, no blue, no
-     green, no red. Every colour in the interface is a step on the ramp below,
-     and difference is expressed as **lightness**, never as hue.
+     `mauve` for everything structural — eleven steps, and difference expressed as
+     **lightness** rather than hue. No orange, no blue.
 
-     That means status is carried by weight rather than colour: `danger` is an
-     inverted dark fill, `warning` a mid fill, `success`/`info` light fills. Every
-     status pill in the app also carries a text label ("Yes"/"No",
-     "SUCCESS"/"FAILED", "Safe to Remove"), so no information depends on hue —
-     see the note in lib/vm-utils.ts.
+     ONE exception: **success is green** (shadcn `green`). It is the single place a
+     second hue earns its keep — a passing build has to read as passing at a
+     glance, from across a room, and mauve-with-more-lightness does not do that.
+     Everything else still differs by weight: `danger` is an inverted dark fill,
+     `warning` a mid fill, `info` a light one. Every status pill also carries its
+     label as text ("Yes"/"No", "SUCCESS"/"FAILED", "Safe to Remove"), so no
+     information depends on hue alone — see the note in lib/vm-utils.ts.
 
      Components must never name a colour. They use the tokens defined here —
      `bg-mauve-900`, `text-ink-source`, `bg-tone-danger` — so the palette can be
@@ -85,6 +86,12 @@
      item, focus rings, the emphasised stat) is this one step. Named so the
      accent can move up or down the ramp in one place. */
   --color-accent-step: var(--color-mauve-600);
+
+  /* Success green, from shadcn's `green` scale. Themed per mode below, because a
+     green that reads on white is unreadable on mauve-950 and vice versa. Used by
+     `STATUS_TONE_CLASS.success` and the Jenkins SUCCESS badge — nowhere else, so
+     it stays meaningful. */
+  --color-positive: var(--positive);
 
   /* Inline "ink" for values in the tracker grid — old IP, new IP, ports. Themed
      per mode below, so `text-ink-source` works in light and dark with no
@@ -185,8 +192,12 @@
      inverted dark fill (heaviest), warning a mid fill, success and info light
      fills. Every pill also carries its label as text, so nothing depends on
      colour alone. */
-  --tone-success-bg: oklch(0.96 0.003 325.6); /* mauve-100 */
-  --tone-success-fg: oklch(0.364 0.029 323.89); /* mauve-700 */
+  /* green-700 — 5.0:1 on white, so it holds up at the 12px the status badge uses.
+     green-600 measures 3.3:1 and fails for text at that size. */
+  --positive: oklch(0.53 0.14 150); /* green-700 */
+
+  --tone-success-bg: oklch(0.96 0.04 157); /* green-100 */
+  --tone-success-fg: oklch(0.45 0.11 151); /* green-800 */
   --tone-info-bg: oklch(0.922 0.005 325.62); /* mauve-200 */
   --tone-info-fg: oklch(0.435 0.029 321.78); /* mauve-600 */
   --tone-warning-bg: oklch(0.865 0.012 325.68); /* mauve-300 */
@@ -253,8 +264,11 @@
   /* Status tones, inverted for a dark surface: danger becomes the *lightest*
      fill (heaviest against dark), success and info the darkest. Same weight
      ordering as light mode, mirrored. */
-  --tone-success-bg: oklch(0.364 0.029 323.89); /* mauve-700 */
-  --tone-success-fg: oklch(0.985 0 0); /* mauve-50  */
+  /* green-300 — light enough to carry against the mauve-950 page. */
+  --positive: oklch(0.87 0.14 154); /* green-300 */
+
+  --tone-success-bg: oklch(0.39 0.09 153); /* green-900 */
+  --tone-success-fg: oklch(0.87 0.14 154); /* green-300 */
   --tone-info-bg: oklch(0.263 0.024 320.12); /* mauve-800 */
   --tone-info-fg: oklch(0.711 0.019 323.02); /* mauve-400 */
   --tone-warning-bg: oklch(0.435 0.029 321.78); /* mauve-600 */

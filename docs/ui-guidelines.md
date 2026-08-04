@@ -114,7 +114,7 @@ width — a wide table (`min-w-[36rem]`) or an unwrapped textarea stretches the
 dialog from the inside. Put `min-w-0` on the wrapper so `overflow-auto` on the
 inner scroll container actually does its job.
 
-## Theme: shadcn `mauve`, one hue, nothing else
+## Theme: shadcn `mauve`, plus green for success
 
 **Never write a colour value in a component.** No hex, no `rgb()`, no `oklch()`,
 no `bg-emerald-600`. Components use the tokens below; `app/globals.css` is the
@@ -130,9 +130,13 @@ curl -s https://ui.shadcn.com/r/colors/mauve.json   # a full theme, cssVarsV4 = 
 curl -s https://ui.shadcn.com/r/colors/index.json   # every scale, every step
 ```
 
-**One family — `mauve`, eleven steps.** No orange, no blue, no green, no red.
-Difference is expressed as **lightness**, never as hue. If you are reaching for a
-second hue, the answer is a different step on the ramp.
+**`mauve` for everything structural — eleven steps**, with difference expressed as
+**lightness** rather than hue. No orange, no blue, no red.
+
+**One exception: success is green** (shadcn `green`, via `--color-positive`). It is
+the single place a second hue earns its keep — a passing build has to read as
+passing at a glance, and mauve-with-more-lightness does not do that. Do not add a
+third hue; for anything else, reach for a different step on the mauve ramp.
 
 `--color-mauve-50 … --color-mauve-950`, plus one indirection:
 
@@ -166,27 +170,31 @@ With one hue, status is carried by **weight**:
 
 | Tone | Light mode | Dark mode |
 | ---- | ---------- | --------- |
-| `success` | mauve-100 fill, mauve-700 text | mauve-700 fill, mauve-50 text |
+| `success` | **green**-100 fill, green-800 text | **green**-900 fill, green-300 text |
 | `info` | mauve-200 fill, mauve-600 text | mauve-800 fill, mauve-400 text |
 | `warning` | mauve-300 fill, mauve-900 text | mauve-600 fill, mauve-50 text |
 | `danger` | mauve-800 fill, mauve-50 text | mauve-200 fill, mauve-900 text |
 
-`danger` is the inverted fill in both modes — the heaviest thing on the surface,
-which is what red used to do. The ordering mirrors when the theme flips.
+`success` is green. `danger` is the inverted mauve fill in both modes — the
+heaviest thing on the surface, which is what red used to do. The ordering mirrors
+when the theme flips.
 
-**This costs the at-a-glance hue cue**, and that is a real tradeoff: a failed
-build no longer reads as "red" from across the room. What makes it acceptable is
-that every pill in the app renders its status **as text** — `Yes`/`No`,
-`SUCCESS`/`FAILED`, `Safe to Remove`/`Pending` — so no information depends on
-colour alone, only scan speed. Keep it that way: never ship a pill that is colour
-only.
+**Failure still has no hue of its own**, so a failed build reads as *heavy* rather
+than as red. What makes that acceptable is that every pill renders its status **as
+text** — `Yes`/`No`, `SUCCESS`/`FAILED`, `Safe to Remove`/`Pending` — so nothing
+depends on colour alone. Keep it that way: never ship a pill that is colour only.
+
+Green contrast, measured: green-700 is **5.0:1** on white (green-600 is only
+3.3:1 and fails for 12px text, which is why the badge uses 700), green-300 is
+**14.1:1** on the dark page, and both pill pairs are **6.5:1**.
 
 ### The tokens
 
 | Use | Token |
 | --- | ----- |
-| Everything | `bg-mauve-50 … bg-mauve-950` (and `text-`, `border-`) |
+| Everything structural | `bg-mauve-50 … bg-mauve-950` (and `text-`, `border-`) |
 | Accent | `--color-accent-step` (= mauve-600) |
+| Success | `text-positive` / `bg-positive` (= shadcn green, themed per mode) |
 | Status pills | `STATUS_TONE_CLASS` in [`lib/vm-utils.ts`](../lib/vm-utils.ts) → `bg-tone-{success,info,warning,danger}` + `text-tone-*-fg` |
 | Inline grid values | `text-ink-source` (came from), `text-ink-target` (landed on), `text-ink-accent` (neutral detail) |
 | Semantic fills | `bg-positive`, `bg-negative` |
@@ -197,9 +205,9 @@ never needs a `dark:` counterpart — that is the point of them. Reach for
 `STATUS_TONE_CLASS` rather than naming greens and reds yourself; it is the shared
 vocabulary across the tracker, the build history and the dashboard.
 
-There is no `positive`/`negative` token any more — they were a green and a red,
-and the palette is one hue. Use the `tone-*` pairs above, or a mauve step
-directly.
+`positive` exists (green); **`negative` does not** — failure is carried by weight,
+not by red. If that asymmetry ever needs fixing, add `--negative` from shadcn's
+`red` alongside `--positive` rather than reaching for a Tailwind red utility.
 
 ### Verifying a token actually exists
 

@@ -20,7 +20,7 @@ domain:
 | - | -------- | ------ |
 | 1 | Dashboard data | **Derived only.** No new tables; the dashboard counts what other slices already store. |
 | 2 | Dashboard rendering | **Server component + service, no hook layer** — read-once, no interaction. Revisit if filters arrive. |
-| 3 | Palette | **shadcn `mauve`, single hue.** All 11 steps copied from ui.shadcn.com/colors via its registry. No second hue anywhere — status is carried by lightness, and by the text label every pill already renders. |
+| 3 | Palette | **shadcn `mauve`** for everything structural, **plus shadcn `green` for success only**. All values copied from ui.shadcn.com/colors via its registry. Failure is still carried by lightness, not red. |
 | 4 | Chrome vs content | **Dark chrome, light content.** The sidebar is mauve-900 in *both* light and dark mode; the content area stays white in light mode. |
 | 5 | VM tracker permissions | **Read-only for viewers.** The Phase 1 "any authenticated user has full access" RLS is replaced by the standard role split. |
 
@@ -85,7 +85,7 @@ result a published scale does.
 Two bugs fell out of the rework: `bg-primary` inside the sidebar rendered
 invisibly against it (the logo mark), and `SidebarMenuButton` was styling
 **every** nav item as active. See
-[ui-guidelines.md § Theme](./ui-guidelines.md#theme-shadcn-mauve-one-hue-nothing-else).
+[ui-guidelines.md § Theme](./ui-guidelines.md#theme-shadcn-mauve-plus-green-for-success).
 
 ---
 
@@ -120,6 +120,7 @@ Labels: `phase-3`, `epic:dashboard`, `epic:theme`, `epic:hardening`, `ui`,
 | F4 | **Theme, round 2**: reduce to the logo's two hues; purge all 108 hardcoded colour utilities | F2 |
 | F6 | **Theme, round 3**: adopt shadcn scales from the registry; no hand-mixed values | F4 |
 | F7 | **Theme, round 4**: single-hue mauve — remove orange, red, green and blue entirely; sidebar to mauve-950 | F6 |
+| F8 | **Theme, round 5**: reinstate shadcn green for `success` only (build status + success pills); `primary` to mauve-800 | F7 |
 | F5 | **Bug: every sidebar nav item rendered as active** — `data-active` presence vs value | F2 |
 | F3 | **`docker` port-source mapping fix** | — |
 

@@ -3,7 +3,9 @@ import type { JenkinsBuildStatus, JenkinsRunPhase } from '@/types/common/jenkins
 // Shared Jenkins build-status pill (used by the browse-jobs dialog and the
 // environment records table) so the two render status identically.
 const STATUS_CLASS: Record<JenkinsBuildStatus, string> = {
-  SUCCESS: 'text-ink-target dark:text-ink-target',
+  // The one hue in the app that isn't mauve. `text-positive` is themed per mode,
+  // and the dot picks it up via `bg-current`, so both stay in step.
+  SUCCESS: 'text-positive',
   FAILED: 'text-destructive',
   UNSTABLE: 'text-ink-source dark:text-ink-source',
   ABORTED: 'text-muted-foreground',
