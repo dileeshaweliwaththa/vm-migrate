@@ -13,7 +13,13 @@ docker compose ps              # wait for STATUS = healthy
 docker compose logs -f app
 ```
 
-Then open `http://localhost:3000` (or `APP_PORT`).
+Then open **`http://localhost:5174`**.
+
+The port is fixed at **5174** in three places, deliberately not configurable by env
+var: `PORT` in the Dockerfile, the `5174:5174` mapping in compose, and the `-p 5174`
+flag on the `dev`/`start` npm scripts. Next cannot read `PORT` from an env file —
+the HTTP server binds before env files are loaded — so a variable would have been
+misleading. To move the port, change those three.
 
 ## The one thing that catches everyone: build-time vs runtime env
 
@@ -127,7 +133,7 @@ docker build \
   --build-arg NEXT_PUBLIC_SUPABASE_PUBLISHABLE_OR_ANON_KEY="your-anon-key" \
   -t upview-vm-tracker:latest .
 
-docker run -d --name upview-vm-tracker -p 3000:3000 \
+docker run -d --name upview-vm-tracker -p 5174:5174 \
   -e SUPABASE_SERVICE_ROLE_KEY="your-service-role-key" \
   -e NEXT_PUBLIC_SUPABASE_URL="https://your-ref.supabase.co" \
   -e NEXT_PUBLIC_SUPABASE_PUBLISHABLE_OR_ANON_KEY="your-anon-key" \
@@ -141,7 +147,7 @@ docker run -d --name upview-vm-tracker -p 3000:3000 \
   but unapplied — until it is pushed, RLS still permits viewer writes to the VM
   tracker (the service layer blocks them, so this is missing defence-in-depth
   rather than an open hole).
-- **Terminate TLS in front of the container.** It serves plain HTTP on 3000. Put
+- **Terminate TLS in front of the container.** It serves plain HTTP on 5174. Put
   a reverse proxy (nginx, Caddy, an ALB) in front, and make sure it forwards
   `X-Forwarded-Proto` so Supabase auth cookies are treated as secure.
 - **Set the Supabase redirect/site URL** to the public origin, or the emailed

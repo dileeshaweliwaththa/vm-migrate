@@ -133,7 +133,13 @@
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0.008 326);
 
-  --primary: oklch(0.212 0.019 322.12);
+  /* mauve-800, not shadcn's mauve-900. Every filled button in the app is
+     `Button variant="default"` → `bg-primary` (the primary action in a dialog, the
+     selected item in the Linked-VM switch), and at mauve-900 they read as
+     near-black rather than as part of the palette. mauve-800 still gives white
+     text ~15:1, so nothing is lost on contrast.
+     Dark mode keeps a *light* primary — see the note there. */
+  --primary: oklch(0.263 0.024 320.12); /* mauve-800 */
   --primary-foreground: oklch(0.985 0 0);
 
   --secondary: oklch(0.96 0.003 325.6);
@@ -193,9 +199,8 @@
   --ink-accent: oklch(0.435 0.029 321.78); /* mauve-600 — detail       */
 }
  
-/* Dark mode — shadcn's `mauve` dark theme verbatim, with the same two
-   deviations (★): the accent is the logo orange, and `sidebar-primary` uses it
-   rather than shadcn's blue. */
+/* Dark mode — shadcn's `mauve` dark theme verbatim, with the same deviations
+   (★): no red, the accent step, and mauve-950 chrome. */
 .dark {
   --background: oklch(0.145 0.008 326);
   --foreground: oklch(0.985 0 0);
@@ -204,8 +209,11 @@
   --popover: oklch(0.212 0.019 322.12);
   --popover-foreground: oklch(0.985 0 0);
 
-  --primary: oklch(0.922 0.005 325.62);
-  --primary-foreground: oklch(0.212 0.019 322.12);
+  /* Deliberately the *inverse* of light mode: a filled button here is a light
+     mauve on a dark page. Setting this to mauve-800 (as light mode does) would
+     make every primary button vanish into the mauve-900 card behind it. */
+  --primary: oklch(0.922 0.005 325.62); /* mauve-200 */
+  --primary-foreground: oklch(0.212 0.019 322.12); /* mauve-900 */
 
   --secondary: oklch(0.263 0.024 320.12);
   --secondary-foreground: oklch(0.985 0 0);
