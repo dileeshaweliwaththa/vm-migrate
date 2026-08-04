@@ -10,9 +10,12 @@ const buttonVariants = cva(
       variant: {
         default: 'bg-primary text-primary-foreground hover:opacity-90',
         destructive: 'bg-destructive text-white hover:bg-destructive/90',
-        // Blue-tinted (teal accent from globals): blue border + text, fills on hover.
+        // Mauve border + text, fills on hover. Uses the themed `primary` so it
+        // stays legible in dark mode, and deliberately *not* the accent step —
+        // that is reserved for the active nav item and focus rings, so an outline
+        // button doesn't compete with them.
         outline:
-          'border border-brand-accent bg-background text-brand-accent hover:bg-brand-accent hover:text-brand-foreground',
+          'border border-primary bg-background text-primary hover:bg-primary hover:text-primary-foreground',
         secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
         ghost: 'hover:bg-accent hover:text-accent-foreground',
       },

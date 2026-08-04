@@ -40,6 +40,9 @@ Before implementing any feature, request, or fix, read and follow:
   API, and its per-role permissions.
 - [docs/dashboard.md](docs/dashboard.md) — the `/dashboard` summary and its
   aggregation rules.
+- [docs/deployment.md](docs/deployment.md) — the Docker image and compose setup,
+  and the build-time vs runtime environment split (`NEXT_PUBLIC_*` are inlined at
+  build time, so they are **build args**).
 - [docs/jenkins-sync.md](docs/jenkins-sync.md) — per-environment Jenkins config,
   port sync, and how a triggered build is followed to completion.
 - [docs/docker-import.md](docs/docker-import.md) — importing environment records

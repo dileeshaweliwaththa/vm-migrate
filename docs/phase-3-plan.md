@@ -20,8 +20,8 @@ domain:
 | - | -------- | ------ |
 | 1 | Dashboard data | **Derived only.** No new tables; the dashboard counts what other slices already store. |
 | 2 | Dashboard rendering | **Server component + service, no hook layer** — read-once, no interaction. Revisit if filters arrive. |
-| 3 | Palette | **Brand navy `#162d47` + teal `#2e86ab`**, already defined in `globals.css`. Not a new palette — the sidebar simply wasn't using it. |
-| 4 | Chrome vs content | **Dark chrome, light content.** The sidebar is solid navy in *both* light and dark mode; the content area stays light in light mode. |
+| 3 | Palette | **shadcn `mauve`, single hue.** All 11 steps copied from ui.shadcn.com/colors via its registry. No second hue anywhere — status is carried by lightness, and by the text label every pill already renders. |
+| 4 | Chrome vs content | **Dark chrome, light content.** The sidebar is mauve-900 in *both* light and dark mode; the content area stays white in light mode. |
 | 5 | VM tracker permissions | **Read-only for viewers.** The Phase 1 "any authenticated user has full access" RLS is replaced by the standard role split. |
 
 ---
@@ -45,22 +45,47 @@ New surface: `services/dashboard/dashboardService.ts`,
 
 ## 3. Theme
 
-`--sidebar*` in both `:root` and `.dark` had **each variable declared twice**
-(identical copy-paste), and light mode painted the sidebar `oklch(0.985 0 0)` —
-effectively white, against a white content area. Phase 3:
+Two rounds. The first fixed the mechanics: `--sidebar*` had **each variable
+declared twice** in both `:root` and `.dark` (identical copy-paste), and light
+mode painted the sidebar `oklch(0.985 0 0)` — effectively white, against a white
+content area.
 
-- Sidebar → brand navy, teal for the **active** nav item.
-- Chart ramp → one cohesive teal→navy series plus amber/rose for the warn/bad
-  end, so a status colour never collides with a series colour.
-- Duplicated declarations removed.
+The second reduced it to the logo's two colours, because the app still didn't
+hang together: it mixed navy, teal, sky, emerald, amber, purple and an unused
+blue scale — seven hues, so no two surfaces looked related.
 
-The primitive marks the active item with `--sidebar-accent`, which is only a
-shade off the sidebar itself, so `app-sidebar.tsx` overrides `data-active:` to
-teal. Anything that hardcoded `bg-primary` inside the sidebar had to change too:
-`primary` *is* the navy the sidebar is now painted with, so the logo mark was
-navy-on-navy.
+The third **replaced the hand-mixed ramps with shadcn's own scales**. The
+two-hue system was right, but the ramps were eyeballed hex values, and
+hand-mixing eleven steps does not produce the perceptually-even, contrast-checked
+result a published scale does.
 
-See [ui-guidelines.md § Theme](./ui-guidelines.md#theme-navy-chrome-light-content).
+- Neutral is now shadcn **`mauve`**; accent is `--color-accent-step`
+  (= mauve-600), so the accent can move along the ramp in one edit.
+- `:root`/`.dark` are shadcn's `mauve` theme **verbatim**, with two documented
+  deviations: no red (`destructive` is the darkest step), the accent step, and
+  dark chrome in light mode (shadcn ships a light sidebar).
+- Values were pulled from the registry (`/r/colors/mauve.json`,
+  `/r/colors/index.json`) rather than eyedropped, so they are exact.
+- The unused `--color-secondary-*`, `--color-accent-*` and
+  `--color-success/pending/error` scales were deleted outright — dead tokens in
+  hues that matched nothing.
+- All 108 hardcoded Tailwind colour utilities across 7 feature components were
+  replaced with semantic tokens: `tone-*` for status pills, `ink-*` for inline
+  grid values, `positive`/`negative` for semantic fills. All are themed per mode,
+  so call sites carry no `dark:` variants.
+- Round 4 removed the last non-mauve values: the orange accent, `destructive`'s
+  red, and the `positive`/`negative` green/red pair. Status is now weight-based
+  (`danger` is an inverted dark fill) — the hue cue is gone, which is a real
+  tradeoff, mitigated by every pill already rendering its status as text.
+- Client vs UPVIEW VMs were purple vs sky — two unrelated hues. Now filled
+  (client) vs outlined (ours): a shape difference, since hue isn't available.
+- The "Migrated from" history panel was dark **red**, reading as an error when it
+  is just history. Now a dark mauve band, with the status carried by a pill.
+
+Two bugs fell out of the rework: `bg-primary` inside the sidebar rendered
+invisibly against it (the logo mark), and `SidebarMenuButton` was styling
+**every** nav item as active. See
+[ui-guidelines.md § Theme](./ui-guidelines.md#theme-shadcn-mauve-one-hue-nothing-else).
 
 ---
 
@@ -91,7 +116,11 @@ Labels: `phase-3`, `epic:dashboard`, `epic:theme`, `epic:hardening`, `ui`,
 | ID | Issue | Depends on |
 | -- | ----- | ---------- |
 | F1 | **Dashboard summary**: service + server-rendered page + pure UI, replacing the placeholder stats | B1, B4, D2 |
-| F2 | **Theme**: navy sidebar + teal accent, cohesive chart ramp, de-duplicated CSS vars | — |
+| F2 | **Theme, round 1**: dark sidebar, de-duplicated CSS vars | — |
+| F4 | **Theme, round 2**: reduce to the logo's two hues; purge all 108 hardcoded colour utilities | F2 |
+| F6 | **Theme, round 3**: adopt shadcn scales from the registry; no hand-mixed values | F4 |
+| F7 | **Theme, round 4**: single-hue mauve — remove orange, red, green and blue entirely; sidebar to mauve-950 | F6 |
+| F5 | **Bug: every sidebar nav item rendered as active** — `data-active` presence vs value | F2 |
 | F3 | **`docker` port-source mapping fix** | — |
 
 ### Milestone M5 — Hardening

@@ -47,55 +47,52 @@
   --radius-4xl: calc(var(--radius) + 16px);
  
   /* ==========================================================================
-     BRAND — the logo, and nothing else.
+     PALETTE — shadcn/ui scales. Do not invent colour values.
      ==========================================================================
-     Two hues and white. Everything below is one of these two hues at a
-     different lightness; nothing introduces a third hue. That is what makes it
-     match — the old palette mixed navy, teal, sky, emerald, amber, purple and
-     a stray blue scale, which is why every surface looked like it came from a
-     different design.
+     Every value below is copied from https://ui.shadcn.com/colors (fetched from
+     its registry: /r/colors/mauve.json and /r/colors/index.json), in the same
+     OKLCH form the rest of this file uses. Nothing here is hand-mixed, so the
+     ramps are the perceptually-even, contrast-checked ones shadcn ships.
 
-     ┌─────────────────────────────────────────────────────────────┐
-     │  THE ONLY TWO VALUES TO EDIT — sampled from the logo.        │
-     │  Every token in this file derives from them, so correcting a │
-     │  sampled hex is a one-line change.                           │
-     └─────────────────────────────────────────────────────────────┘ */
-  --color-brand: #141b6b; /* navy  — "are More Outsourcing" */
-  --color-brand-accent: #f36f21; /* orange — "Teams"            */
-  --color-brand-foreground: #ffffff;
+     ONE family. `mauve`, eleven steps, and nothing else — no orange, no blue, no
+     green, no red. Every colour in the interface is a step on the ramp below,
+     and difference is expressed as **lightness**, never as hue.
 
-  /* Navy ramp — one hue, eleven lightnesses. Chrome, text, borders, surfaces. */
-  --color-navy-50: #f2f3fb;
-  --color-navy-100: #e4e6f7;
-  --color-navy-200: #cdd0ee;
-  --color-navy-300: #a9aee1;
-  --color-navy-400: #7c83ce;
-  --color-navy-500: #4e57b8;
-  --color-navy-600: #363fa0;
-  --color-navy-700: #232b85;
-  --color-navy-800: #141b6b; /* = brand */
-  --color-navy-900: #101657;
-  --color-navy-950: #0b1043;
+     That means status is carried by weight rather than colour: `danger` is an
+     inverted dark fill, `warning` a mid fill, `success`/`info` light fills. Every
+     status pill in the app also carries a text label ("Yes"/"No",
+     "SUCCESS"/"FAILED", "Safe to Remove"), so no information depends on hue —
+     see the note in lib/vm-utils.ts.
 
-  /* Orange ramp — the accent. Used sparingly: the active nav item, focus
-     rings, "needs attention". If everything is orange, nothing is. */
-  --color-orange-50: #fff4ec;
-  --color-orange-100: #fee8d9;
-  --color-orange-200: #fdd1b5;
-  --color-orange-300: #fcb183;
-  --color-orange-400: #f98f4e;
-  --color-orange-500: #f36f21; /* = brand-accent */
-  --color-orange-600: #d65d15;
-  --color-orange-700: #b44a0f;
+     Components must never name a colour. They use the tokens defined here —
+     `bg-mauve-900`, `text-ink-source`, `bg-tone-danger` — so the palette can be
+     replaced from this file alone. */
 
-  /* Functional greens/reds. These are the only colours outside the two brand
-     hues, and they are here because they carry *meaning* a brand colour can't:
-     a failed build rendered in navy or orange stops being readable as failure.
-     Both are desaturated and deepened to sit with the navy rather than shout
-     over it — no neon. Warning reuses the brand orange, and info reuses the
-     brand navy, so only two extra hues exist in the whole app. */
-  --color-positive: #157347;
-  --color-negative: #c0263a;
+  /* shadcn `mauve` — the entire palette. Values from /r/colors/mauve.json. */
+  --color-mauve-50: oklch(0.985 0 0);
+  --color-mauve-100: oklch(0.96 0.003 325.6);
+  --color-mauve-200: oklch(0.922 0.005 325.62);
+  --color-mauve-300: oklch(0.865 0.012 325.68);
+  --color-mauve-400: oklch(0.711 0.019 323.02);
+  --color-mauve-500: oklch(0.542 0.034 322.5);
+  --color-mauve-600: oklch(0.435 0.029 321.78);
+  --color-mauve-700: oklch(0.364 0.029 323.89);
+  --color-mauve-800: oklch(0.263 0.024 320.12);
+  --color-mauve-900: oklch(0.212 0.019 322.12);
+  --color-mauve-950: oklch(0.145 0.008 326);
+
+  /* The accent — mauve-600. Everything that used to be orange (the active nav
+     item, focus rings, the emphasised stat) is this one step. Named so the
+     accent can move up or down the ramp in one place. */
+  --color-accent-step: var(--color-mauve-600);
+
+  /* Inline "ink" for values in the tracker grid — old IP, new IP, ports. Themed
+     per mode below, so `text-ink-source` works in light and dark with no
+     `dark:` counterpart at the call site. All three are mauve steps: `source`
+     is the muted past, `target` the emphasised present, `accent` a detail. */
+  --color-ink-source: var(--ink-source);
+  --color-ink-target: var(--ink-target);
+  --color-ink-accent: var(--ink-accent);
 
   /* Status pill tones, themed per mode in :root / .dark below. Exposed as
      utilities (`bg-tone-success`, `text-tone-success-fg`) so STATUS_TONE_CLASS
@@ -123,123 +120,143 @@
   --font-size-paragraph-mini-medium: 12px;
 }
  
+/* Light mode — shadcn's `mauve` theme (/r/colors/mauve.json → cssVarsV4) with
+   exactly two documented deviations, marked ★ below. Everything unmarked is
+   shadcn's value verbatim. */
 :root {
   --radius: 0.625rem;
 
-  /* Content: white page, navy ink. Body text is navy-950 rather than black —
-     black next to a navy logo reads as a third colour. */
-  --background: #ffffff;
-  --foreground: #0b1043;
-  --card: #ffffff;
-  --card-foreground: #0b1043;
-  --popover: #ffffff;
-  --popover-foreground: #0b1043;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0.008 326);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0.008 326);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0.008 326);
 
-  --primary: #141b6b;
-  --primary-foreground: #ffffff;
+  --primary: oklch(0.212 0.019 322.12);
+  --primary-foreground: oklch(0.985 0 0);
 
-  /* Neutral surfaces are navy-tinted, not grey — a pure grey beside navy looks
-     dirty, the same tint looks deliberate. */
-  --secondary: #f2f3fb;
-  --secondary-foreground: #141b6b;
-  --muted: #f2f3fb;
-  --muted-foreground: #565d93;
-  --accent: #e4e6f7;
-  --accent-foreground: #141b6b;
+  --secondary: oklch(0.96 0.003 325.6);
+  --secondary-foreground: oklch(0.212 0.019 322.12);
+  --muted: oklch(0.96 0.003 325.6);
+  --muted-foreground: oklch(0.542 0.034 322.5);
+  --accent: oklch(0.96 0.003 325.6);
+  --accent-foreground: oklch(0.212 0.019 322.12);
 
-  --destructive: #c0263a;
-  --border: #dfe2f2;
-  --input: #dfe2f2;
-  /* Focus rings are orange: the one accent, and it never collides with the navy
-     it sits on. */
-  --ring: #f36f21;
+  /* ★ Deviation 1 — no red. shadcn's `destructive` is a red
+     (oklch(0.577 0.245 27.325)); the palette is mauve only, so destructive is the
+     darkest step instead. Delete actions read as *heavy* rather than red. */
+  --destructive: oklch(0.212 0.019 322.12); /* mauve-900 */
+  --border: oklch(0.922 0.005 325.62);
+  --input: oklch(0.922 0.005 325.62);
 
-  /* Charts: the navy ramp, then orange. Two hues, five distinguishable steps —
-     a series colour can never be mistaken for a status colour. */
-  --chart-1: #141b6b;
-  --chart-2: #363fa0;
-  --chart-3: #7c83ce;
-  --chart-4: #f36f21;
-  --chart-5: #f98f4e;
+  /* ★ Deviation 2 — the accent step. Was the logo orange; now mauve-600. */
+  --ring: var(--color-accent-step);
 
-  /* Sidebar: deepest navy in light mode too — dark chrome, light content. The
-     active item is brand orange, which is the logo's own accent and the only
-     thing on the sidebar that isn't navy. */
-  --sidebar: #0b1043;
-  --sidebar-foreground: #cdd0ee;
-  --sidebar-primary: #f36f21;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #232b85;
-  --sidebar-accent-foreground: #ffffff;
-  --sidebar-border: #232b85;
-  --sidebar-ring: #f36f21;
+  /* Charts: five distinguishable steps of the one ramp, spaced widely enough to
+     stay separable — lightness is the only channel available. */
+  --chart-1: oklch(0.212 0.019 322.12); /* mauve-900 */
+  --chart-2: oklch(0.435 0.029 321.78); /* mauve-600 */
+  --chart-3: oklch(0.542 0.034 322.5); /* mauve-500 */
+  --chart-4: oklch(0.711 0.019 323.02); /* mauve-400 */
+  --chart-5: oklch(0.865 0.012 325.68); /* mauve-300 */
 
-  /* Status pill tones. The single source of truth for STATUS_TONE_CLASS in
-     lib/vm-utils.ts — info is brand navy, warning is brand orange, so only
-     positive/negative add a hue. */
-  --tone-success-bg: #dcf2e6;
-  --tone-success-fg: #0f5233;
-  --tone-info-bg: #e4e6f7;
-  --tone-info-fg: #232b85;
-  --tone-warning-bg: #fee8d9;
-  --tone-warning-fg: #b44a0f;
-  --tone-danger-bg: #fbdfe3;
-  --tone-danger-fg: #97182a;
+  /* ★ Deviation 3 — dark chrome. shadcn ships a *light* sidebar in light mode
+     (oklch(0.985 0 0)); this app wants dark chrome against light content, so the
+     sidebar is mauve-950 in both themes — the deepest step on the ramp. The
+     active item is mauve-600, which is the accent step. */
+  --sidebar: oklch(0.145 0.008 326); /* mauve-950 */
+  --sidebar-foreground: oklch(0.865 0.012 325.68); /* mauve-300 */
+  --sidebar-primary: var(--color-accent-step);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.263 0.024 320.12); /* mauve-800 */
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(0.263 0.024 320.12); /* mauve-800 */
+  --sidebar-ring: var(--color-accent-step);
+
+  /* Status pill tones — the single source of truth for STATUS_TONE_CLASS in
+     lib/vm-utils.ts. With one hue, status is carried by **weight**: danger is an
+     inverted dark fill (heaviest), warning a mid fill, success and info light
+     fills. Every pill also carries its label as text, so nothing depends on
+     colour alone. */
+  --tone-success-bg: oklch(0.96 0.003 325.6); /* mauve-100 */
+  --tone-success-fg: oklch(0.364 0.029 323.89); /* mauve-700 */
+  --tone-info-bg: oklch(0.922 0.005 325.62); /* mauve-200 */
+  --tone-info-fg: oklch(0.435 0.029 321.78); /* mauve-600 */
+  --tone-warning-bg: oklch(0.865 0.012 325.68); /* mauve-300 */
+  --tone-warning-fg: oklch(0.212 0.019 322.12); /* mauve-900 */
+  --tone-danger-bg: oklch(0.263 0.024 320.12); /* mauve-800 */
+  --tone-danger-fg: oklch(0.985 0 0); /* mauve-50  */
+
+  --ink-source: oklch(0.542 0.034 322.5); /* mauve-500 — muted past   */
+  --ink-target: oklch(0.212 0.019 322.12); /* mauve-900 — emphasised   */
+  --ink-accent: oklch(0.435 0.029 321.78); /* mauve-600 — detail       */
 }
  
+/* Dark mode — shadcn's `mauve` dark theme verbatim, with the same two
+   deviations (★): the accent is the logo orange, and `sidebar-primary` uses it
+   rather than shadcn's blue. */
 .dark {
-  /* Dark mode is the same two hues, inverted: navy surfaces instead of neutral
-     greys, so nothing turns into a third colour when the theme flips. */
-  --background: #080c33;
-  --foreground: #e4e6f7;
-  --card: #0b1043;
-  --card-foreground: #e4e6f7;
-  --popover: #0b1043;
-  --popover-foreground: #e4e6f7;
+  --background: oklch(0.145 0.008 326);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.212 0.019 322.12);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.212 0.019 322.12);
+  --popover-foreground: oklch(0.985 0 0);
 
-  /* Navy-800 has too little contrast against a navy page, so `primary` steps up
-     the ramp rather than switching hue. */
-  --primary: #7c83ce;
-  --primary-foreground: #080c33;
+  --primary: oklch(0.922 0.005 325.62);
+  --primary-foreground: oklch(0.212 0.019 322.12);
 
-  --secondary: #101657;
-  --secondary-foreground: #e4e6f7;
-  --muted: #101657;
-  --muted-foreground: #a9aee1;
-  --accent: #232b85;
-  --accent-foreground: #ffffff;
+  --secondary: oklch(0.263 0.024 320.12);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.263 0.024 320.12);
+  --muted-foreground: oklch(0.711 0.019 323.02);
+  --accent: oklch(0.263 0.024 320.12);
+  --accent-foreground: oklch(0.985 0 0);
 
-  --destructive: #e4677a;
-  --border: #232b85;
-  --input: #2b3494;
-  --ring: #f98f4e;
+  /* ★ no red, as in light mode — the *lightest* step here, so a destructive
+     button still reads as the heaviest thing on a dark surface. */
+  --destructive: oklch(0.922 0.005 325.62); /* mauve-200 */
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
 
-  --chart-1: #7c83ce;
-  --chart-2: #a9aee1;
-  --chart-3: #4e57b8;
-  --chart-4: #f98f4e;
-  --chart-5: #fcb183;
+  /* ★ accent step, as in light mode. */
+  --ring: var(--color-accent-step);
 
-  /* Deeper than the page, same hue — the sidebar stays the same surface it is in
-     light mode, and the active item stays orange. */
-  --sidebar: #0b1043;
-  --sidebar-foreground: #cdd0ee;
-  --sidebar-primary: #f36f21;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #232b85;
-  --sidebar-accent-foreground: #ffffff;
-  --sidebar-border: #232b85;
-  --sidebar-ring: #f98f4e;
+  --chart-1: oklch(0.985 0 0); /* mauve-50  */
+  --chart-2: oklch(0.865 0.012 325.68); /* mauve-300 */
+  --chart-3: oklch(0.711 0.019 323.02); /* mauve-400 */
+  --chart-4: oklch(0.542 0.034 322.5); /* mauve-500 */
+  --chart-5: oklch(0.435 0.029 321.78); /* mauve-600 */
 
-  /* Status tones: dark translucent-looking fills with lifted text. */
-  --tone-success-bg: #123b28;
-  --tone-success-fg: #7fd6a4;
-  --tone-info-bg: #1d2578;
-  --tone-info-fg: #a9aee1;
-  --tone-warning-bg: #55290c;
-  --tone-warning-fg: #fcb183;
-  --tone-danger-bg: #571320;
-  --tone-danger-fg: #f2a3ae;
+  /* ★ shadcn's mauve dark theme sets `sidebar-primary` to a blue
+     (oklch(0.488 0.243 264.376)) that belongs to no other token in the theme.
+     The accent step replaces it, and the sidebar is mauve-950 in both themes so
+     it is literally the same surface either way. */
+  --sidebar: oklch(0.145 0.008 326); /* mauve-950 */
+  --sidebar-foreground: oklch(0.865 0.012 325.68); /* mauve-300 */
+  --sidebar-primary: var(--color-accent-step);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.263 0.024 320.12); /* mauve-800 */
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(0.263 0.024 320.12); /* mauve-800 */
+  --sidebar-ring: var(--color-accent-step);
+
+  /* Status tones, inverted for a dark surface: danger becomes the *lightest*
+     fill (heaviest against dark), success and info the darkest. Same weight
+     ordering as light mode, mirrored. */
+  --tone-success-bg: oklch(0.364 0.029 323.89); /* mauve-700 */
+  --tone-success-fg: oklch(0.985 0 0); /* mauve-50  */
+  --tone-info-bg: oklch(0.263 0.024 320.12); /* mauve-800 */
+  --tone-info-fg: oklch(0.711 0.019 323.02); /* mauve-400 */
+  --tone-warning-bg: oklch(0.435 0.029 321.78); /* mauve-600 */
+  --tone-warning-fg: oklch(0.985 0 0); /* mauve-50  */
+  --tone-danger-bg: oklch(0.922 0.005 325.62); /* mauve-200 */
+  --tone-danger-fg: oklch(0.212 0.019 322.12); /* mauve-900 */
+
+  --ink-source: oklch(0.711 0.019 323.02); /* mauve-400 — muted past */
+  --ink-target: oklch(0.985 0 0); /* mauve-50  — emphasised */
+  --ink-accent: oklch(0.865 0.012 325.68); /* mauve-300 — detail     */
 }
  
 @layer base {

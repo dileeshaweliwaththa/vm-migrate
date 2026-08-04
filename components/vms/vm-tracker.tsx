@@ -246,7 +246,7 @@ export function VmTracker({ role }: { role: UserRole }) {
   }
   if (error || !data) {
     return (
-      <div className="p-10 text-sm text-red-600">
+      <div className="p-10 text-sm text-destructive">
         {error instanceof Error ? error.message : 'Failed to load the tracker.'}
       </div>
     );
@@ -265,28 +265,28 @@ export function VmTracker({ role }: { role: UserRole }) {
             </span>
             <span>
               Migrated:{' '}
-              <b className="text-emerald-600 dark:text-emerald-400">
+              <b className="text-ink-target">
                 {stats.migrated}/{stats.vms}
               </b>
             </span>
             <span>
-              Supabase: <b className="text-purple-600 dark:text-purple-400">{stats.supa}</b>
+              Supabase: <b className="text-ink-accent">{stats.supa}</b>
             </span>
             <span>
-              Not Migrating: <b className="text-sky-600 dark:text-sky-400">{stats.keeping}</b>
+              Not Migrating: <b className="text-ink-accent">{stats.keeping}</b>
             </span>
             <span>
               URLs: <b className="text-foreground">{stats.urls}</b>
             </span>
             <span>
               DNS done:{' '}
-              <b className="text-emerald-600 dark:text-emerald-400">
+              <b className="text-ink-target">
                 {stats.dns}/{stats.urls}
               </b>
             </span>
             <span>
               Tested:{' '}
-              <b className="text-emerald-600 dark:text-emerald-400">
+              <b className="text-ink-target">
                 {stats.tested}/{stats.urls}
               </b>
             </span>

@@ -3,14 +3,14 @@ import type { JenkinsBuildStatus, JenkinsRunPhase } from '@/types/common/jenkins
 // Shared Jenkins build-status pill (used by the browse-jobs dialog and the
 // environment records table) so the two render status identically.
 const STATUS_CLASS: Record<JenkinsBuildStatus, string> = {
-  SUCCESS: 'text-emerald-600 dark:text-emerald-500',
+  SUCCESS: 'text-ink-target dark:text-ink-target',
   FAILED: 'text-destructive',
-  UNSTABLE: 'text-amber-600 dark:text-amber-500',
+  UNSTABLE: 'text-ink-source dark:text-ink-source',
   ABORTED: 'text-muted-foreground',
   DISABLED: 'text-muted-foreground',
   NOT_BUILT: 'text-muted-foreground',
   PENDING: 'text-muted-foreground',
-  BUILDING: 'text-sky-600 dark:text-sky-400',
+  BUILDING: 'text-ink-accent',
   UNKNOWN: 'text-muted-foreground',
 };
 

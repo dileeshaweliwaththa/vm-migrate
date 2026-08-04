@@ -81,8 +81,9 @@ export function AppSidebar({ role, email }: { role: UserRole; email: string }) {
           <SidebarMenuItem>
             <SidebarMenuButton asChild size="lg">
               <Link href="/dashboard">
-                {/* Teal, not `bg-primary` — primary *is* the navy the sidebar is
-                    painted with, so the mark would disappear into it. */}
+                {/* The accent step, not `bg-primary` — `primary` is a dark mauve
+                    and the sidebar is the darkest, so the mark would disappear
+                    into it. */}
                 <span className="grid aspect-square size-8 place-items-center rounded-md bg-sidebar-primary text-xs font-bold text-sidebar-primary-foreground">
                   UV
                 </span>

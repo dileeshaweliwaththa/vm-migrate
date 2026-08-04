@@ -1,0 +1,46 @@
+# Keep the build context small and free of secrets. Everything the image needs
+# is installed from package-lock.json or produced by `next build`.
+
+# Dependencies + build output — reinstalled/rebuilt inside the image. Copying the
+# host's node_modules would also drag in platform-specific binaries built for
+# Windows/macOS into a Linux image.
+node_modules
+.next
+out
+build
+
+# Secrets. `next build` receives the two public Supabase values as build args
+# (see Dockerfile); the service-role key is runtime-only. No .env file should
+# ever enter an image layer.
+.env
+.env.*
+
+# Ops-only: Supabase CLI migrations are applied with `supabase db push`, never by
+# the container. Already excluded from Next's file tracing (next.config.ts).
+supabase
+
+# VCS / editor / CI
+.git
+.gitignore
+.github
+.vscode
+.idea
+*.swp
+.DS_Store
+
+# Docs and agent instructions — not needed at runtime.
+docs
+*.md
+AGENTS.md
+CLAUDE.md
+
+# Local artefacts
+coverage
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+Dockerfile
+docker-compose.yml
+.dockerignore

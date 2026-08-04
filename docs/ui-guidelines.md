@@ -114,33 +114,133 @@ width — a wide table (`min-w-[36rem]`) or an unwrapped textarea stretches the
 dialog from the inside. Put `min-w-0` on the wrapper so `overflow-auto` on the
 inner scroll container actually does its job.
 
-## Theme: navy chrome, light content
+## Theme: shadcn `mauve`, one hue, nothing else
 
-The palette is the original tracker's brand: **navy `#162d47`** + **teal
-`#2e86ab`**, defined as `--color-brand` / `--color-brand-accent` in
-`app/globals.css`. The rule is **dark chrome, light content** — the sidebar is
-solid navy in *both* light and dark mode, while the content area stays light in
-light mode. Teal marks the **active** nav item.
+**Never write a colour value in a component.** No hex, no `rgb()`, no `oklch()`,
+no `bg-emerald-600`. Components use the tokens below; `app/globals.css` is the
+only file that names a colour. That is what makes the palette replaceable — and
+it has been replaced four times already.
 
-Two things to know before touching it:
+**Never invent a colour value either.** Everything in `globals.css` is copied
+from [ui.shadcn.com/colors](https://ui.shadcn.com/colors), which you can fetch
+programmatically rather than eyedropper off the page:
 
-1. **`--primary` *is* the sidebar navy.** So inside the sidebar,
-   `bg-primary`/`text-primary-foreground` renders navy-on-navy and disappears.
-   Use the `--sidebar-*` tokens there (`bg-sidebar-primary`,
-   `text-sidebar-foreground`, `bg-sidebar-accent`) — never the global ones. The
-   same applies to `text-muted-foreground` and the default `AvatarFallback` tone:
-   both are tuned for a light surface and wash out on navy.
-2. **The sidebar primitive marks the active item with `--sidebar-accent`,** which
-   here is only a shade off the sidebar itself. `components/layout/app-sidebar.tsx`
-   overrides `data-active:bg-sidebar-primary` to get teal. Override in the feature
-   component (rule 3) — don't edit `components/ui/sidebar.tsx`.
+```bash
+curl -s https://ui.shadcn.com/r/colors/mauve.json   # a full theme, cssVarsV4 = OKLCH
+curl -s https://ui.shadcn.com/r/colors/index.json   # every scale, every step
+```
 
-Chart tokens `--chart-1..5` are one cohesive teal→navy series plus amber/rose at
-the warn/bad end, so a **status** colour never collides with a **series** colour.
-For status pills reuse `STATUS_TONE_CLASS` from
-[`lib/vm-utils.ts`](../lib/vm-utils.ts) rather than picking new greens and reds —
-it is the shared vocabulary across the tracker, the build history, and the
-dashboard.
+**One family — `mauve`, eleven steps.** No orange, no blue, no green, no red.
+Difference is expressed as **lightness**, never as hue. If you are reaching for a
+second hue, the answer is a different step on the ramp.
+
+`--color-mauve-50 … --color-mauve-950`, plus one indirection:
+
+```css
+--color-accent-step: var(--color-mauve-600);
+```
+
+That is the accent — the active nav item, focus rings, the emphasised stat. It
+exists as its own name so the accent can move up or down the ramp in one edit.
+
+`:root` and `.dark` are shadcn's `mauve` theme verbatim, with exactly **three**
+deviations, each marked `★` in the file:
+
+1. **No red.** shadcn's `destructive` is a red; here it is the darkest step
+   (mauve-900 light / mauve-200 dark), so a delete button reads as *heavy* rather
+   than red.
+2. **The accent step** replaces shadcn's mid-mauve `ring`, and also the stray
+   blue shadcn puts in `sidebar-primary` for dark mode — a value that belongs to
+   no other token in the theme.
+3. **Dark chrome.** shadcn ships a *light* sidebar in light mode; here it is
+   **mauve-950** in both themes, so the sidebar is literally the same surface
+   whichever theme you're in.
+
+**Layout rule: dark chrome, light content.** Sidebar is mauve-950 always;
+content stays white in light mode. The accent step marks the **active** nav item
+and focus rings and nothing else.
+
+### Status without hue
+
+With one hue, status is carried by **weight**:
+
+| Tone | Light mode | Dark mode |
+| ---- | ---------- | --------- |
+| `success` | mauve-100 fill, mauve-700 text | mauve-700 fill, mauve-50 text |
+| `info` | mauve-200 fill, mauve-600 text | mauve-800 fill, mauve-400 text |
+| `warning` | mauve-300 fill, mauve-900 text | mauve-600 fill, mauve-50 text |
+| `danger` | mauve-800 fill, mauve-50 text | mauve-200 fill, mauve-900 text |
+
+`danger` is the inverted fill in both modes — the heaviest thing on the surface,
+which is what red used to do. The ordering mirrors when the theme flips.
+
+**This costs the at-a-glance hue cue**, and that is a real tradeoff: a failed
+build no longer reads as "red" from across the room. What makes it acceptable is
+that every pill in the app renders its status **as text** — `Yes`/`No`,
+`SUCCESS`/`FAILED`, `Safe to Remove`/`Pending` — so no information depends on
+colour alone, only scan speed. Keep it that way: never ship a pill that is colour
+only.
+
+### The tokens
+
+| Use | Token |
+| --- | ----- |
+| Everything | `bg-mauve-50 … bg-mauve-950` (and `text-`, `border-`) |
+| Accent | `--color-accent-step` (= mauve-600) |
+| Status pills | `STATUS_TONE_CLASS` in [`lib/vm-utils.ts`](../lib/vm-utils.ts) → `bg-tone-{success,info,warning,danger}` + `text-tone-*-fg` |
+| Inline grid values | `text-ink-source` (came from), `text-ink-target` (landed on), `text-ink-accent` (neutral detail) |
+| Semantic fills | `bg-positive`, `bg-negative` |
+| Everything else | the standard shadcn semantics — `bg-background`, `text-muted-foreground`, `border-border`, `bg-card`, `text-destructive`, … |
+
+`tone-*` and `ink-*` are **themed per mode** in `:root`/`.dark`, so a call site
+never needs a `dark:` counterpart — that is the point of them. Reach for
+`STATUS_TONE_CLASS` rather than naming greens and reds yourself; it is the shared
+vocabulary across the tracker, the build history and the dashboard.
+
+There is no `positive`/`negative` token any more — they were a green and a red,
+and the palette is one hue. Use the `tone-*` pairs above, or a mauve step
+directly.
+
+### Verifying a token actually exists
+
+A token that isn't registered in `@theme` produces **no CSS and no error** — the
+element just renders unstyled. After adding one, check it compiled:
+
+```bash
+grep -c -F '.bg-your-token' $(grep -l 'sidebar-primary' .next/static/chunks/*.css | head -1)
+```
+
+### Two traps in the sidebar
+
+1. **`--primary` is a dark mauve — the same family the sidebar is painted
+   with.** Inside the sidebar, `bg-primary`/`text-primary-foreground` disappears
+   into the background. Use the `--sidebar-*` tokens there
+   (`bg-sidebar-primary`, `text-sidebar-foreground`, `bg-sidebar-accent`) — never
+   the global ones. Same for `text-muted-foreground` and the default
+   `AvatarFallback` tone: both are tuned for a light surface and wash out on the
+   dark chrome.
+
+2. **`SidebarMenuButton`'s active styling applies to every item.** The primitive
+   renders `data-active={isActive}` *unconditionally*, and React stringifies a
+   `data-*` `false` — so the attribute is always present as `"false"`. Tailwind's
+   `data-active:` variant compiles to `[data-active]`, which tests attribute
+   **presence**, so `data-active:bg-sidebar-accent` matches all of them. With the
+   old near-invisible accent nobody noticed; the moment the active colour became
+   distinct, the entire nav rendered filled.
+
+   The fix in `components/layout/app-sidebar.tsx`: restate the same variant
+   (`data-active:bg-transparent`) so tailwind-merge drops the primitive's rule,
+   then style the real active item from React state with `!` — both selectors land
+   at equal specificity, and emission order shouldn't decide the winner.
+
+   This is the same family as the Radix boolean-attribute trap above, but a
+   *different* root cause — upgrading Radix will not fix it. Don't edit
+   `components/ui/sidebar.tsx` (rule 3); override in the feature component.
+
+Chart tokens `--chart-1..5` are five widely-spaced steps of the same ramp
+(mauve-900 → mauve-300 in light mode, reversed in dark). Lightness is the only
+channel available, so keep series counts low — five is the practical ceiling
+before adjacent steps stop being separable.
 
 ## Where shadcn fits in the architecture
 

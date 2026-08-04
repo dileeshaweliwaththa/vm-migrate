@@ -237,3 +237,11 @@ sync says so rather than failing silently (see phase-2-plan.md §10).
   ports.
 - Untested against a live Jenkins instance in this build — validate on a real
   server before relying on it.
+- **Credentials are per environment, and cannot be shared.**
+  `environment_secrets` is keyed by `environment_id` (primary key), so ten
+  environments on the same Jenkins server mean the same URL, username and token
+  entered ten times — and rotating that token means editing all ten, with no way
+  to list which they are. Tracked in **#80** with a proposed `jenkins_servers`
+  table; the fix also removes `deriveBase()`, which only exists because
+  `environments.jenkins_url` means the server root *or* the job URL depending on
+  how it was set.

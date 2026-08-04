@@ -1,0 +1,80 @@
+# Deploys the app container only. Supabase is a hosted service — there is no
+# database, no migration runner and no cache in here. Schema changes are applied
+# separately with `supabase db push` (see docs/schema.md).
+#
+#   cp env.docker.sample .env    # compose reads .env for ${...} interpolation
+#   docker compose up -d --build
+#
+# See docs/deployment.md.
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # These are build args, not runtime env, because NEXT_PUBLIC_* values are
+      # inlined into the bundle during `next build`. The `:?` form makes compose
+      # abort with the message instead of building an image whose client bundle
+      # has `undefined` where the Supabase URL should be.
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:?set it in .env — cp env.docker.sample .env}
+        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_OR_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_OR_ANON_KEY:?set it in .env — cp env.docker.sample .env}
+
+    image: upview-vm-tracker:latest
+    container_name: upview-vm-tracker
+    restart: unless-stopped
+
+    # Host port is configurable; the container always listens on 3000.
+    ports:
+      - '${APP_PORT:-3000}:3000'
+
+    environment:
+      NODE_ENV: production
+
+      # Runtime-only secret. Needed for admin user management and for reading the
+      # Gemini key on behalf of a non-admin editor — both go through the
+      # service-role client, which bypasses RLS. Never a build arg.
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:?set it in .env — required for admin user management}
+
+      # Optional: fallback Gemini key when none is stored in app_settings.
+      # Leave empty to rely solely on the key an admin sets in the UI.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+
+      # Also passed at runtime, not just as build args. The client bundle has
+      # them inlined, but server-side code (lib/supabase/server.ts, proxy.ts,
+      # lib/env.ts) reads process.env at request time.
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_OR_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_OR_ANON_KEY}
+
+    # Mirrors the Dockerfile's HEALTHCHECK so `docker compose ps` reports health
+    # even if the image is replaced by one built elsewhere.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+    # All state lives in Supabase, so the container can run with a read-only root
+    # filesystem. Two writable tmpfs mounts are still needed:
+    #   /tmp             — general scratch space
+    #   /app/.next/cache — Next may create its data/fetch cache at runtime even
+    #                      though the build produces no cache dir. Without this,
+    #                      the first write fails with EROFS.
+    # Drop `read_only` (and these mounts) if a future feature needs real disk.
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /app/.next/cache
+    security_opt:
+      - no-new-privileges:true
+
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'

@@ -230,7 +230,7 @@ export function DashboardOverview({ summary }: { summary: DashboardSummary }) {
             <Separator />
             <Link
               href="/tracker"
-              className="text-sm font-medium text-primary underline-offset-4 hover:underline dark:text-[color:var(--chart-1)]"
+              className="text-sm font-medium text-primary underline-offset-4 hover:underline"
             >
               Open the VM tracker →
             </Link>

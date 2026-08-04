@@ -116,25 +116,20 @@ function MigratedFrom({ vm, allVms, allDeleted }: { vm: Vm; allVms: Vm[]; allDel
       {sources.map(({ src, tag }) => (
         <Fragment key={`mig-${vm.id}-${src.id}`}>
           <TableRow className="hover:bg-transparent">
-            <TableCell className="w-9 bg-red-900/80" />
-            <TableCell
-              colSpan={TRACKER_COLUMNS - 1}
-              className="bg-red-950/80 py-1.5 text-red-100"
-            >
-              <span className="text-[10px] font-bold tracking-wide text-red-300 uppercase">
+            <TableCell className="w-9 bg-mauve-700" />
+            <TableCell colSpan={TRACKER_COLUMNS - 1} className="bg-mauve-800 py-1.5 text-mauve-100">
+              <span className="text-[10px] font-bold tracking-wide text-mauve-400 uppercase">
                 ⬆ Migrated from:{' '}
               </span>
-              <span className="text-xs font-semibold text-red-100">{src.name || '(unnamed)'}</span>
-              <span className="ml-2 text-[10px] text-red-300/80">
+              <span className="text-xs font-semibold text-mauve-50">{src.name || '(unnamed)'}</span>
+              <span className="ml-2 text-[10px] text-mauve-300">
                 {src.oldIp} → {src.newIp}
               </span>
               {tag ? (
                 <span
                   className={cn(
-                    'ml-2 rounded-full px-2 py-0.5 text-[9px] font-bold',
-                    tag === 'ARCHIVED'
-                      ? 'bg-emerald-900 text-emerald-200'
-                      : 'bg-red-800 text-red-100'
+                    'ml-2 rounded-full px-2 py-0.5 text-[9px] font-bold text-mauve-900',
+                    tag === 'ARCHIVED' ? 'bg-mauve-400' : 'bg-mauve-50'
                   )}
                 >
                   {tag}
@@ -144,35 +139,37 @@ function MigratedFrom({ vm, allVms, allDeleted }: { vm: Vm; allVms: Vm[]; allDel
           </TableRow>
           {src.urls.map((u) => (
             <TableRow key={`mig-url-${vm.id}-${src.id}-${u.id}`} className="hover:bg-transparent">
-              <TableCell className="w-9 bg-red-900/80" />
-              <TableCell className="bg-red-950/60 py-1 pl-5">
-                <span className="rounded-full bg-emerald-900 px-2 py-0.5 text-[9px] font-bold tracking-wide text-emerald-200">
+              <TableCell className="w-9 bg-mauve-700" />
+              <TableCell className="bg-mauve-800 py-1 pl-5">
+                <span className="rounded-full bg-mauve-400 px-2 py-0.5 text-[9px] font-bold tracking-wide text-mauve-900">
                   MIGRATED
                 </span>
               </TableCell>
-              <TableCell className="bg-red-950/60 text-center text-xs text-amber-300">
+              <TableCell className="bg-mauve-800 text-center text-xs text-mauve-400">
                 {src.oldIp}
               </TableCell>
-              <TableCell className="bg-red-950/60 text-center text-xs text-emerald-300">
+              <TableCell className="bg-mauve-800 text-center text-xs text-mauve-100">
                 {src.newIp}
               </TableCell>
-              <TableCell className="bg-red-950/60 text-center text-xs font-semibold text-sky-300">
+              <TableCell className="bg-mauve-800 text-center text-xs font-semibold text-mauve-100">
                 {u.port}
               </TableCell>
-              <TableCell className="bg-red-950/60 text-center text-xs text-red-100/80">
+              <TableCell className="bg-mauve-800 text-center text-xs text-mauve-300">
                 {u.proto}
               </TableCell>
-              <TableCell className="bg-red-950/60 text-xs text-red-100/80">{u.url}</TableCell>
-              <TableCell className="bg-red-950/60 text-xs font-medium text-red-100">
+              <TableCell className="bg-mauve-800 text-xs text-mauve-300">{u.url}</TableCell>
+              <TableCell className="bg-mauve-800 text-xs font-medium text-mauve-100">
                 {buildFullUrl(u.proto, src.newIp, u.port)}
               </TableCell>
-              <TableCell className="bg-red-950/60 text-center text-xs">{u.dns ? 'Yes' : 'No'}</TableCell>
-              <TableCell className="bg-red-950/60 text-center text-xs">
+              <TableCell className="bg-mauve-800 text-center text-xs text-mauve-200">
+                {u.dns ? 'Yes' : 'No'}
+              </TableCell>
+              <TableCell className="bg-mauve-800 text-center text-xs text-mauve-200">
                 {u.tested ? 'Yes' : 'No'}
               </TableCell>
-              <TableCell className="bg-red-950/60" colSpan={4} />
-              <TableCell className="bg-red-950/60 text-xs text-red-100/60">{u.notes}</TableCell>
-              <TableCell className="bg-red-950/60" />
+              <TableCell className="bg-mauve-800" colSpan={4} />
+              <TableCell className="bg-mauve-800 text-xs text-mauve-400">{u.notes}</TableCell>
+              <TableCell className="bg-mauve-800" />
             </TableRow>
           ))}
         </Fragment>
@@ -229,7 +226,7 @@ export function VmRow({
             placeholder="0.0.0.0"
             onChange={(v) => h.onVmLocalChange(vm.id, { oldIp: v })}
             onCommit={(v) => h.onVmCommit(vm.id, { oldIp: v })}
-            className="text-center text-amber-600 dark:text-amber-400"
+            className="text-center text-ink-source"
             readOnly={readOnly}
           />
         </TableCell>
@@ -239,7 +236,7 @@ export function VmRow({
             placeholder="0.0.0.0"
             onChange={(v) => h.onVmLocalChange(vm.id, { newIp: v })}
             onCommit={(v) => h.onVmCommit(vm.id, { newIp: v })}
-            className="text-center text-emerald-600 dark:text-emerald-400"
+            className="text-center text-ink-target"
             readOnly={readOnly}
           />
         </TableCell>
@@ -288,7 +285,7 @@ export function VmRow({
                 type="button"
                 onClick={() => h.onAddUrl(vm.id)}
                 title="Add URL row"
-                className="inline-flex size-7 items-center justify-center rounded-md bg-emerald-600 text-white hover:bg-emerald-700"
+                className="inline-flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground hover:opacity-90"
               >
                 <Plus className="size-4" />
               </button>
@@ -303,8 +300,8 @@ export function VmRow({
                 className={cn(
                   'inline-flex h-7 items-center justify-center rounded-md border px-2 text-xs font-bold',
                   vm.isClient
-                    ? 'border-purple-400 bg-purple-100 text-purple-700 dark:border-purple-700 dark:bg-purple-950/60 dark:text-purple-300'
-                    : 'border-sky-400 bg-sky-100 text-sky-700 dark:border-sky-700 dark:bg-sky-950/60 dark:text-sky-300'
+                    ? 'border-transparent bg-mauve-600 text-mauve-50'
+                    : 'border-mauve-400 bg-transparent text-mauve-600 dark:text-mauve-300'
                 )}
               >
                 {vm.isClient ? 'C' : 'UV'}
@@ -313,7 +310,7 @@ export function VmRow({
                 type="button"
                 onClick={() => h.onTrash(vm.id)}
                 title="Delete VM"
-                className="inline-flex size-7 items-center justify-center rounded-md bg-muted text-muted-foreground hover:bg-red-100 hover:text-red-700 dark:hover:bg-red-950/60"
+                className="inline-flex size-7 items-center justify-center rounded-md bg-muted text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
               >
                 <X className="size-4" />
               </button>
@@ -334,10 +331,10 @@ export function VmRow({
           <TableRow key={`url-${vm.id}-${u.id}`}>
             <TableCell className="w-9 bg-primary/60" />
             <TableCell className="py-0.5 pl-5 text-muted-foreground">↳</TableCell>
-            <TableCell className="text-center text-xs text-amber-600 dark:text-amber-400">
+            <TableCell className="text-center text-xs text-ink-source">
               {vm.oldIp}
             </TableCell>
-            <TableCell className="text-center text-xs text-emerald-600 dark:text-emerald-400">
+            <TableCell className="text-center text-xs text-ink-target">
               {vm.newIp}
             </TableCell>
             <TableCell className="py-0.5">
@@ -346,7 +343,7 @@ export function VmRow({
                 placeholder="443"
                 onChange={(v) => h.onUrlLocalChange(vm.id, u.id, { port: v })}
                 onCommit={(v) => h.onUrlCommit(vm.id, u.id, { port: v })}
-                className="text-center font-semibold text-sky-600 dark:text-sky-400"
+                className="text-center font-semibold text-ink-accent"
                 readOnly={readOnly}
               />
             </TableCell>
@@ -419,7 +416,7 @@ export function VmRow({
                   type="button"
                   onClick={() => h.onDeleteUrl(vm.id, u.id)}
                   title="Delete URL"
-                  className="inline-flex size-6 items-center justify-center rounded-md text-red-600 hover:bg-red-100 dark:hover:bg-red-950/60"
+                  className="inline-flex size-6 items-center justify-center rounded-md text-destructive hover:bg-destructive/10"
                 >
                   <X className="size-3.5" />
                 </button>

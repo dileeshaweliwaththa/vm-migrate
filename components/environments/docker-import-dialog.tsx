@@ -244,8 +244,8 @@ export function DockerImportDialog({
               ) : null}
 
               {result.unparsed.length ? (
-                <details className="rounded-md border border-amber-600/40 px-3 py-2 text-sm">
-                  <summary className="flex cursor-pointer items-center gap-1.5 text-amber-700 dark:text-amber-500">
+                <details className="rounded-md border border-ink-source/40 px-3 py-2 text-sm">
+                  <summary className="flex cursor-pointer items-center gap-1.5 text-ink-source dark:text-ink-source">
                     <TriangleAlert className="h-3.5 w-3.5" />
                     {result.unparsed.length} line(s) couldn&apos;t be read
                   </summary>

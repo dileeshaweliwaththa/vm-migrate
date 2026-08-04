@@ -50,7 +50,7 @@ function TrashSection({
           {open ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
           <Trash2 className="size-4 text-muted-foreground" />
           {label}
-          <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-700 dark:bg-red-950/60 dark:text-red-300">
+          <span className="rounded-full bg-tone-danger px-2 py-0.5 text-xs font-bold text-tone-danger-fg">
             {items.length}
           </span>
         </button>
@@ -59,7 +59,7 @@ function TrashSection({
             variant="outline"
             size="sm"
             onClick={() => onClearTrash(type)}
-            className="text-red-600 hover:text-red-700"
+            className="text-destructive hover:text-destructive/80"
           >
             Clear all
           </Button>
@@ -81,10 +81,10 @@ function TrashSection({
             {items.map((vm) => (
               <TableRow key={vm.id}>
                 <TableCell className="font-semibold">{vm.name || '(unnamed)'}</TableCell>
-                <TableCell className="text-amber-600 dark:text-amber-400">
+                <TableCell className="text-ink-source">
                   {vm.oldIp || '—'}
                 </TableCell>
-                <TableCell className="text-emerald-600 dark:text-emerald-400">
+                <TableCell className="text-ink-target">
                   {vm.newIp || '—'}
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground">
@@ -103,7 +103,7 @@ function TrashSection({
                         variant="outline"
                         size="sm"
                         onClick={() => onPurge(vm.id)}
-                        className="text-red-600 hover:text-red-700"
+                        className="text-destructive hover:text-destructive/80"
                       >
                         <X className="size-3.5" /> Delete
                       </Button>

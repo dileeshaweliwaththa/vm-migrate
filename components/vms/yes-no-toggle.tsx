@@ -1,6 +1,7 @@
 'use client';
 
 import { cn } from '@/lib/utils';
+import { STATUS_TONE_CLASS } from '@/lib/vm-utils';
 
 // A compact Yes/No pill toggle used across the tracker grid. Pure and
 // presentational: it shows the current boolean and fires onChange with the
@@ -19,9 +20,9 @@ export function YesNoToggle({
   title?: string;
   readOnly?: boolean;
 }) {
-  const tone = value
-    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-    : 'bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300';
+  // Yes/No is the same success/danger vocabulary as every other pill in the app,
+  // so it reads from the shared tone map rather than naming its own colours.
+  const tone = STATUS_TONE_CLASS[value ? 'success' : 'danger'];
   const base =
     'inline-flex min-w-14 items-center justify-center rounded-full px-2.5 py-0.5 text-xs font-semibold';
 
@@ -38,14 +39,9 @@ export function YesNoToggle({
       type="button"
       title={title}
       onClick={() => onChange(!value)}
-      className={cn(
-        base,
-        'transition-colors',
-        tone,
-        value
-          ? 'hover:bg-emerald-200 dark:hover:bg-emerald-900/60'
-          : 'hover:bg-red-200 dark:hover:bg-red-900/60'
-      )}
+      // One hover rule for both states: the tone already carries the hue, so
+      // darkening it slightly needs no second set of colour classes.
+      className={cn(base, tone, 'transition-opacity hover:opacity-75')}
     >
       {value ? 'Yes' : 'No'}
     </button>

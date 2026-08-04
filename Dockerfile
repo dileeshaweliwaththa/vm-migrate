@@ -1,0 +1,113 @@
+# syntax=docker/dockerfile:1
+
+# Production image for the VM Migration Tracker (Next.js 16, npm, standalone
+# output). See docs/deployment.md for the reasoning and the commands.
+#
+# Three stages so a dependency change and a source change invalidate different
+# layers, and so the final image carries neither npm, the lockfile, nor the
+# ~500MB of devDependencies needed to build.
+
+# ─── deps ─────────────────────────────────────────────────────────────────────
+# Only the manifests are copied here, so this layer is reused for every build in
+# which dependencies didn't change.
+FROM node:22-alpine AS deps
+
+# Next.js on Alpine needs libc6-compat — musl vs glibc. Without it, some native
+# dependencies fail to load at runtime with an opaque "not found" error.
+RUN apk add --no-cache libc6-compat
+
+WORKDIR /app
+COPY package.json package-lock.json ./
+
+# `npm ci` (not `install`) — installs exactly the lockfile, and fails if
+# package.json and the lockfile disagree, rather than silently resolving new
+# versions into a production image.
+RUN npm ci
+
+
+# ─── builder ──────────────────────────────────────────────────────────────────
+FROM node:22-alpine AS builder
+RUN apk add --no-cache libc6-compat
+WORKDIR /app
+
+ENV NEXT_TELEMETRY_DISABLED=1
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+
+# `NEXT_PUBLIC_*` values are inlined into the bundle **at build time**. Passing
+# them only at `docker run` is too late — the browser would receive `undefined`
+# and every Supabase call would fail. So they have to be build args.
+#
+# Both are public by design: the anon/publishable key is meant to reach the
+# browser and is constrained by RLS (docs/auth.md), so baking it into an image
+# layer is expected, not a leak.
+#
+# The **service-role key is deliberately not here.** It is read lazily per
+# request inside `createServiceClient()` (lib/supabase/service.ts), so it stays a
+# runtime-only secret and never touches an image layer. Never add it as an ARG.
+ARG NEXT_PUBLIC_SUPABASE_URL
+ARG NEXT_PUBLIC_SUPABASE_PUBLISHABLE_OR_ANON_KEY
+ENV NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL} \
+    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_OR_ANON_KEY=${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_OR_ANON_KEY}
+
+# Fail early with a message that names the actual problem. Without these two,
+# `next build` dies partway through "Collecting page data" with a stack trace
+# that never mentions Docker or env vars: `lib/env.ts` calls `requireEnv` at
+# module scope, and every API route imports it transitively via
+# `lib/supabase/service.ts`.
+RUN if [ -z "$NEXT_PUBLIC_SUPABASE_URL" ] || [ -z "$NEXT_PUBLIC_SUPABASE_PUBLISHABLE_OR_ANON_KEY" ]; then \
+      echo "" >&2; \
+      echo "ERROR: missing required build args." >&2; \
+      echo "  NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_OR_ANON_KEY" >&2; \
+      echo "  must be passed with --build-arg (docker build) or under build.args" >&2; \
+      echo "  (docker compose). They are inlined into the bundle at build time," >&2; \
+      echo "  so supplying them at run time does not work." >&2; \
+      echo "" >&2; \
+      exit 1; \
+    fi
+
+# Produces .next/standalone (server.js + traced node_modules) because
+# next.config.ts sets `output: "standalone"`.
+RUN npm run build
+
+
+# ─── runner ───────────────────────────────────────────────────────────────────
+FROM node:22-alpine AS runner
+WORKDIR /app
+
+# HOSTNAME is what the standalone server binds to. It defaults to localhost,
+# which inside a container means "unreachable from outside" — a published port
+# would connect and hang. 0.0.0.0 is required.
+# (Comments are kept out of the ENV continuation below: not every Dockerfile
+# parser strips them there, and the value would silently absorb the text.)
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0
+
+# Run as a non-root user. BusyBox `adduser`/`addgroup` flags, not the GNU ones.
+RUN addgroup -g 1001 -S nodejs \
+ && adduser -S -u 1001 -G nodejs nextjs
+
+# `output: "standalone"` bundles the server and its traced dependencies but
+# copies **neither** of these, so both are explicit:
+#   public/       — static files served at the root
+#   .next/static/ — hashed build assets, which must land at .next/static
+COPY --from=builder /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+USER nextjs
+EXPOSE 3000
+
+# /login is the only public, statically-prerendered page — no session, no
+# database round trip — so this checks "is the server serving?" and nothing else.
+# Uses Node's global fetch rather than curl/wget, neither of which is guaranteed
+# in this image.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/login').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+# server.js is generated by the standalone build; there is no `npm start` here
+# and no npm in the image.
+CMD ["node", "server.js"]

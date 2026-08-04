@@ -33,7 +33,7 @@ function GeminiStatusView({ status }: { status: GeminiStatus }) {
     : status.ok
       ? { icon: <CheckCircle2 className="h-4 w-4" />, className: 'text-primary' }
       : status.quotaExceeded
-        ? { icon: <AlertTriangle className="h-4 w-4" />, className: 'text-amber-600 dark:text-amber-500' }
+        ? { icon: <AlertTriangle className="h-4 w-4" />, className: 'text-ink-source dark:text-ink-source' }
         : { icon: <XCircle className="h-4 w-4" />, className: 'text-destructive' };
 
   return (
