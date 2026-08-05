@@ -1,31 +1,19 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import {
-  ChevronsUpDown,
   FolderKanban,
   LayoutDashboard,
-  LogOut,
   Server,
   Settings,
   Users,
   type LucideIcon,
 } from 'lucide-react';
-import { createClient } from '@/lib/supabase/client';
 import { cn } from '@/lib/utils';
 import { isAdmin } from '@/lib/rbac';
 import type { UserRole } from '@/types/common';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Badge } from '@/components/ui/badge';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import {
   Sidebar,
   SidebarContent,
@@ -37,7 +25,6 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  useSidebar,
 } from '@/components/ui/sidebar';
 
 interface NavItem {
@@ -55,24 +42,22 @@ const NAV: NavItem[] = [
   { href: '/admin/settings', label: 'Settings', icon: Settings, adminOnly: true },
 ];
 
-const roleBadgeVariant: Record<UserRole, 'default' | 'secondary' | 'outline'> = {
-  admin: 'default',
-  editor: 'secondary',
-  viewer: 'outline',
-};
-
-export function AppSidebar({ role, email }: { role: UserRole; email: string }) {
+export function AppSidebar({
+  role,
+  name,
+  email,
+}: {
+  role: UserRole;
+  name: string;
+  email: string;
+}) {
   const pathname = usePathname();
-  const router = useRouter();
-  const { isMobile } = useSidebar();
 
   const items = NAV.filter((item) => !item.adminOnly || isAdmin(role));
 
-  const handleSignOut = async () => {
-    await createClient().auth.signOut();
-    router.push('/login');
-    router.refresh();
-  };
+  // `profiles.name` is optional, so fall back to the address rather than
+  // rendering an empty row. Matches `UserMenu`.
+  const label = name.trim() || email;
 
   return (
     <Sidebar collapsible="icon">
@@ -143,49 +128,22 @@ export function AppSidebar({ role, email }: { role: UserRole; email: string }) {
         </SidebarGroup>
       </SidebarContent>
 
+      {/* Identity only — name and role as plain text. The clickable account menu
+          (and sign-out) lives in the top bar, so nothing here is interactive. */}
       <SidebarFooter>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <SidebarMenuButton
-                  size="lg"
-                  className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
-                >
-                  <Avatar className="size-8 rounded-md">
-                    {/* The default fallback tone is tuned for a light surface. */}
-                    <AvatarFallback className="rounded-md bg-sidebar-accent text-xs font-semibold uppercase text-sidebar-foreground">
-                      {email.charAt(0)}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="grid flex-1 text-left text-sm leading-tight">
-                    <span className="truncate">{email}</span>
-                    <span className="truncate text-xs capitalize text-sidebar-foreground/70">
-                      {role}
-                    </span>
-                  </div>
-                  <ChevronsUpDown className="ml-auto size-4" />
-                </SidebarMenuButton>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                side={isMobile ? 'bottom' : 'right'}
-                align="end"
-                className="w-56"
-              >
-                <DropdownMenuLabel className="flex items-center justify-between gap-2 font-normal">
-                  <span className="truncate">{email}</span>
-                  <Badge variant={roleBadgeVariant[role]} className="capitalize">
-                    {role}
-                  </Badge>
-                </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleSignOut}>
-                  <LogOut className="mr-2 h-4 w-4" /> Sign Out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </SidebarMenuItem>
-        </SidebarMenu>
+        <div className="flex items-center gap-2 px-2 py-1.5 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
+          <Avatar className="size-8 shrink-0 rounded-md">
+            {/* The default fallback tone is tuned for a light surface. */}
+            <AvatarFallback className="rounded-md bg-sidebar-accent text-xs font-semibold uppercase text-sidebar-foreground">
+              {label.charAt(0)}
+            </AvatarFallback>
+          </Avatar>
+          {/* Collapsed to the icon rail, the avatar stands in for both lines. */}
+          <div className="grid min-w-0 leading-tight group-data-[collapsible=icon]:hidden">
+            <span className="truncate text-sm font-medium">{label}</span>
+            <span className="truncate text-xs capitalize text-sidebar-foreground/70">{role}</span>
+          </div>
+        </div>
       </SidebarFooter>
     </Sidebar>
   );
