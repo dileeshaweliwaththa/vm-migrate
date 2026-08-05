@@ -114,6 +114,28 @@ width — a wide table (`min-w-[36rem]`) or an unwrapped textarea stretches the
 dialog from the inside. Put `min-w-0` on the wrapper so `overflow-auto` on the
 inner scroll container actually does its job.
 
+## The same trap at page level — `min-w-0` on the app shell
+
+`SidebarProvider` renders a flex row and `SidebarInset` is its flex child, so
+`SidebarInset` also defaults to **`min-width: auto`**. Any wide descendant — the
+tracker's `min-w-[1800px]` table — then widens the whole page instead of scrolling
+inside its own `overflow-x-auto` container.
+
+The visible symptom is not a stray scrollbar. It is that **`sticky` stops
+working**: `sticky top-0` pins on the vertical axis only, so once the *body*
+scrolls horizontally the top bar and the page header slide off to the left with
+the content. That is what "the title goes out of scope when scrolled right" means.
+
+`app/(protected)/(app)/layout.tsx` passes `min-w-0` to `SidebarInset`, and
+`vm-tracker.tsx` puts it on its own `<main>` too. **Both are required** — the
+constraint has to hold at every flex level between the shell and the scroll
+container, because one unconstrained ancestor is enough to push the page wide.
+
+When adding a page with a wide table: put the width floor on the `<Table>`, wrap
+it in `overflow-x-auto`, and make sure every flex ancestor up to `SidebarInset`
+carries `min-w-0`. Block wrappers (`mx-auto w-full max-w-7xl`) are fine as-is —
+this only bites flex and grid items.
+
 ## Theme: shadcn `mauve`, plus green for success
 
 **Never write a colour value in a component.** No hex, no `rgb()`, no `oklch()`,

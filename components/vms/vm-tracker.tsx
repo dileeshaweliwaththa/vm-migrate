@@ -322,7 +322,11 @@ export function VmTracker({ role }: { role: UserRole }) {
         }
       />
 
-      <main className="flex-1 p-4">
+      {/* `min-w-0` for the same reason as SidebarInset: this is a flex item too,
+          so without it the 1800px table pushes the page wide rather than letting
+          the container below scroll. Both levels are needed — the constraint has
+          to hold all the way down the chain. */}
+      <main className="min-w-0 flex-1 p-4">
         <div className="overflow-x-auto rounded-xl border border-border">
           <Table className="min-w-[1800px]">
             <TableHeader>

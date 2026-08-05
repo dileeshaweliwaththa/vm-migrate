@@ -24,7 +24,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <SidebarProvider>
       <AppSidebar role={actor.role} name={actor.name} email={actor.email} />
-      <SidebarInset>
+      {/* `min-w-0` is load-bearing. SidebarInset is a flex item, so it defaults to
+          `min-width: auto` and refuses to shrink below its content's min-content
+          width. A wide child — the tracker's `min-w-[1800px]` table — would then
+          widen the whole page instead of scrolling inside its own container, and
+          the sticky top bar and page header would slide sideways with the body.
+          Same failure as the DialogContent grid trap in docs/ui-guidelines.md. */}
+      <SidebarInset className="min-w-0">
         <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b border-border bg-background/95 px-4 backdrop-blur">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="mr-2 h-4" />
