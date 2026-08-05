@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Download, Plus, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -165,9 +165,12 @@ export function VmTracker({ role }: { role: UserRole }) {
     },
   };
 
-  const handleAddVm = async () => {
+  // Takes the section it was invoked from, so the row lands in the table that was
+  // clicked. Previously hardcoded to UPVIEW, which was fine with a single table
+  // but would put every "add" in the wrong section now there are two.
+  const handleAddVm = async (isClient: boolean) => {
     try {
-      const vm = await createVm.mutateAsync({ isClient: false });
+      const vm = await createVm.mutateAsync({ isClient });
       setData((d) => (d ? { ...d, vms: [...d.vms, vm] } : d));
     } catch (e) {
       alert(e instanceof Error ? e.message : 'Failed to create VM.');
@@ -309,8 +312,11 @@ export function VmTracker({ role }: { role: UserRole }) {
             <Button variant="outline" size="sm" onClick={() => setAllExpanded(false)}>
               Collapse All
             </Button>
+            {/* `() => handleAddVm(false)`, not `handleAddVm` directly: the latter
+                hands the click event in as `isClient` — truthy — so every VM added
+                from the header would land in the Client table. */}
             {canWrite ? (
-              <Button size="sm" onClick={handleAddVm}>
+              <Button size="sm" onClick={() => handleAddVm(false)}>
                 <Plus className="size-4" /> Add VM
               </Button>
             ) : (
@@ -326,66 +332,81 @@ export function VmTracker({ role }: { role: UserRole }) {
           so without it the 1800px table pushes the page wide rather than letting
           the container below scroll. Both levels are needed — the constraint has
           to hold all the way down the chain. */}
-      <main className="min-w-0 flex-1 p-4">
-        <div className="overflow-x-auto rounded-xl border border-border">
-          <Table className="min-w-[1800px]">
-            <TableHeader>
-              <TableRow>
-                {COLUMN_HEADERS.map((label, i) => (
-                  <TableHead
-                    key={`${label}-${i}`}
-                    className={i >= 4 && i <= 13 ? 'text-center' : undefined}
-                  >
-                    {label}
-                  </TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {SECTIONS.map(({ label, isClient }) => {
-                const sectionVms = data.vms.filter((v) => v.isClient === isClient);
-                return (
-                  <Fragment key={label}>
-                    <TableRow className="hover:bg-transparent">
-                      <TableCell
-                        colSpan={TRACKER_COLUMNS}
-                        className="bg-muted py-2 text-xs font-bold tracking-wide uppercase"
-                      >
-                        {label}
-                        <span className="ml-2 rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold text-primary-foreground">
-                          {sectionVms.length}
-                        </span>
-                      </TableCell>
+      <main className="min-w-0 flex-1 space-y-6 p-4">
+        {/* One table per section rather than one table with divider rows. Each gets
+            its own column headers, so a section is readable on its own, and its
+            title sits *outside* the scroll container — where a wide table can never
+            push it out of view. */}
+        {SECTIONS.map(({ label, isClient }) => {
+          const sectionVms = data.vms.filter((v) => v.isClient === isClient);
+          return (
+            <section key={label} aria-label={label} className="space-y-2">
+              <div className="flex items-center gap-2">
+                <h2 className="text-xs font-bold tracking-wide uppercase">{label}</h2>
+                <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold text-primary-foreground">
+                  {sectionVms.length}
+                </span>
+              </div>
+
+              <div className="overflow-x-auto rounded-xl border border-border">
+                <Table className="min-w-[1800px]">
+                  <TableHeader>
+                    <TableRow>
+                      {COLUMN_HEADERS.map((columnLabel, i) => (
+                        <TableHead
+                          key={`${columnLabel}-${i}`}
+                          className={i >= 4 && i <= 13 ? 'text-center' : undefined}
+                        >
+                          {columnLabel}
+                        </TableHead>
+                      ))}
                     </TableRow>
-                    {sectionVms.map((vm) => (
-                      <VmRow
-                        key={vm.id}
-                        vm={vm}
-                        allVms={data.vms}
-                        allDeleted={data.deleted}
-                        h={handlers}
-                        canWrite={canWrite}
-                      />
-                    ))}
-                  </Fragment>
-                );
-              })}
-              {canWrite && (
-                <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={TRACKER_COLUMNS} className="p-3">
-                    <button
-                      type="button"
-                      onClick={handleAddVm}
-                      className="w-full rounded-lg border-2 border-dashed border-primary/40 py-2.5 text-sm font-semibold text-primary hover:bg-primary/5"
-                    >
-                      + Add New VM
-                    </button>
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </div>
+                  </TableHeader>
+                  <TableBody>
+                    {sectionVms.length === 0 ? (
+                      <TableRow className="hover:bg-transparent">
+                        <TableCell
+                          colSpan={TRACKER_COLUMNS}
+                          className="py-6 text-center text-sm text-muted-foreground"
+                        >
+                          No {isClient ? 'client' : 'UPVIEW'} VMs yet.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      sectionVms.map((vm) => (
+                        <VmRow
+                          key={vm.id}
+                          vm={vm}
+                          // Deliberately the *full* lists, not this section's: the
+                          // "Migrated from" history matches on destination IP, and a
+                          // client VM can migrate onto an UPVIEW VM (or vice versa).
+                          // Passing sectionVms would silently hide those rows.
+                          allVms={data.vms}
+                          allDeleted={data.deleted}
+                          h={handlers}
+                          canWrite={canWrite}
+                        />
+                      ))
+                    )}
+                    {canWrite && (
+                      <TableRow className="hover:bg-transparent">
+                        <TableCell colSpan={TRACKER_COLUMNS} className="p-3">
+                          <button
+                            type="button"
+                            onClick={() => handleAddVm(isClient)}
+                            className="w-full rounded-lg border-2 border-dashed border-primary/40 py-2.5 text-sm font-semibold text-primary hover:bg-primary/5"
+                          >
+                            + Add {isClient ? 'Client' : 'UPVIEW'} VM
+                          </button>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </section>
+          );
+        })}
 
         <VmTrash
           deleted={data.deleted}
