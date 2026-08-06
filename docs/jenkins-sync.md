@@ -42,9 +42,47 @@ re-derives them from role strings.
 | Hook       | `hooks/environments/useEnvironmentJenkins.ts` (config, job list, trigger, run progress, history), `hooks/environments/useEnvironments.ts` (`syncFromJenkins`) |
 | Service    | `services/jenkins/jenkinsService.ts`, `services/jenkins/extraction.ts` |
 | Repository | `repositories/jenkins/jenkinsRepository.ts` (external HTTP), `repositories/environmentSecrets/environmentSecretRepository.ts` (service-role), `repositories/environmentBuildRuns/environmentBuildRunRepository.ts` (build history) |
+| Shared     | [`lib/jenkins-url.ts`](../lib/jenkins-url.ts) — deriving a server root, the same-server guard, and re-mounting reported URLs (see [below](#the-urls-jenkins-reports-are-not-the-address-you-reach-it-on)) |
 
 `jenkinsRepository` is the **one external-HTTP data source** — the documented
 exception to "repositories only touch Supabase" (architecture.md / AGENTS.md §2).
+
+## The URLs Jenkins reports are not the address you reach it on
+
+Every absolute URL in a Jenkins API response — `job.url`, the queue item in a
+trigger's `Location` header, `executable.url` — is built from Jenkins' own global
+**Jenkins URL** setting (Manage Jenkins → System → Jenkins Location), *not* from
+the address the request arrived on. The two disagree as soon as that setting goes
+stale: a VM that moved to a new IP, a server put behind a proxy, a renamed host.
+A request to `http://20.197.41.68:8080` then comes back describing jobs at
+`http://20.204.129.96:8080/job/…`.
+
+Untreated, that host is what gets stored on a record (`jenkins_job_url`), what the
+row's job link opens, and what ▶ Run posts back — where the SSRF guard correctly
+refuses it (*"That job URL doesn't belong to this Jenkins server"*) even though the
+user configured the right server. Symptom: a record whose link is dead and whose
+Run button always errors, while Status and Last build still populate (those come
+from the job *listing*, which is fetched from the configured base).
+
+So `rebaseOnJenkinsServer` re-mounts every such URL on the base the environment is
+configured with, keeping only its path (context paths honoured; a URL already on
+that server is returned unchanged). It is applied at each boundary:
+
+| Where | What it fixes |
+| ----- | ------------- |
+| `listJenkinsJobs` (`flattenJobs`) | the browse dialog's links, and the URL **Use** stores on a new record |
+| `rowToPort` via `rowToEnvironment` | records **already stored** with the old host — the row link, the ▶ Run payload, and the job-list match behind Status / Last build |
+| `triggerJenkinsBuild` | the job URL posted from a row, and the queue URL returned to the poller |
+| `getJenkinsRunState` | the queue/build handles the client polls, and `executable.url` |
+| `listEnvironmentBuildRuns` | job and build links on runs recorded before the server moved |
+| `linkJenkinsJob` | never writes Jenkins' self-reported host back onto the environment |
+
+Because a re-mounted URL always carries the environment's own origin, this
+**strengthens** the SSRF guard rather than loosening it: the token can only ever be
+sent to the server the environment points at, and `isSameJenkinsServer` stays as
+the assertion behind it. Correcting stored URLs on read (not by migration) also
+means a server that moves *again* needs nothing but the new URL in Jenkins
+settings.
 
 ## Flow
 
@@ -242,6 +280,10 @@ sync says so rather than failing silently (see phase-2-plan.md §10).
   environments on the same Jenkins server mean the same URL, username and token
   entered ten times — and rotating that token means editing all ten, with no way
   to list which they are. Tracked in **#80** with a proposed `jenkins_servers`
-  table; the fix also removes `deriveBase()`, which only exists because
+  table; the fix also removes `deriveJenkinsBase()`, which only exists because
   `environments.jenkins_url` means the server root *or* the job URL depending on
   how it was set.
+- **A wrong Jenkins URL setting is worked around, not repaired.** Re-mounting keeps
+  this app working, but Jenkins itself still emails links and renders absolute URLs
+  pointing at the stale host. Fixing Jenkins Location on the server is still worth
+  doing.

@@ -22,6 +22,11 @@ import {
   type BuildRunWriteColumns,
 } from '@/repositories/environmentBuildRuns/environmentBuildRunRepository';
 import { rowToBuildRun } from '@/services/jenkins/mappers';
+import {
+  deriveJenkinsBase,
+  isSameJenkinsServer,
+  rebaseOnJenkinsServer,
+} from '@/lib/jenkins-url';
 import { canEdit, canRunBuild } from '@/lib/rbac';
 import type { ApiSingleResponse } from '@/types/common';
 import type {
@@ -90,47 +95,11 @@ const findEnv = async (
   return detail?.environments.find((e) => e.id === envId);
 };
 
-// Derives the Jenkins server root from a job URL (handles context paths and
-// plain roots): everything before "/job/", else the URL itself.
-const deriveBase = (jobUrl: string): string => {
-  const trimmed = jobUrl.trim().replace(/\/+$/, '');
-  const idx = trimmed.indexOf('/job/');
-  return idx > -1 ? trimmed.slice(0, idx) : trimmed;
-};
-
-// Is `candidate` a URL on the *same* Jenkins server as `base` — same origin, at
-// or below its context path? Every request built from a client-supplied URL
-// carries this environment's Basic-auth token, so this is the guard that keeps
-// the token from being sent anywhere else.
-//
-// A plain `candidate.startsWith(base)` is not enough: with a base of
-// `https://jenkins.corp` the URL `https://jenkins.corp.attacker.test/job/x`
-// passes it, and the token would be handed to that host. Compare parsed origins
-// instead, which also pins the scheme and port.
-const isSameJenkinsServer = (candidate: string | undefined, base: string): boolean => {
-  if (!candidate || !base) return false;
-
-  let target: URL;
-  let root: URL;
-  try {
-    target = new URL(candidate);
-    root = new URL(base);
-  } catch {
-    return false; // not an absolute URL
-  }
-
-  if (target.protocol !== 'http:' && target.protocol !== 'https:') return false;
-  // `URL.origin` ignores userinfo, so reject it explicitly rather than let a
-  // `https://user:pass@host/` form through.
-  if (target.username || target.password) return false;
-  if (target.origin !== root.origin) return false;
-
-  // Honour a context path (e.g. https://host/jenkins): the target must sit at or
-  // under it, with a boundary check so `/jenkinsX` can't pass as `/jenkins`.
-  const rootPath = root.pathname.replace(/\/+$/, '');
-  const targetPath = target.pathname.replace(/\/+$/, '');
-  return targetPath === rootPath || targetPath.startsWith(`${rootPath}/`);
-};
+// URL handling lives in lib/jenkins-url.ts: deriving the server root, the
+// same-server guard, and `rebaseOnJenkinsServer` — which re-mounts the URLs
+// Jenkins reports (built from its own possibly-stale "Jenkins URL" setting, not
+// from the address we reached it on) onto the base this environment actually
+// uses. Everything below applies that before a URL is fetched, stored, or shown.
 
 const RESULT_MAP: Record<string, JenkinsBuildStatus> = {
   SUCCESS: 'SUCCESS',
@@ -162,20 +131,25 @@ const jobStatus = (job: JenkinsRawJob): { status: JenkinsBuildStatus; building: 
 
 // Flattens the nested job tree into runnable-job summaries (leaves), carrying a
 // human folder path. Nodes with children are folders/multibranch — recurse.
-const flattenJobs = (jobs: JenkinsRawJob[], prefix = ''): JenkinsJobSummary[] => {
+//
+// Each job's URL is re-mounted on `base`: what Jenkins reports here is its own
+// configured root URL, which is what makes a link unreachable and a ▶ Run fail
+// once a server has moved. Doing it at the edge means the summary the rest of the
+// app sees — including the URL "Use" stores on a record — is always reachable.
+const flattenJobs = (jobs: JenkinsRawJob[], base: string, prefix = ''): JenkinsJobSummary[] => {
   const out: JenkinsJobSummary[] = [];
   for (const job of jobs) {
     const name = job.name ?? '';
     const path = prefix ? `${prefix} / ${name}` : name;
     if (job.jobs && job.jobs.length > 0) {
-      out.push(...flattenJobs(job.jobs, path));
+      out.push(...flattenJobs(job.jobs, base, path));
     } else if (job.url) {
       const { status, building } = jobStatus(job);
       const ts = job.lastCompletedBuild?.timestamp;
       out.push({
         name,
         path,
-        url: job.url,
+        url: rebaseOnJenkinsServer(job.url, base),
         status,
         building,
         lastBuildNumber: job.lastCompletedBuild?.number ?? null,
@@ -204,7 +178,10 @@ const resolveEnvJenkins = async (
   if (!username) {
     return { ok: false, message: 'Set the Jenkins username (the token must be paired with its user).' };
   }
-  return { ok: true, value: { env, auth: { username, apiToken }, base: deriveBase(env.jenkinsUrl) } };
+  return {
+    ok: true,
+    value: { env, auth: { username, apiToken }, base: deriveJenkinsBase(env.jenkinsUrl) },
+  };
 };
 
 // Public, secret-free config for the modal (token replaced by a boolean).
@@ -359,7 +336,7 @@ export const listJenkinsJobs = async (
     if (!res.ok) {
       return { success: false, message: configErrorMessage(res.status, res.error, auth.username), data: null };
     }
-    const jobs = flattenJobs(res.jobs).sort((a, b) => a.path.localeCompare(b.path));
+    const jobs = flattenJobs(res.jobs, base).sort((a, b) => a.path.localeCompare(b.path));
     return { success: true, message: 'OK', data: jobs };
   } catch (error) {
     return { success: false, message: asMsg(error, 'Failed to load Jenkins jobs.'), data: null };
@@ -384,10 +361,14 @@ const jobNameFromUrl = (jobUrl: string): string => {
 const recordTriggeredRun = async (
   actor: CurrentActor,
   env: Environment,
+  base: string,
   jobUrl: string,
   queueUrl: string
 ): Promise<void> => {
-  const port = env.ports.find((p) => p.jenkinsJobUrl === jobUrl);
+  // Matched on the re-mounted URL on both sides: a record stored before the
+  // server moved still carries the old host, and comparing raw strings would
+  // leave the run unattributed to any record (and so out of its history).
+  const port = env.ports.find((p) => rebaseOnJenkinsServer(p.jenkinsJobUrl, base) === jobUrl);
   try {
     await insertBuildRun({
       environment_id: env.id,
@@ -425,7 +406,14 @@ export const triggerJenkinsBuild = async (
     if (!resolved.ok) return { success: false, message: resolved.message, data: null };
 
     const { env, auth, base } = resolved.value;
-    if (!isSameJenkinsServer(jobUrl, base)) {
+    // The job URL arrives from the client (a record row, or the browse dialog), so
+    // it is re-mounted on this environment's own server root before anything is
+    // fetched with the token attached. That both keeps the SSRF guard absolute —
+    // the request can only go to this environment's Jenkins — and stops a record
+    // whose stored URL still names the server's old address from being rejected
+    // outright. Only a URL with no usable path left survives as a failure.
+    const target = rebaseOnJenkinsServer(jobUrl, base);
+    if (!isSameJenkinsServer(target, base)) {
       return {
         success: false,
         message: 'That job URL doesn’t belong to this Jenkins server.',
@@ -433,7 +421,7 @@ export const triggerJenkinsBuild = async (
       };
     }
 
-    const res = await triggerBuild(auth, base, jobUrl);
+    const res = await triggerBuild(auth, base, target);
     if (!res.ok) {
       const message =
         res.status === 403
@@ -450,12 +438,17 @@ export const triggerJenkinsBuild = async (
     // track it individually and falls back to the job list's coarse state. The
     // history row is written either way: who ran what is worth recording even
     // when the run itself can't be followed to a result.
-    await recordTriggeredRun(actor, env, jobUrl, res.queueUrl);
+    //
+    // It comes back in a `Location` header Jenkins also builds from its own root
+    // URL, so it gets the same treatment before it is handed to the poller or
+    // written to history — otherwise the very next poll would be refused.
+    const queueUrl = res.queueUrl ? rebaseOnJenkinsServer(res.queueUrl, base) : '';
+    await recordTriggeredRun(actor, env, base, target, queueUrl);
 
     return {
       success: true,
       message: 'Build queued in Jenkins.',
-      data: { queued: true, queueUrl: res.queueUrl },
+      data: { queued: true, queueUrl },
     };
   } catch (error) {
     return { success: false, message: asMsg(error, 'Failed to trigger the build.'), data: null };
@@ -568,20 +561,24 @@ export const getJenkinsRunState = async (
     if (!resolved.ok) return { success: false, message: resolved.message, data: null };
     const { auth, base } = resolved.value;
 
-    // The URLs arrive from the client, so both are checked against this
-    // environment's own Jenkins root before any request is made with the token
-    // attached — otherwise this endpoint would fetch arbitrary URLs on request.
-    const belongs = (url?: string): boolean => isSameJenkinsServer(url, base);
+    // The URLs arrive from the client, so each is re-mounted on this environment's
+    // own Jenkins root and then checked against it before any request is made with
+    // the token attached — otherwise this endpoint would fetch arbitrary URLs on
+    // request. Re-mounting also covers queue/build URLs minted by Jenkins itself,
+    // which carry whatever host its root-URL setting names.
+    const on = (url?: string): string => (url ? rebaseOnJenkinsServer(url, base) : '');
+    const belongs = (url?: string): boolean => isSameJenkinsServer(on(url), base);
 
     // Every successful poll below also lands on the run's history row, so a
-    // record ends with the build number and result it actually reached.
+    // record ends with the build number and result it actually reached. Matched on
+    // the re-mounted handles, which is the form the trigger stored.
     const ok = async (data: JenkinsRunState): Promise<ApiSingleResponse<JenkinsRunState>> => {
-      await syncRunHistory(ref, data);
+      await syncRunHistory({ queueUrl: on(ref.queueUrl), buildUrl: on(ref.buildUrl) }, data);
       return { success: true, message: 'OK', data };
     };
 
     if (belongs(ref.buildUrl)) {
-      return ok(await buildRunState(auth, ref.buildUrl as string, null));
+      return ok(await buildRunState(auth, on(ref.buildUrl), null));
     }
 
     if (!belongs(ref.queueUrl)) {
@@ -592,12 +589,12 @@ export const getJenkinsRunState = async (
       };
     }
 
-    const item = await fetchQueueItem(auth, ref.queueUrl as string);
+    const item = await fetchQueueItem(auth, on(ref.queueUrl));
     // 404 = the queue item has already expired. Nothing further to follow.
     if (!item.ok) return ok(unknownRun);
     if (item.cancelled) return ok({ ...unknownRun, phase: 'CANCELLED' });
 
-    const buildUrl = item.executable?.url ?? '';
+    const buildUrl = on(item.executable?.url);
     if (!buildUrl || !belongs(buildUrl)) {
       return ok({
         ...unknownRun,
@@ -638,7 +635,16 @@ export const listEnvironmentBuildRuns = async (
 
   try {
     const rows = await findBuildRuns(envId, BUILD_HISTORY_LIMIT, portId);
-    return { success: true, message: 'OK', data: rows.map(rowToBuildRun) };
+    // The job and build links are re-mounted on the environment's current server
+    // root: a run recorded before the server moved holds the address Jenkins had
+    // then, and a history entry whose link 404s is worse than no link.
+    const base = deriveJenkinsBase(env.jenkinsUrl);
+    const runs = rows.map(rowToBuildRun).map((run) => ({
+      ...run,
+      jobUrl: rebaseOnJenkinsServer(run.jobUrl, base),
+      buildUrl: rebaseOnJenkinsServer(run.buildUrl, base),
+    }));
+    return { success: true, message: 'OK', data: runs };
   } catch (error) {
     return { success: false, message: asMsg(error, 'Failed to load the build history.'), data: null };
   }
@@ -659,14 +665,17 @@ export const linkJenkinsJob = async (
   const env = await findEnv(projectId, envId);
   if (!env) return { success: false, message: 'Environment not found.', data: null };
 
-  const base = deriveBase(env.jenkinsUrl);
-  if (!isSameJenkinsServer(jobUrl, base)) {
+  const base = deriveJenkinsBase(env.jenkinsUrl);
+  // Stored re-mounted on the base the environment already points at, so linking a
+  // job never writes back the host Jenkins reports itself as.
+  const target = rebaseOnJenkinsServer(jobUrl, base);
+  if (!isSameJenkinsServer(target, base)) {
     return { success: false, message: 'That job URL doesn’t belong to this Jenkins server.', data: null };
   }
 
   try {
     await updateEnvironment(envId, {
-      jenkins_url: jobUrl,
+      jenkins_url: target,
       cicd_provider: 'jenkins',
       ...(description.trim() ? { notes: description.trim() } : {}),
     });
