@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { KeyRound } from 'lucide-react';
+import { KeyRound, Server } from 'lucide-react';
 import {
   useEnvironmentJenkinsConfig,
   useSaveEnvironmentJenkinsConfig,
@@ -24,6 +24,11 @@ import {
 
 const SECRET_UNCHANGED = '';
 
+// The VM's Jenkins server root, when there's one to borrow. Named rather than
+// inlined because "" and undefined both have to fall through to the placeholder.
+const inheritedBase = (config: EnvironmentJenkinsConfig): string =>
+  config.inherited?.jenkinsBase ?? '';
+
 // Inner form: seeded once from the loaded config. Only mounted after the config
 // query resolves, so there's no setState-in-effect.
 function ConfigForm({
@@ -38,8 +43,13 @@ function ConfigForm({
   onSaved: () => void;
 }) {
   const save = useSaveEnvironmentJenkinsConfig(projectId, envId);
-  const [jenkinsUrl, setJenkinsUrl] = useState(config.jenkinsUrl);
-  const [jenkinsUsername, setJenkinsUsername] = useState(config.jenkinsUsername);
+  // Seeded from what the VM already has where this environment has nothing. The
+  // server root is a starting point, not an answer: the editor still has to name
+  // the job (or save and pick one with "Browse jobs", which only needs the root).
+  const [jenkinsUrl, setJenkinsUrl] = useState(config.jenkinsUrl || inheritedBase(config));
+  const [jenkinsUsername, setJenkinsUsername] = useState(
+    config.jenkinsUsername || config.inherited?.jenkinsUsername || ''
+  );
   const [jenkinsApiToken, setJenkinsApiToken] = useState(SECRET_UNCHANGED);
 
   const handleSave = () => {
@@ -54,9 +64,28 @@ function ConfigForm({
     });
   };
 
+  // The token is never sent to the browser, so "prefilled" can only ever mean the
+  // two non-secret fields — the third is a promise the server keeps on save.
+  const inherited = config.inherited;
+
   return (
     <>
       <div className="space-y-4">
+        {inherited ? (
+          <div className="rounded-md border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+            <Server className="mr-1 inline h-3 w-3 align-[-2px]" />
+            {inherited.vmName ? (
+              <>
+                <span className="font-medium text-foreground">{inherited.vmName}</span> already has
+                Jenkins set up
+              </>
+            ) : (
+              <>This VM already has Jenkins set up</>
+            )}
+            , so its server and user are filled in below and its API token will be reused. Paste a
+            token only to use a different one.
+          </div>
+        ) : null}
         <div className="space-y-2">
           <Label htmlFor="jk-url">Job URL</Label>
           <Input
@@ -85,7 +114,13 @@ function ConfigForm({
               type="password"
               className="pl-9"
               autoComplete="off"
-              placeholder={config.hasToken ? '•••••••••• (leave blank to keep)' : 'Paste the API token'}
+              placeholder={
+                config.hasToken
+                  ? '•••••••••• (leave blank to keep)'
+                  : inherited
+                    ? '•••••••••• (leave blank to reuse the VM’s)'
+                    : 'Paste the API token'
+              }
               value={jenkinsApiToken}
               onChange={(e) => setJenkinsApiToken(e.target.value)}
             />

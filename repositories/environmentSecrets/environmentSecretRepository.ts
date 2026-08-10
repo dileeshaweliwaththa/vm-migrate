@@ -24,6 +24,24 @@ export const hasEnvironmentToken = async (environmentId: string): Promise<boolea
   return token.trim().length > 0;
 };
 
+// Which of these environments hold a non-empty token. Returns **ids only** — it
+// is the one query here whose result is allowed to inform a decision made outside
+// this file, so it deliberately cannot carry a token value with it.
+export const findEnvironmentIdsWithToken = async (
+  environmentIds: string[]
+): Promise<string[]> => {
+  if (environmentIds.length === 0) return [];
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .from('environment_secrets')
+    .select('environment_id, jenkins_api_token')
+    .in('environment_id', environmentIds);
+  if (error) throw new Error(error.message);
+  return (data ?? [])
+    .filter((row) => ((row.jenkins_api_token as string | null) ?? '').trim().length > 0)
+    .map((row) => row.environment_id as string);
+};
+
 export const setEnvironmentToken = async (
   environmentId: string,
   token: string

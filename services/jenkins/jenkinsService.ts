@@ -8,8 +8,12 @@ import {
   listAllJobs,
   triggerBuild,
 } from '@/repositories/jenkins/jenkinsRepository';
-import { updateEnvironment } from '@/repositories/environments/environmentRepository';
 import {
+  findEnvironmentsByVmId,
+  updateEnvironment,
+} from '@/repositories/environments/environmentRepository';
+import {
+  findEnvironmentIdsWithToken,
   getEnvironmentToken,
   setEnvironmentToken,
   hasEnvironmentToken,
@@ -22,6 +26,7 @@ import {
   type BuildRunWriteColumns,
 } from '@/repositories/environmentBuildRuns/environmentBuildRunRepository';
 import { rowToBuildRun } from '@/services/jenkins/mappers';
+import { rowToEnvironment } from '@/services/projects/mappers';
 import {
   deriveJenkinsBase,
   isDeniedJenkinsTarget,
@@ -194,6 +199,31 @@ const resolveEnvJenkins = async (
   };
 };
 
+// The environment on this one's VM whose Jenkins credentials can be reused.
+//
+// A VM runs **one** Jenkins, so the second environment placed on it is being
+// pointed at a server that is already configured — asking for the same URL, user,
+// and token again is asking the editor to re-enter what the app knows. This finds
+// the donor; the two callers below decide what to do with it: the modal is told
+// what it may prefill (server root + username, never the token), and the save
+// copies the token itself, server-side.
+//
+// Most recently updated first, so a rotated token is what gets lent, not the
+// oldest one on the VM.
+const findVmJenkinsDonor = async (env: Environment): Promise<Environment | null> => {
+  if (!env.vmId) return null;
+
+  const candidates = (await findEnvironmentsByVmId(env.vmId))
+    .map(rowToEnvironment)
+    // A donor is only useful if it carries the whole pair: Basic auth is
+    // username + token, and a URL to derive the server root from.
+    .filter((e) => e.id !== env.id && e.jenkinsUrl.trim() && e.jenkinsUsername.trim());
+  if (candidates.length === 0) return null;
+
+  const withToken = new Set(await findEnvironmentIdsWithToken(candidates.map((e) => e.id)));
+  return candidates.find((e) => withToken.has(e.id)) ?? null;
+};
+
 // Public, secret-free config for the modal (token replaced by a boolean).
 export const getEnvironmentJenkinsConfig = async (
   projectId: string,
@@ -207,10 +237,27 @@ export const getEnvironmentJenkinsConfig = async (
 
   try {
     const hasToken = await hasEnvironmentToken(envId);
+    // Only offered to an environment with nothing of its own — once it has a
+    // token, its own configuration is the answer and the offer would just be a
+    // second, confusing source of truth.
+    const donor = hasToken ? null : await findVmJenkinsDonor(env);
     return {
       success: true,
       message: 'OK',
-      data: { jenkinsUrl: env.jenkinsUrl, jenkinsUsername: env.jenkinsUsername, hasToken },
+      data: {
+        jenkinsUrl: env.jenkinsUrl,
+        jenkinsUsername: env.jenkinsUsername,
+        hasToken,
+        inherited: donor
+          ? {
+              vmName: env.vmName ?? '',
+              // The server root, not the donor's job URL — the job is per
+              // environment, the server is per VM.
+              jenkinsBase: deriveJenkinsBase(donor.jenkinsUrl),
+              jenkinsUsername: donor.jenkinsUsername,
+            }
+          : null,
+      },
     };
   } catch (error) {
     return { success: false, message: asMsg(error, 'Failed to load Jenkins config.'), data: null };
@@ -244,6 +291,14 @@ export const saveEnvironmentJenkinsConfig = async (
     // Secret token: only write when provided (undefined = keep stored value).
     if (input.jenkinsApiToken !== undefined) {
       await setEnvironmentToken(envId, input.jenkinsApiToken.trim());
+    } else if (!(await hasEnvironmentToken(envId))) {
+      // Nothing typed and nothing stored: take the VM's. This is the only path
+      // that moves a token between rows, and it is why the modal can offer to
+      // reuse credentials without the token ever reaching the browser — the value
+      // is read and written here, server-side, both rows being equally
+      // unreachable by any client. Editor-gated by the check at the top.
+      const donor = await findVmJenkinsDonor(env);
+      if (donor) await setEnvironmentToken(envId, await getEnvironmentToken(donor.id));
     }
     const hasToken = await hasEnvironmentToken(envId);
     return {
@@ -253,6 +308,9 @@ export const saveEnvironmentJenkinsConfig = async (
         jenkinsUrl: input.jenkinsUrl.trim(),
         jenkinsUsername: input.jenkinsUsername.trim(),
         hasToken,
+        // Whatever was on offer has just been taken (or was declined by typing a
+        // token) — either way this environment now stands on its own.
+        inherited: null,
       },
     };
   } catch (error) {

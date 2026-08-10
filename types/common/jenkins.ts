@@ -128,10 +128,26 @@ export interface EnvironmentSyncResult {
 
 // Public (secret-free) per-environment Jenkins config for the modal. The token
 // is replaced by a boolean — never sent to the browser.
+// What another environment on the *same VM* already has configured, offered to an
+// environment that has no credentials of its own. A VM runs one Jenkins, so the
+// second environment on it shouldn't need the same server, user, and token typed
+// again. Non-secret by construction: the server root and username, never the
+// token — that is copied server-side on save and never travels to the browser.
+// See docs/jenkins-sync.md § Inheriting a VM's Jenkins credentials.
+export interface InheritedJenkinsConfig {
+  // The VM both environments sit on — what makes the offer make sense to read.
+  vmName: string;
+  // The donor's *server root*, not its job URL: the job differs per environment.
+  jenkinsBase: string;
+  jenkinsUsername: string;
+}
+
 export interface EnvironmentJenkinsConfig {
   jenkinsUrl: string;
   jenkinsUsername: string;
   hasToken: boolean;
+  // Null unless this environment has no token and its VM has one to lend.
+  inherited: InheritedJenkinsConfig | null;
 }
 
 // Write payload from the modal. Token is only sent when (re)set; undefined keeps

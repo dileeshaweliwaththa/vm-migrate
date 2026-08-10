@@ -30,6 +30,21 @@ export const findAllEnvironments = async (): Promise<EnvironmentRow[]> => {
   return (data ?? []) as EnvironmentRow[];
 };
 
+// Every environment sitting on one VM, most recently updated first. Used to find
+// the Jenkins credentials a VM already has configured — a VM runs one Jenkins, so
+// its newest configuration is the one worth offering to the next environment.
+// Ports aren't selected: no caller of this needs them.
+export const findEnvironmentsByVmId = async (vmId: string): Promise<EnvironmentRow[]> => {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('environments')
+    .select('*')
+    .eq('vm_id', vmId)
+    .order('updated_at', { ascending: false });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as EnvironmentRow[];
+};
+
 export const insertEnvironment = async (
   values: EnvironmentWriteColumns
 ): Promise<EnvironmentRow> => {

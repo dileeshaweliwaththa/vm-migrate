@@ -83,6 +83,25 @@ three files today — that grep is the audit.
   dialog can set it, and `getEnvironmentJenkinsConfig` returns `hasToken: boolean`
   instead of the value. A viewer can run a build without the token ever reaching
   their browser.
+- **One token can be copied to another environment on the same VM**, entirely
+  server-side ([jenkins-sync.md § Inheriting a VM's Jenkins
+  credentials](./jenkins-sync.md#inheriting-a-vms-jenkins-credentials)). This is
+  the only path that moves a token between rows, and it holds the write-only rule:
+  `saveEnvironmentJenkinsConfig` reads the donor's value and writes the new row
+  through the service-role repository, so the token is never returned to a client,
+  and the modal's "pre-fill" is only ever the server root and username. The
+  supporting query, `findEnvironmentIdsWithToken`, returns **ids only** — by
+  construction it cannot carry a token value out to a caller. Gated on `canEdit`
+  like every other write in that service. Two properties to preserve if this is
+  extended: the donor must be on the *same VM* (`vm_id`, the unit that actually
+  has a Jenkins), and an explicitly typed token must always win over the copy.
+  Note the blast radius it accepts: a VM can host environments from **different
+  projects**, so an editor configuring one project's environment may inherit a
+  token first configured in another. That grants no capability an editor lacked —
+  they could already trigger builds against that server through the donor
+  environment, and per [A7](#accepted-risks) deployment authority is effectively
+  "editor" — but it does widen where the value is *stored*, which is why the modal
+  names the VM it is borrowing from rather than filling the fields silently.
 - The Gemini key is likewise reduced to `hasGeminiKey`. Provider errors are
   translated by `interpretGeminiError` rather than passed through raw.
 - `SUPABASE_SERVICE_ROLE_KEY` is read inside `createServiceClient()` at request

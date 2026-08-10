@@ -92,7 +92,9 @@ On a project page, each environment whose CI/CD provider is **Jenkins** shows
 1. **Jenkins settings** (⚙) — opens a modal to set the **Job URL** (a specific
    job, or just the server base URL), **Username**, and **API token**
    (write-only; masked once stored). URL + username save to the environment; the
-   token saves to `environment_secrets`.
+   token saves to `environment_secrets`. If the environment's VM already has
+   Jenkins configured elsewhere, the modal arrives pre-filled — see
+   [Inheriting a VM's Jenkins credentials](#inheriting-a-vms-jenkins-credentials).
 2. **Browse jobs** (list icon, shown once a URL is set) — lists **all jobs on
    the server** (the base is derived from the Job URL, so a bare base URL is
    enough to browse). For each job it shows status (from `color` + last build
@@ -122,6 +124,58 @@ On a project page, each environment whose CI/CD provider is **Jenkins** shows
    newest first: build number, status, **who started it**, when, and how long it
    took. It sits next to ▶ Run because they are the same unit of work: one record,
    one job, one history.
+
+## Inheriting a VM's Jenkins credentials
+
+A VM runs **one** Jenkins. So the second environment placed on a VM is being
+pointed at a server the app already has credentials for, and asking the editor to
+re-type the same URL, user, and token is asking them to re-enter what is already
+stored. The settings modal therefore arrives pre-filled.
+
+**What is pre-filled, and what is not.** The token is write-only —
+`getEnvironmentJenkinsConfig` has never returned it and still doesn't
+([security.md § Secrets handling](./security.md#secrets-handling)). So "pre-filled"
+covers exactly the two non-secret fields:
+
+| Field | Pre-filled with | How |
+| ----- | --------------- | --- |
+| Job URL | the donor's **server root**, not its job URL | client-side, from `inherited.jenkinsBase` |
+| Username | the donor's username | client-side, from `inherited.jenkinsUsername` |
+| API token | — | **server-side on save**; never sent to the browser |
+
+The server root rather than the job URL, because the job is per environment while
+the server is per VM. It leaves the editor one step: name the job, or save and pick
+one with **Browse jobs**, which needs only the root.
+
+**How the token gets there.** Leaving the token box blank is the accept. On save,
+when nothing was typed *and* the environment has no token of its own,
+`saveEnvironmentJenkinsConfig` reads the donor's token and writes it to this
+environment's row — both reads through the service-role repository, both rows
+equally unreachable by any client, the value never crossing the network. Typing a
+token instead is the decline: an explicit value always wins.
+
+**Who the donor is** (`findVmJenkinsDonor`): an environment on the same `vm_id`,
+excluding this one, carrying a job URL *and* a username *and* a token. Basic auth is
+username + token, so a half-configured environment is no use as a donor. Ordered by
+`updated_at` descending, so a rotated token is what gets lent rather than the oldest
+one on the VM.
+
+**When the offer appears:** only while the environment has no token of its own.
+Once it has one, its own configuration is the answer, and a standing offer would be
+a second source of truth for the same field.
+
+Two consequences worth knowing:
+
+- **The copy is a snapshot, not a link.** Rotating the donor's token does not
+  update the environments that inherited it — they keep the value they were given
+  and start failing with a 401 until each is re-saved. A per-VM credential record
+  would fix this properly; it is the same shape as the `jenkins_servers` table
+  under [Limitations](#limitations).
+- **A VM can host more than one project's environments**, so the donor may belong to
+  a different project. That is deliberate — the VM is the unit that has a Jenkins —
+  and the modal names the VM so the editor can see what they're accepting. It grants
+  no capability an editor didn't already have; see
+  [security.md](./security.md#secrets-handling).
 
 ## Records by provider
 
