@@ -24,6 +24,7 @@ import {
 import { rowToBuildRun } from '@/services/jenkins/mappers';
 import {
   deriveJenkinsBase,
+  isDeniedJenkinsTarget,
   isSameJenkinsServer,
   rebaseOnJenkinsServer,
 } from '@/lib/jenkins-url';
@@ -64,6 +65,14 @@ const asMsg = (error: unknown, fallback: string): string =>
 // Denial messages. Routes map anything ending in "access required." to a 403.
 const EDITOR_REQUIRED = 'Editor access required.';
 const SIGN_IN_REQUIRED = 'Authenticated access required.';
+
+// The one target class refused outright, wherever a Jenkins URL is saved or used.
+// The URL is editor-supplied, so it decides what the *server* connects to; a
+// link-local address is never a Jenkins server but is exactly where an instance
+// metadata endpoint lives. Checked at save time and again on every use, because a
+// row written before this existed would otherwise still be fetched.
+const DENIED_TARGET =
+  'That Jenkins URL points at a link-local or unspecified address (e.g. an instance metadata endpoint), which this app will not connect to.';
 
 // Newest-first history is a list, not a feed — a card only ever shows the recent
 // runs of one environment, so it is bounded here rather than paginated.
@@ -172,6 +181,7 @@ const resolveEnvJenkins = async (
   if (!env.jenkinsUrl.trim()) {
     return { ok: false, message: 'Set the Jenkins URL first (Jenkins settings).' };
   }
+  if (isDeniedJenkinsTarget(env.jenkinsUrl)) return { ok: false, message: DENIED_TARGET };
   const apiToken = (await getEnvironmentToken(envId)).trim();
   if (!apiToken) return { ok: false, message: 'No Jenkins API token set for this environment.' };
   const username = env.jenkinsUsername.trim();
@@ -218,6 +228,12 @@ export const saveEnvironmentJenkinsConfig = async (
   const env = await findEnv(projectId, envId);
   if (!env) return { success: false, message: 'Environment not found.', data: null };
 
+  // Refused at the point it is written, so a denied target never becomes stored
+  // configuration that later code has to keep re-checking.
+  if (isDeniedJenkinsTarget(input.jenkinsUrl)) {
+    return { success: false, message: DENIED_TARGET, data: null };
+  }
+
   try {
     // Non-secret parts on the environment; ensure the provider reflects Jenkins.
     await updateEnvironment(envId, {
@@ -259,6 +275,11 @@ export const syncEnvironmentPorts = async (
   if (!env) return { success: false, message: 'Environment not found.', data: null };
   if (!env.jenkinsUrl.trim()) {
     return { success: false, message: 'Set the Jenkins job URL first (Jenkins settings).', data: null };
+  }
+  // This path fetches the job config directly rather than through
+  // resolveEnvJenkins, so it carries the same target check itself.
+  if (isDeniedJenkinsTarget(env.jenkinsUrl)) {
+    return { success: false, message: DENIED_TARGET, data: null };
   }
 
   try {

@@ -15,5 +15,7 @@ export interface EnvironmentRow {
   updated_at: string;
   // Nested selects used by the project-detail query.
   environment_ports?: EnvironmentPortRow[];
-  vms?: { name: string } | null;
+  // The IPs come along with the name because a record's direct URL is built from
+  // the VM's address plus the record's port — see `vmLiveIp` in lib/endpoints.ts.
+  vms?: { name: string; old_ip: string; new_ip: string; migrated: boolean } | null;
 }

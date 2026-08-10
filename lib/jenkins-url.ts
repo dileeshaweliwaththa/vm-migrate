@@ -61,6 +61,34 @@ export const isSameJenkinsServer = (candidate: string | undefined, base: string)
   return targetPath === rootPath || targetPath.startsWith(`${rootPath}/`);
 };
 
+// Hosts that are never a Jenkins server, and are the first thing an SSRF probe
+// reaches for. Every outbound Jenkins request is built from a URL an editor typed
+// into Jenkins settings, so the server can be pointed at whatever that URL names.
+//
+// The list is deliberately narrow. This tool exists to reach build servers on
+// internal networks, so private ranges (10/8, 172.16/12, 192.168/16) stay allowed
+// — blocking them would break the product. What is refused is the link-local
+// range, which carries the cloud instance-metadata endpoints (169.254.169.254 on
+// AWS/Azure, metadata.google.internal on GCP) and answers no Jenkins, and the
+// unspecified address. See docs/security.md § SSRF.
+const isDeniedHostname = (hostname: string): boolean => {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (host === '0.0.0.0' || host === '::' || host === '::0') return true;
+  if (host === 'metadata.google.internal') return true;
+  // IPv4 link-local (169.254.0.0/16) and IPv6 link-local (fe80::/10).
+  if (/^169\.254\./.test(host)) return true;
+  if (/^fe[89ab][0-9a-f]:/.test(host)) return true;
+  return false;
+};
+
+// Is this URL one the app must refuse to fetch, whatever the credentials? Returns
+// false for a URL it cannot parse — the callers already reject those on their own
+// terms, and this predicate answers only the question it is named for.
+export const isDeniedJenkinsTarget = (url: string): boolean => {
+  const parsed = parseUrl(url.trim());
+  return parsed ? isDeniedHostname(parsed.hostname) : false;
+};
+
 // Where a Jenkins path begins, for the case where the reported URL carries a
 // different context path than the one we connect through — splice there so the
 // two paths are never concatenated into `/jenkins/jenkins/job/…`.

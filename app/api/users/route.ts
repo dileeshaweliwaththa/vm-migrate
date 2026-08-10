@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/services/auth/authService';
 import { listUsers, provisionUser } from '@/services/users/userService';
+import { isDeniedMessage, writeStatus } from '@/lib/errors';
 import type { UserRole } from '@/types/common';
 
 // GET /api/users — list all provisioned users (admin only).
@@ -12,7 +13,7 @@ export async function GET() {
 
   const result = await listUsers();
   if (!result.success) {
-    const status = result.message === 'Admin access required.' ? 403 : 500;
+    const status = isDeniedMessage(result.message) ? 403 : 500;
     return NextResponse.json({ error: result.message }, { status });
   }
   return NextResponse.json({ data: result.data });
@@ -32,7 +33,7 @@ export async function POST(request: Request) {
       name?: string;
     };
     const response = await provisionUser(email ?? '', role ?? 'viewer', name);
-    return NextResponse.json({ response }, { status: response.success ? 201 : 400 });
+    return NextResponse.json({ response }, { status: writeStatus(response, 201) });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to invite user.' },

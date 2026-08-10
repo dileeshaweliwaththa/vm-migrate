@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/services/auth/authService';
 import { changeUserRole, removeUser } from '@/services/users/userService';
+import { writeStatus } from '@/lib/errors';
 import type { UserRole } from '@/types/common';
 
 type Context = { params: Promise<{ id: string }> };
@@ -16,7 +17,7 @@ export async function PATCH(request: Request, context: Context) {
     const { id } = await context.params;
     const { role } = (await request.json()) as { role?: UserRole };
     const response = await changeUserRole(id, role ?? 'viewer');
-    return NextResponse.json({ response }, { status: response.success ? 200 : 400 });
+    return NextResponse.json({ response }, { status: writeStatus(response) });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to update role.' },
@@ -35,7 +36,7 @@ export async function DELETE(_request: Request, context: Context) {
   try {
     const { id } = await context.params;
     const response = await removeUser(id);
-    return NextResponse.json({ response }, { status: response.success ? 200 : 400 });
+    return NextResponse.json({ response }, { status: writeStatus(response) });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to remove user.' },

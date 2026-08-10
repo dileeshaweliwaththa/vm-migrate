@@ -85,10 +85,32 @@ export const provisionUser = async (
   }
 };
 
+// Demoting the last admin would leave nobody able to manage users, settings, or
+// the destructive tracker actions — and no way back in, since only an admin can
+// grant the role. `removeUser` already refuses to delete your own account (and an
+// admin can't delete themselves, so a delete always leaves one); a role change is
+// the remaining way to reach zero, so it is closed here.
+const wouldRemoveLastAdmin = async (id: string, newRole: UserRole): Promise<boolean> => {
+  if (newRole === 'admin') return false;
+  const profiles = await adminListProfiles();
+  const admins = profiles.filter((p) => p.role === 'admin');
+  return admins.length <= 1 && admins.some((p) => p.id === id);
+};
+
 export const changeUserRole = async (id: string, role: UserRole): Promise<ApiResponse> => {
   const denied = await requireAdmin();
   if (denied) return denied;
   if (!isValidRole(role)) return { success: false, message: 'Invalid role.' };
+  try {
+    if (await wouldRemoveLastAdmin(id, role)) {
+      return {
+        success: false,
+        message: 'This is the only admin — promote another user to admin first.',
+      };
+    }
+  } catch (error) {
+    return { success: false, message: asError(error, 'Could not verify the admin count.') };
+  }
   try {
     const { error } = await adminUpdateRole(id, role);
     if (error) return { success: false, message: asError(error, 'Could not update the role.') };

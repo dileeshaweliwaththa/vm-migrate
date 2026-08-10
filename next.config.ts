@@ -12,6 +12,33 @@ const nextConfig: NextConfig = {
   outputFileTracingExcludes: {
     "**/*": ["./supabase/**"],
   },
+
+  // Response headers that cost nothing and close off whole classes of attack on
+  // an internal tool. Deliberately *not* a full CSP: script-src would need a
+  // nonce threaded through the app, and a broken CSP is worse than none. See
+  // docs/security.md § Browser hardening for what a real CSP would take.
+  //
+  // frame-ancestors is doubled with X-Frame-Options because the two are read by
+  // different browsers/versions, and this app has admin-only destructive actions
+  // (purge, clear trash, replace-all import) that a clickjack could drive.
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+          {
+            key: "Permissions-Policy",
+            value: "camera=(), microphone=(), geolocation=()",
+          },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

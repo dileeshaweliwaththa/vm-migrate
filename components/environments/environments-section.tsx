@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { toast } from 'sonner';
 import {
   Container,
+  Copy,
   ExternalLink,
   History,
   ListChecks,
@@ -18,6 +19,16 @@ import {
 } from 'lucide-react';
 import type { Environment, EnvironmentPort, ProjectDetail } from '@/types/common/project';
 import { providerHasBranch, providerHasPorts } from '@/types/common/project';
+import type { Protocol } from '@/types/common/vm';
+import { recordLiveUrl } from '@/lib/endpoints';
+
+// What a hand-added record is created as. Shared by the Add row's handler and its
+// live-link preview so the preview can't promise a URL the record won't get.
+const NEW_RECORD_PROTOCOL: Protocol = 'HTTPS';
+
+// The scheme on a link is always implied (see recordLiveUrl), so what's shown is
+// the `ip:port` people actually recognise.
+const hostAndPort = (url: string): string => url.replace(/^\w+:\/\//, '');
 import type { JenkinsJobSummary } from '@/types/common/jenkins';
 import { useEnvironmentMutations } from '@/hooks/environments/useEnvironments';
 import {
@@ -116,7 +127,69 @@ function LastBuild({ job }: { job?: JenkinsJobSummary }) {
   );
 }
 
-// A single record row: Port · Name · Domain · Status · Last build (+ Run/Delete).
+// The record's direct address on the environment's VM — `ip:port`, opened and
+// copied straight from the row. It only appears once both halves exist, so the
+// cell's job when one is missing is to say *which* one, rather than showing a
+// bare dash the reader has to diagnose. The prompt to fill the gap is editors-only:
+// a viewer can't act on it, and the port cell beside it isn't an input for them.
+function LiveUrlCell({
+  port,
+  vmIp,
+  canEdit,
+}: {
+  port: EnvironmentPort;
+  vmIp: string | null;
+  canEdit: boolean;
+}) {
+  const url = recordLiveUrl(port, vmIp);
+
+  if (!url) {
+    const missingPort = !port.port.trim();
+    return (
+      <span
+        className="text-sm text-muted-foreground"
+        title={missingPort ? 'Add a port to build the link' : 'This record is not a web endpoint'}
+      >
+        {missingPort && canEdit ? 'Add a port' : '—'}
+      </span>
+    );
+  }
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success('Link copied.');
+    } catch {
+      toast.error('Could not copy — open the link and copy it from the address bar.');
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-0.5">
+      <a
+        href={url}
+        target="_blank"
+        rel="noreferrer"
+        title={`Open ${url}`}
+        className="inline-flex items-center gap-1 font-mono text-xs text-primary hover:underline"
+      >
+        {hostAndPort(url)}
+        <ExternalLink className="h-3 w-3 shrink-0" />
+      </a>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        aria-label="Copy link"
+        title="Copy link"
+        onClick={copy}
+      >
+        <Copy className="h-3.5 w-3.5" />
+      </Button>
+    </div>
+  );
+}
+
+// A single record row: Port · Name · Link · Domain · Status · Last build (+ Run/Delete).
 // Status and last build come live from Jenkins (matched by job URL); port, name,
 // and domain are editable inline so they can be filled in later.
 //
@@ -133,6 +206,7 @@ function PortRow({
   showBuildColumns,
   showPort,
   showBranch,
+  showLiveUrl,
   job,
 }: {
   projectId: string;
@@ -142,10 +216,12 @@ function PortRow({
   canBuild: boolean;
   showActions: boolean;
   // Which columns this provider warrants; see the card for why. Jenkins-only for
-  // the build pair, port-bearing providers only for Port.
+  // the build pair, port-bearing providers only for Port, a linked VM with an
+  // address for Link.
   showBuildColumns: boolean;
   showPort: boolean;
   showBranch: boolean;
+  showLiveUrl: boolean;
   job?: JenkinsJobSummary;
 }) {
   const { updatePort, removePort } = useEnvironmentMutations(projectId);
@@ -282,6 +358,14 @@ function PortRow({
         </TableCell>
       ) : null}
       <TableCell>{nameCell}</TableCell>
+      {/* Ahead of Domain: it's the address that works first — the port is live on
+          the VM the moment the record exists, while the domain still has to be
+          pointed at it. */}
+      {showLiveUrl ? (
+        <TableCell>
+          <LiveUrlCell port={port} vmIp={env.vmIp} canEdit={canEdit} />
+        </TableCell>
+      ) : null}
       <TableCell>{domainCell}</TableCell>
       {showBuildColumns ? (
         <>
@@ -419,9 +503,26 @@ function EnvironmentCard({
   const showPort = providerHasPorts(env.cicdProvider);
   const showBranch = providerHasBranch(env.cicdProvider);
 
+  // Link needs both halves of `ip:port` to be *possible*: an address on the linked
+  // VM, and a provider that deploys onto a host port at all. Without a VM the
+  // column could only ever be a wall of dashes, so the card drops it — the missing
+  // half is the environment's, and it's the VM chip in the header that says so.
+  const showLiveUrl = showPort && Boolean(env.vmIp);
+
   // Name · Domain are always there; Port/Branch is one leading column either way.
-  const leadingColumns = (showPort ? 1 : 0) + (showBranch ? 1 : 0) + 2;
+  const leadingColumns = (showPort ? 1 : 0) + (showBranch ? 1 : 0) + (showLiveUrl ? 1 : 0) + 2;
   const columnCount = leadingColumns + (showBuildColumns ? 2 : 0) + (showActions ? 1 : 0);
+
+  // Tailwind only sees literal class names, so the floor is picked rather than
+  // computed. Link adds roughly another 12rem of content to whichever shape the
+  // provider already had.
+  const tableMinWidth = showBuildColumns
+    ? showLiveUrl
+      ? 'min-w-[60rem]'
+      : 'min-w-[48rem]'
+    : showLiveUrl
+      ? 'min-w-[44rem]'
+      : 'min-w-[32rem]';
 
   const handleSyncJenkins = () => {
     syncFromJenkins.mutate(env.id, {
@@ -434,6 +535,14 @@ function EnvironmentCard({
   // the table shows: a port where there are ports, a branch where there aren't.
   const canAddRecord = showPort ? Boolean(port.trim()) : Boolean(branch.trim());
 
+  // What the Link column will hold once this row is added, previewed as the port
+  // is typed. Built through the same helper as the saved rows, so the preview and
+  // the result can't disagree.
+  const newRecordUrl = recordLiveUrl(
+    { port, protocol: NEW_RECORD_PROTOCOL },
+    showLiveUrl ? env.vmIp : null
+  );
+
   const handleAddPort = () => {
     if (!canAddRecord) return;
     addPort.mutate(
@@ -442,7 +551,7 @@ function EnvironmentCard({
         input: {
           port: showPort ? port : '',
           branch: showBranch ? branch : '',
-          protocol: 'HTTPS',
+          protocol: NEW_RECORD_PROTOCOL,
           description,
           domain,
           position: env.ports.length,
@@ -474,6 +583,9 @@ function EnvironmentCard({
               className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
             >
               <Server className="h-3 w-3" /> {env.vmName}
+              {/* Where the Link column's addresses come from — shown here once
+                  rather than repeated down the column. */}
+              {env.vmIp ? <span className="font-mono">· {env.vmIp}</span> : null}
             </Link>
           ) : null}
         </div>
@@ -627,12 +739,17 @@ function EnvironmentCard({
           the build columns it's four columns wide and needs far less room — the
           same floor would force a pointless sideways scroll. */}
       <div className="overflow-x-auto px-4 py-3">
-        <Table className={showBuildColumns ? 'min-w-[48rem]' : 'min-w-[32rem]'}>
+        <Table className={tableMinWidth}>
           <TableHeader>
             <TableRow>
               {showPort ? <TableHead className="w-24">Port</TableHead> : null}
               {showBranch ? <TableHead className="w-40">Branch</TableHead> : null}
               <TableHead className="w-[22%]">Name</TableHead>
+              {showLiveUrl ? (
+                <TableHead className="w-48" title={`Direct address on ${env.vmName || 'the VM'}`}>
+                  Link
+                </TableHead>
+              ) : null}
               <TableHead>Domain</TableHead>
               {showBuildColumns ? (
                 <>
@@ -657,6 +774,7 @@ function EnvironmentCard({
                 showBuildColumns={showBuildColumns}
                 showPort={showPort}
                 showBranch={showBranch}
+                showLiveUrl={showLiveUrl}
                 job={p.jenkinsJobUrl ? jobByUrl.get(p.jenkinsJobUrl) : undefined}
               />
             ))}
@@ -699,6 +817,16 @@ function EnvironmentCard({
                     onKeyDown={(e) => e.key === 'Enter' && handleAddPort()}
                   />
                 </TableCell>
+                {/* Not an input — the link is derived. Previewing it as the port
+                    is typed shows what the row will get, so the column doesn't
+                    look broken while it's empty. */}
+                {showLiveUrl ? (
+                  <TableCell>
+                    <span className="font-mono text-xs text-muted-foreground">
+                      {newRecordUrl ? hostAndPort(newRecordUrl) : '—'}
+                    </span>
+                  </TableCell>
+                ) : null}
                 <TableCell>
                   <Input
                     value={domain}

@@ -141,7 +141,7 @@ role-based RLS as `projects` (writes = `editor`/`admin`).
 | `jenkins_url`   | `text`        | Jenkins job URL (secret token lives in `environment_secrets`) |
 | `jenkins_username` | `text`     | Jenkins Basic-auth username (non-secret)         |
 | `deploy_url`    | `text`        | live/deployed URL                                |
-| `vm_id`         | `uuid`        | FK → `vms.id`, `on delete set null` (optional)   |
+| `vm_id`         | `uuid`        | FK → `vms.id`, `on delete set null` (optional); its IPs are what the records table's Link column is built from |
 | `notes`         | `text`        | free text                                        |
 | `position`      | `integer`     | display order within the project                 |
 | `created_at` / `updated_at` | `timestamptz` | `set_updated_at` trigger             |

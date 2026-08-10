@@ -4,6 +4,7 @@ import type { EnvironmentPortRow } from '@/types/supabase/response/environmentPo
 import type { Protocol } from '@/types/common/vm';
 import { PORT_SOURCES } from '@/types/common/project';
 import { deriveJenkinsBase, rebaseOnJenkinsServer } from '@/lib/jenkins-url';
+import { vmLiveIp } from '@/lib/endpoints';
 import type {
   CicdProvider,
   Environment,
@@ -70,6 +71,15 @@ export const rowToEnvironment = (row: EnvironmentRow): Environment => {
     deployUrl: row.deploy_url,
     vmId: row.vm_id,
     vmName: row.vms?.name ?? null,
+    // Resolved here rather than in the UI so every consumer of an environment
+    // (the records table, the docs generator) reads the same address.
+    vmIp: row.vms
+      ? vmLiveIp({
+          oldIp: row.vms.old_ip ?? '',
+          newIp: row.vms.new_ip ?? '',
+          migrated: row.vms.migrated ?? false,
+        }) || null
+      : null,
     notes: row.notes,
     position: row.position,
     ports: (row.environment_ports ?? [])

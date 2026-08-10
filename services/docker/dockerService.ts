@@ -11,6 +11,14 @@ import type { DockerCandidate, DockerParseResult } from '@/types/common/docker';
 // existing ports endpoint with source='docker', so there's one write path for
 // records rather than a second one here. See docs/docker-import.md.
 
+// A `docker ps` listing is a screenful, not a document — a few hundred containers
+// would still be well inside this. The cap is here because the parser runs
+// line-by-line regexes over whatever arrives in the request body, and route
+// handlers have no body-size limit of their own: without it, one very large paste
+// is CPU spent for nothing. Rejected with a message rather than truncated, so a
+// genuinely huge paste isn't silently half-imported.
+const MAX_OUTPUT_CHARS = 200_000;
+
 export const previewDockerImport = async (
   projectId: string,
   envId: string,
@@ -21,6 +29,13 @@ export const previewDockerImport = async (
 
   if (!output.trim()) {
     return { success: false, message: 'Paste the output of `docker ps` first.', data: null };
+  }
+  if (output.length > MAX_OUTPUT_CHARS) {
+    return {
+      success: false,
+      message: `That paste is too large (${Math.round(output.length / 1000)}k characters). Paste the output of a single \`docker ps\`.`,
+      data: null,
+    };
   }
 
   const detail = await getProject(projectId);

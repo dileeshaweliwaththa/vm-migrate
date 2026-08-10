@@ -36,6 +36,9 @@ Before implementing any feature, request, or fix, read and follow:
 - [docs/schema.md](docs/schema.md) — database schema and the migration workflow.
 - [docs/auth.md](docs/auth.md) — the sign-in flow, and **where access is
   enforced** (page guard / route handler / role + RLS).
+- [docs/security.md](docs/security.md) — the threat model, the secrets inventory,
+  the SSRF and stored-HTML rules, the **accepted** risks, and the checklist every
+  new route/table/outbound fetch has to pass.
 - [docs/tracker.md](docs/tracker.md) — the VM tracker feature, its layers, its
   API, and its per-role permissions.
 - [docs/dashboard.md](docs/dashboard.md) — the `/dashboard` summary and its

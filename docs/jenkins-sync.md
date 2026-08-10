@@ -128,11 +128,14 @@ On a project page, each environment whose CI/CD provider is **Jenkins** shows
 The records table isn't one fixed shape — a record means something different per
 provider, so the columns follow the provider:
 
-| Provider              | Columns                                        | Docker import |
-| --------------------- | ---------------------------------------------- | ------------- |
-| `jenkins`             | Port · Name · Domain · Status · Last build     | yes           |
-| `other` / `none`      | Port · Name · Domain                           | yes           |
-| `aws` / `azure` / `amplify` | **Branch** · Name · Domain               | no            |
+| Provider              | Columns                                              | Docker import |
+| --------------------- | ---------------------------------------------------- | ------------- |
+| `jenkins`             | Port · Name · *Link* · Domain · Status · Last build  | yes           |
+| `other` / `none`      | Port · Name · *Link* · Domain                        | yes           |
+| `aws` / `azure` / `amplify` | **Branch** · Name · Domain                     | no            |
+
+*Link* is conditional on top of the provider — see
+[The Link column](#the-link-column) below.
 
 **Port and Branch are alternatives, never both.** A managed platform doesn't
 deploy a port on a host — an Amplify deployment is a *branch*, AWS/Azure ones are
@@ -160,6 +163,38 @@ Two consequences worth knowing:
 - **Switching a provider only changes which column is shown.** `port` and `branch`
   both exist on every row, so a value hidden by a provider switch is still there
   and reappears if the provider is switched back — nothing is deleted.
+
+### The Link column
+
+A record's **Link** is its direct address on the VM the environment runs on —
+`http://10.0.0.5:3000`, opened or copied straight from the row. It sits **before
+Domain** because it is the address that works first: the port is live on the VM
+the moment the record exists, while the domain still has to be pointed at it.
+
+It needs both halves, so the card shows the column only when
+`providerHasPorts(provider) && env.vmIp` — a port-bearing provider, and a linked
+VM that has an address. Without a VM the column could only ever be a wall of
+dashes, and the missing half is the *environment's*, not the record's; the VM chip
+in the card header (which shows `name · ip`) is where that gap reads. Inside the
+column, a record with no port yet reads **"Add a port"** rather than a dash.
+
+The two halves resolve like this, both in
+[`lib/endpoints.ts`](../lib/endpoints.ts):
+
+- `vmLiveIp(vm)` — the address the VM answers on **today**: the new IP once
+  `migrated` is set, the old one until then. A row in mid-migration carries both,
+  and the tracker's new IP isn't serving anything yet. It is resolved in
+  `rowToEnvironment` and carried on the environment as `vmIp`, so the records
+  table, the Add row's preview, and the docs generator can't derive it three ways.
+- `recordLiveUrl(record, vmIp)` — `scheme://ip:port`, or null when either half is
+  missing or the record isn't a web protocol. The scheme is always plain
+  `http`/`ws`: TLS is terminated per *hostname* by whatever proxy fronts the
+  domain, so `https://` on a bare IP is only ever a certificate error. This is why
+  the visible label is the bare `ip:port` — the scheme carries no information.
+
+`recordUrl` (the public, DNS-fronted address behind the Domain column) is
+unchanged and still the one the dashboard's "reachable" count uses. The generated
+docs now carry both, labelled apart.
 
 ## Build history
 

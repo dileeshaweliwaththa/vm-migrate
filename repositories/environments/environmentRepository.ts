@@ -23,7 +23,7 @@ export const findAllEnvironments = async (): Promise<EnvironmentRow[]> => {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from('environments')
-    .select('*, environment_ports(*), vms(name)')
+    .select('*, environment_ports(*), vms(name, old_ip, new_ip, migrated)')
     .order('project_id', { ascending: true })
     .order('position', { ascending: true });
   if (error) throw new Error(error.message);
@@ -37,7 +37,7 @@ export const insertEnvironment = async (
   const { data, error } = await supabase
     .from('environments')
     .insert(values)
-    .select('*, environment_ports(*), vms(name)')
+    .select('*, environment_ports(*), vms(name, old_ip, new_ip, migrated)')
     .single();
   if (error) throw new Error(error.message);
   return data as EnvironmentRow;
@@ -52,7 +52,7 @@ export const updateEnvironment = async (
     .from('environments')
     .update(values)
     .eq('id', id)
-    .select('*, environment_ports(*), vms(name)')
+    .select('*, environment_ports(*), vms(name, old_ip, new_ip, migrated)')
     .single();
   if (error) throw new Error(error.message);
   return data as EnvironmentRow;

@@ -60,6 +60,10 @@ export interface Environment {
   deployUrl: string;
   vmId: string | null;
   vmName: string | null;
+  // The linked VM's current address (see `vmLiveIp`), or null when no VM is
+  // linked or it has no IP yet. Joined onto the environment because a record's
+  // direct URL is that address plus the record's own port.
+  vmIp: string | null;
   notes: string;
   position: number;
   ports: EnvironmentPort[];

@@ -8,7 +8,7 @@ import { canEdit } from '@/lib/rbac';
 import { tiptapExtensions } from '@/lib/tiptap/extensions';
 import { interpretGeminiError } from '@/services/ai/errors';
 import type { ApiSingleResponse } from '@/types/common';
-import { recordUrl } from '@/lib/endpoints';
+import { recordLiveUrl, recordUrl } from '@/lib/endpoints';
 import type {
   CicdProvider,
   EnvironmentPort,
@@ -67,7 +67,11 @@ const SOURCE_LABEL: Record<PortSource, string> = {
 // One record (endpoint) as a labelled line. Every field the record carries is
 // spelled out — the model can only write about what it's given, and the domain in
 // particular is the answer to "where does this environment actually live".
-const recordLine = (record: EnvironmentPort, provider: CicdProvider): string => {
+const recordLine = (
+  record: EnvironmentPort,
+  provider: CicdProvider,
+  vmIp: string | null
+): string => {
   const parts: string[] = [];
   // On a managed platform a record is a *branch*, not a host port — demanding a
   // port there would report a missing value that by definition doesn't exist.
@@ -84,6 +88,11 @@ const recordLine = (record: EnvironmentPort, provider: CicdProvider): string => 
 
   const url = recordUrl(record);
   if (url) parts.push(`reachable at ${url}`);
+
+  // The address on the VM itself, which exists whether or not a domain has been
+  // pointed at the record yet — often the only way in during a migration.
+  const liveUrl = recordLiveUrl(record, vmIp);
+  if (liveUrl) parts.push(`directly reachable on the VM at ${liveUrl}`);
 
   parts.push(SOURCE_LABEL[record.source]);
   if (record.jenkinsJobUrl) parts.push(`Jenkins job ${record.jenkinsJobUrl}`);
@@ -112,7 +121,7 @@ const buildProjectContext = (project: ProjectDetail): string => {
     const parts = [`- ${env.name}`, `CI/CD: ${env.cicdProvider}`];
     if (env.deployUrl) parts.push(`deploy URL: ${env.deployUrl}`);
     if (env.jenkinsUrl) parts.push(`Jenkins: ${env.jenkinsUrl}`);
-    if (env.vmName) parts.push(`VM: ${env.vmName}`);
+    if (env.vmName) parts.push(`VM: ${env.vmName}${env.vmIp ? ` (${env.vmIp})` : ''}`);
     if (env.notes) parts.push(`notes: ${env.notes}`);
     lines.push(`  ${parts.join(', ')}`);
 
@@ -121,7 +130,7 @@ const buildProjectContext = (project: ProjectDetail): string => {
       continue;
     }
     lines.push(`    records for ${env.name} (${env.ports.length}):`);
-    for (const record of env.ports) lines.push(recordLine(record, env.cicdProvider));
+    for (const record of env.ports) lines.push(recordLine(record, env.cicdProvider, env.vmIp));
   }
 
   return lines.join('\n');

@@ -69,7 +69,11 @@ Details that matter:
   builds it from protocol + domain + port (eliding `:443`/`:80`, tolerating a
   domain pasted with a scheme, returning `null` for TCP/UDP). A hallucinated
   endpoint in deployment docs is worse than no endpoint, so it never comes from
-  the model.
+  the model. `recordLiveUrl` alongside it adds the record's **direct address on
+  the VM** (`http://ip:port`, from the environment's `vmIp`) as a separate,
+  separately-labelled line — it exists whether or not a domain has been pointed at
+  the record yet, which during a migration is often the only way in. See
+  [The Link column](./jenkins-sync.md#the-link-column).
 - **Blank fields are labelled `NOT RECORDED YET`** and the prompt forbids guessing
   them. A record added via Jenkins "Use" or a docker import may legitimately have
   no port or domain yet.

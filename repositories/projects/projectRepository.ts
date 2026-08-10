@@ -39,7 +39,7 @@ export const findProjectEnvironments = async (projectId: string): Promise<Enviro
   const supabase = await createClient();
   const { data, error } = await supabase
     .from('environments')
-    .select('*, environment_ports(*), vms(name)')
+    .select('*, environment_ports(*), vms(name, old_ip, new_ip, migrated)')
     .eq('project_id', projectId)
     .order('position', { ascending: true });
   if (error) throw new Error(error.message);
