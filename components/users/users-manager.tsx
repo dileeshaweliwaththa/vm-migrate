@@ -179,7 +179,7 @@ export function UsersManager() {
         }
       />
 
-      <div className="mx-auto w-full max-w-5xl space-y-6 px-4 py-8 sm:px-6">
+      <div className="mx-auto w-full max-w-5xl space-y-6 px-4 py-8 sm:px-8">
 
       {isLoading ? (
         <p className="text-sm text-muted-foreground">Loading users…</p>

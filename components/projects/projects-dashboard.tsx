@@ -12,7 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Toggle } from '@/components/ui/toggle';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { PageHeader } from '@/components/layout/page-header';
 import { ProjectDialog } from '@/components/projects/project-dialog';
 
@@ -82,18 +82,30 @@ export function ProjectsDashboard({
         }
       />
 
-      <div className="mx-auto w-full max-w-7xl space-y-6 px-4 py-8 sm:px-6">
+      <div className="mx-auto w-full max-w-7xl space-y-6 px-4 py-8 sm:px-8">
         <div className="flex flex-wrap items-center justify-between gap-3">
+        {/* `ToggleGroup`, not `ui/tabs`. The generated tabs primitive styles on
+            `data-horizontal` / `data-active` — Radix 2.x boolean attributes that
+            1.4.3 never emits — so the tag filter rendered as an empty block. This
+            keys off `data-[state=on]`, which 1.4.3 does emit. Same trap as the
+            Switch, documented in docs/ui-guidelines.md. */}
         {tags.length > 1 ? (
-          <Tabs value={tag} onValueChange={setTag}>
-            <TabsList>
-              {tags.map((t) => (
-                <TabsTrigger key={t} value={t}>
-                  {t}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </Tabs>
+          <ToggleGroup
+            type="single"
+            value={tag}
+            onValueChange={(v) => v && setTag(v)}
+            className="flex-wrap justify-start gap-1 rounded-sm border border-border bg-muted p-1"
+          >
+            {tags.map((t) => (
+              <ToggleGroupItem
+                key={t}
+                value={t}
+                className="rounded-sm px-3 text-body-sm data-[state=on]:bg-card data-[state=on]:font-medium data-[state=on]:text-foreground"
+              >
+                {t}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
         ) : (
           <span />
         )}
@@ -138,11 +150,11 @@ export function ProjectsDashboard({
           ))}
         </div>
       ) : error ? (
-        <p className="text-sm text-destructive">
+        <p className="text-body-sm text-destructive">
           {error instanceof Error ? error.message : 'Failed to load projects.'}
         </p>
       ) : filtered.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-border py-16 text-center text-sm text-muted-foreground">
+        <div className="rounded-lg border border-dashed border-border py-16 text-center text-body-sm text-muted-foreground">
           No {showArchived ? '' : 'active '}projects{tag !== ALL ? ` tagged ${tag}` : ''} yet.
           {isAdmin && !showArchived ? (
             <span className="mt-1 block">Turn on “Show Archived” if you archived one.</span>
@@ -179,14 +191,23 @@ function ProjectCard({ project, canRestore }: { project: Project; canRestore: bo
 
   return (
     <Link href={`/projects/${project.id}`} className="block">
+      {/* Hover shifts the *border*, not the shadow — "maintaining the
+          flat-futuristic aesthetic", per the design brief's interaction rule. */}
       <Card
-        className={`h-full transition-colors hover:border-primary/50 ${
+        className={`h-full rounded-lg shadow-none transition-colors hover:border-input ${
           project.archived ? 'border-dashed bg-muted/30' : ''
         }`}
       >
         <CardHeader className="pb-2">
           <div className="flex items-start justify-between gap-2">
-            <CardTitle className="text-base">{project.name}</CardTitle>
+            {/* `tracking-normal` because `CardTitle` ships `tracking-tight`, and
+                letter-spacing is a separate tailwind-merge group from font-size —
+                so it survives `text-headline-md` and would tighten a title the
+                design leaves at default. (`leading-none` *is* dropped: font-size
+                and line-height do conflict.) */}
+            <CardTitle className="font-display text-headline-md tracking-normal uppercase">
+              {project.name}
+            </CardTitle>
             {project.archived ? (
               <div className="flex shrink-0 items-center gap-1">
                 <Badge variant="secondary">Archived</Badge>
@@ -208,7 +229,7 @@ function ProjectCard({ project, canRestore }: { project: Project; canRestore: bo
           {project.tags.length ? (
             <div className="flex flex-wrap gap-1 pt-1">
               {project.tags.map((t) => (
-                <Badge key={t} variant="outline">
+                <Badge key={t} variant="outline" className="rounded-sm text-label-caps font-bold uppercase">
                   {t}
                 </Badge>
               ))}
@@ -216,10 +237,11 @@ function ProjectCard({ project, canRestore }: { project: Project; canRestore: bo
           ) : null}
         </CardHeader>
         <CardContent className="space-y-3">
-          <p className="line-clamp-2 min-h-8 text-sm text-muted-foreground">
+          <p className="line-clamp-2 min-h-8 text-body-sm text-muted-foreground">
             {project.description || 'No description yet.'}
           </p>
-          <div className="text-xs text-muted-foreground">
+          {/* Mono, like every other count and identifier in the system. */}
+          <div className="font-mono text-label-mono text-ink-source">
             {project.environmentCount} environment{project.environmentCount === 1 ? '' : 's'}
           </div>
         </CardContent>

@@ -3,12 +3,16 @@
 @plugin '@tailwindcss/typography';
 
 @custom-variant dark (&:is(.dark *));
- 
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+
+  /* Three faces, one per job — see the PALETTE note below. */
+  --font-display: var(--font-hanken-grotesk);
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-jetbrains-mono);
+
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -38,6 +42,10 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+
+  /* 0.5rem, so the derived steps land exactly on the design system's shape
+     language: sm 4px (buttons, inputs, chips — "precision-molded, not bubbly"),
+     lg 8px (cards and other primary containers), xl 12px. */
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -45,58 +53,66 @@
   --radius-2xl: calc(var(--radius) + 8px);
   --radius-3xl: calc(var(--radius) + 12px);
   --radius-4xl: calc(var(--radius) + 16px);
- 
+
   /* ==========================================================================
-     PALETTE — shadcn/ui scales. Do not invent colour values.
+     PALETTE — the "Kinetic Slate" design system. Do not invent colour values.
      ==========================================================================
-     Every value below is copied from https://ui.shadcn.com/colors (fetched from
-     its registry: /r/colors/mauve.json and /r/colors/index.json), in the same
-     OKLCH form the rest of this file uses. Nothing here is hand-mixed, so the
-     ramps are the perceptually-even, contrast-checked ones shadcn ships.
+     Every value below comes from the Stitch design system of the same name
+     (project 11781340808558879699, asset 0e3101fddcc84c8b9e27c4e06e478b2e),
+     read from its `theme.namedColors` and the DESIGN.md it ships. Nothing here
+     is eyedropped off a screenshot.
 
-     `mauve` for everything structural — eleven steps, and difference expressed as
-     **lightness** rather than hue. No orange, no blue.
+     The system is seeded from Tailwind's own scales — its stated seeds are
+     `overridePrimaryColor` **#0f172a** (slate-900), `overrideNeutralColor`
+     **#64748b** (slate-500), `overrideSecondaryColor` **#3b82f6** (blue-500) and
+     `overrideTertiaryColor` **#10b981** (emerald-500) — so the structural ramp
+     below is Tailwind `slate`, verbatim, and the design brief's own callouts
+     (#e2e8f0 for card borders, #cbd5e1 for hover borders, #94a3b8 for scrollbar
+     thumbs) are three of its steps.
 
-     ONE exception: **success is green** (shadcn `green`). It is the single place a
-     second hue earns its keep — a passing build has to read as passing at a
-     glance, from across a room, and mauve-with-more-lightness does not do that.
-     Everything else still differs by weight: `danger` is an inverted dark fill,
-     `warning` a mid fill, `info` a light one. Every status pill also carries its
-     label as text ("Yes"/"No", "SUCCESS"/"FAILED", "Safe to Remove"), so no
-     information depends on hue alone — see the note in lib/vm-utils.ts.
+     Three hues earn their keep, each with a job:
+       - **slate** — every structural surface, border and neutral text.
+       - **blue** (`--secondary` #0058be) — the *active* state, and only that:
+         the current nav item, focus rings, the live-status dot.
+       - **status** — green / amber / red, in status pills only.
+
+     Unlike the palette this replaced, hue is now load-bearing: a failed build is
+     red and a passing one is green. That is safe **only because every pill still
+     renders its status as text** ("SUCCESS"/"FAILED", "Yes"/"No", "Safe to
+     Remove"). Keep it that way — never ship a pill that is colour alone.
 
      Components must never name a colour. They use the tokens defined here —
-     `bg-mauve-900`, `text-ink-source`, `bg-tone-danger` — so the palette can be
+     `bg-steel-900`, `text-ink-source`, `bg-tone-danger` — so the palette can be
      replaced from this file alone. */
 
-  /* shadcn `mauve` — the entire palette. Values from /r/colors/mauve.json. */
-  --color-mauve-50: oklch(0.985 0 0);
-  --color-mauve-100: oklch(0.96 0.003 325.6);
-  --color-mauve-200: oklch(0.922 0.005 325.62);
-  --color-mauve-300: oklch(0.865 0.012 325.68);
-  --color-mauve-400: oklch(0.711 0.019 323.02);
-  --color-mauve-500: oklch(0.542 0.034 322.5);
-  --color-mauve-600: oklch(0.435 0.029 321.78);
-  --color-mauve-700: oklch(0.364 0.029 323.89);
-  --color-mauve-800: oklch(0.263 0.024 320.12);
-  --color-mauve-900: oklch(0.212 0.019 322.12);
-  --color-mauve-950: oklch(0.145 0.008 326);
+  /* Tailwind `slate` — the structural ramp. Named `steel` rather than `slate` so
+     it can't be confused with (or silently shadowed by) Tailwind's built-in
+     scale, and so the ramp keeps one name across future palette swaps. */
+  --color-steel-50: #f8fafc;
+  --color-steel-100: #f1f5f9;
+  --color-steel-200: #e2e8f0;
+  --color-steel-300: #cbd5e1;
+  --color-steel-400: #94a3b8;
+  --color-steel-500: #64748b;
+  --color-steel-600: #475569;
+  --color-steel-700: #334155;
+  --color-steel-800: #1e293b;
+  --color-steel-900: #0f172a;
+  --color-steel-950: #020617;
 
-  /* The accent — mauve-600. Everything that used to be orange (the active nav
-     item, focus rings, the emphasised stat) is this one step. Named so the
-     accent can move up or down the ramp in one place. */
-  --color-accent-step: var(--color-mauve-600);
+  /* The accent — the design system's `secondary`. Everything that marks the
+     *active* state (the current nav item, focus rings, the live dot) is this one
+     value. Named so the accent can move in one place. */
+  --color-accent-step: #0058be;
 
-  /* Success green, from shadcn's `green` scale. Themed per mode below, because a
-     green that reads on white is unreadable on mauve-950 and vice versa. Used by
-     `STATUS_TONE_CLASS.success` and the Jenkins SUCCESS badge — nowhere else, so
-     it stays meaningful. */
+  /* Success green. Themed per mode below, because a green that reads on white is
+     unreadable on the dark page and vice versa. */
   --color-positive: var(--positive);
 
   /* Inline "ink" for values in the tracker grid — old IP, new IP, ports. Themed
      per mode below, so `text-ink-source` works in light and dark with no
-     `dark:` counterpart at the call site. All three are mauve steps: `source`
-     is the muted past, `target` the emphasised present, `accent` a detail. */
+     `dark:` counterpart at the call site. `source` is the muted past, `target`
+     the emphasised present, `accent` a detail. */
   --color-ink-source: var(--ink-source);
   --color-ink-target: var(--ink-target);
   --color-ink-accent: var(--ink-accent);
@@ -113,245 +129,286 @@
   --color-tone-danger: var(--tone-danger-bg);
   --color-tone-danger-fg: var(--tone-danger-fg);
 
-  /* Custom Font Sizes */
-  --font-size-heading-1: 48px;
-  --font-size-heading-2: 30px;
-  --font-size-heading-3: 24px;
-  --font-size-heading-4: 20px;
-  --font-size-monospaced: 16px;
-  --font-size-paragraph-regular: 16px;
-  --font-size-paragraph-medium: 16px;
-  --font-size-paragraph-small-regular: 14px;
-  --font-size-paragraph-small-medium: 14px;
-  --font-size-paragraph-mini-regular: 12px;
-  --font-size-paragraph-mini-medium: 12px;
+  /* The dot used by the content canvas's grid overlay (see `.canvas-grid`). */
+  --color-canvas-dot: var(--canvas-dot);
+
+  /* ==========================================================================
+     TYPE SCALE — the design system's `theme.typography`, verbatim.
+     ==========================================================================
+     Registered in Tailwind's `--text-*` namespace, so each one compiles to a
+     real utility that carries its line-height, weight and tracking together:
+     `text-headline-xl` is the whole style, not just a size. Three families:
+     Hanken Grotesk for headlines, Inter for body, JetBrains Mono for technical
+     metadata (ports, IPs, timestamps) where column alignment is the point.
+
+     `text-label-caps` does not include `text-transform` — Tailwind's `--text-*`
+     modifiers cover size, height, weight and tracking only. Add `uppercase` at
+     the call site. */
+  --text-headline-xl: 36px;
+  --text-headline-xl--line-height: 44px;
+  --text-headline-xl--letter-spacing: -0.02em;
+  --text-headline-xl--font-weight: 700;
+
+  --text-headline-lg: 24px;
+  --text-headline-lg--line-height: 32px;
+  --text-headline-lg--letter-spacing: -0.01em;
+  --text-headline-lg--font-weight: 600;
+
+  --text-headline-md: 20px;
+  --text-headline-md--line-height: 28px;
+  --text-headline-md--font-weight: 600;
+
+  --text-body-md: 16px;
+  --text-body-md--line-height: 24px;
+  --text-body-md--font-weight: 400;
+
+  --text-body-sm: 14px;
+  --text-body-sm--line-height: 20px;
+  --text-body-sm--font-weight: 400;
+
+  --text-label-mono: 13px;
+  --text-label-mono--line-height: 16px;
+  --text-label-mono--letter-spacing: 0.02em;
+  --text-label-mono--font-weight: 500;
+
+  --text-label-caps: 12px;
+  --text-label-caps--line-height: 16px;
+  --text-label-caps--letter-spacing: 0.05em;
+  --text-label-caps--font-weight: 700;
+
+  /* ==========================================================================
+     ELEVATION — "tonal layers and low-contrast outlines", per the design brief.
+     ==========================================================================
+     Level 1 (cards) is a 1px border and *no* shadow; there is deliberately no
+     token for it. Only two things cast anything: */
+
+  /* Level 2 — dropdowns and popovers. The brief's value, verbatim. */
+  --shadow-level-2: 0 10px 15px -3px rgb(0 0 0 / 0.05);
+
+  /* The active nav item's glow. Derived from the accent rather than a second
+     colour, so moving `--color-accent-step` moves the glow with it. */
+  --shadow-nav-active: 0 0 15px color-mix(in oklab, var(--sidebar-primary) 30%, transparent);
 }
- 
-/* Light mode — shadcn's `mauve` theme (/r/colors/mauve.json → cssVarsV4) with
-   exactly two documented deviations, marked ★ below. Everything unmarked is
-   shadcn's value verbatim. */
+
+/* Light mode. The design system ships light only (`colorMode: LIGHT`); its
+   DESIGN.md notes the structure "allows for a 'Carbon' dark mode
+   implementation", which is what `.dark` below is. */
 :root {
-  --radius: 0.625rem;
+  --radius: 0.5rem;
 
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0.008 326);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0.008 326);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0.008 326);
+  /* The page is the design's `surface` — a blue-tinted off-white, not slate-50.
+     Cards sit on it as pure white, which is what makes the tonal layering read
+     without shadows. */
+  --background: #f8f9ff; /* surface        */
+  --foreground: #0b1c30; /* on-surface     */
+  --card: #ffffff; /* surface-container-lowest */
+  --card-foreground: #0b1c30;
+  --popover: #ffffff;
+  --popover-foreground: #0b1c30;
 
-  /* mauve-800, not shadcn's mauve-900. Every filled button in the app is
-     `Button variant="default"` → `bg-primary` (the primary action in a dialog, the
-     selected item in the Linked-VM switch), and at mauve-900 they read as
-     near-black rather than as part of the palette. mauve-800 still gives white
-     text ~15:1, so nothing is lost on contrast.
-     Dark mode keeps a *light* primary — see the note there. */
-  --primary: oklch(0.263 0.024 320.12); /* mauve-800 */
-  --primary-foreground: oklch(0.985 0 0);
+  /* "Primary Slate" — the brief's #0f172a, used for filled buttons, headline
+     type and high-emphasis icons. The generated theme collapses this seed to
+     pure #000000; slate-900 is the value the brief actually specifies, and it
+     keeps a filled button part of the palette rather than a black hole. White
+     text on it measures ~17:1. */
+  --primary: #0f172a; /* steel-900 */
+  --primary-foreground: #ffffff;
 
-  --secondary: oklch(0.96 0.003 325.6);
-  --secondary-foreground: oklch(0.212 0.019 322.12);
-  --muted: oklch(0.96 0.003 325.6);
-  --muted-foreground: oklch(0.542 0.034 322.5);
-  --accent: oklch(0.96 0.003 325.6);
-  --accent-foreground: oklch(0.212 0.019 322.12);
+  /* `secondary` in shadcn's vocabulary is a muted *fill* (secondary buttons, the
+     JENKINS badge), not an accent — the design system's blue `secondary` is the
+     accent and lives in `--color-accent-step` instead. Don't cross those. */
+  --secondary: #e5eeff; /* surface-container      */
+  --secondary-foreground: #0f172a;
+  --muted: #eff4ff; /* surface-container-low  */
+  --muted-foreground: #475569; /* steel-600 */
+  --accent: #e5eeff; /* hover fill, not the accent colour */
+  --accent-foreground: #0f172a;
 
-  /* ★ Deviation 1 — no red. shadcn's `destructive` is a red
-     (oklch(0.577 0.245 27.325)); the palette is mauve only, so destructive is the
-     darkest step instead. Delete actions read as *heavy* rather than red. */
-  --destructive: oklch(0.212 0.019 322.12); /* mauve-900 */
-  --border: oklch(0.922 0.005 325.62);
-  --input: oklch(0.922 0.005 325.62);
+  /* Red is back. The design system carries a real `error` (#ba1a1a) and the
+     delete action uses it, so destructive no longer has to be carried by weight
+     alone the way the previous single-hue palette did. */
+  --destructive: #ba1a1a; /* error */
 
-  /* ★ Deviation 2 — the accent step. Was the logo orange; now mauve-600. */
+  /* The brief's two outline values: #e2e8f0 for container borders, #cbd5e1 where
+     an edge has to be felt (inputs, hover). */
+  --border: #e2e8f0; /* steel-200 */
+  --input: #cbd5e1; /* steel-300 */
+
+  /* "On focus, the border transitions to Secondary Blue with a subtle ring." */
   --ring: var(--color-accent-step);
 
-  /* Charts: five distinguishable steps of the one ramp, spaced widely enough to
-     stay separable — lightness is the only channel available. */
-  --chart-1: oklch(0.212 0.019 322.12); /* mauve-900 */
-  --chart-2: oklch(0.435 0.029 321.78); /* mauve-600 */
-  --chart-3: oklch(0.542 0.034 322.5); /* mauve-500 */
-  --chart-4: oklch(0.711 0.019 323.02); /* mauve-400 */
-  --chart-5: oklch(0.865 0.012 325.68); /* mauve-300 */
+  /* Charts: the three functional hues plus two steps of the ramp, so adjacent
+     series differ by hue first and lightness second. */
+  --chart-1: #0058be; /* accent            */
+  --chart-2: #2170e4; /* secondary-container */
+  --chart-3: #10b981; /* tertiary seed     */
+  --chart-4: #0f172a; /* steel-900         */
+  --chart-5: #94a3b8; /* steel-400         */
 
-  /* ★ Deviation 3 — dark chrome. shadcn ships a *light* sidebar in light mode
-     (oklch(0.985 0 0)); this app wants dark chrome against light content, so the
-     sidebar is mauve-950 in both themes — the deepest step on the ramp. The
-     active item is mauve-600, which is the accent step. */
-  --sidebar: oklch(0.145 0.008 326); /* mauve-950 */
-  --sidebar-foreground: oklch(0.865 0.012 325.68); /* mauve-300 */
+  /* Dark chrome, light content — and this time it is the design's own call:
+     "the vertical sidebar uses a dark theme even in the Light Mode system to
+     create clear structural separation." The surface is `primary-container`
+     #131b2e in *both* themes, so the sidebar is literally the same panel either
+     way. The active item is the accent; hover and border are white at 5% / 10%
+     composited over that navy, so they hold up as opaque values. */
+  --sidebar: #131b2e; /* primary-container */
+  --sidebar-foreground: #d3e4fe; /* surface-variant   */
   --sidebar-primary: var(--color-accent-step);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.263 0.024 320.12); /* mauve-800 */
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.263 0.024 320.12); /* mauve-800 */
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #1f2638; /* white 5% over #131b2e  */
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #2b3243; /* white 10% over #131b2e */
   --sidebar-ring: var(--color-accent-step);
 
   /* Status pill tones — the single source of truth for STATUS_TONE_CLASS in
-     lib/vm-utils.ts. With one hue, status is carried by **weight**: danger is an
-     inverted dark fill (heaviest), warning a mid fill, success and info light
-     fills. Every pill also carries its label as text, so nothing depends on
-     colour alone. */
-  /* green-700 — 5.0:1 on white, so it holds up at the 12px the status badge uses.
-     green-600 measures 3.3:1 and fails for text at that size. */
-  --positive: oklch(0.53 0.14 150); /* green-700 */
+     lib/vm-utils.ts. Light mode has real container colours to use: success and
+     warning are the pill values from the design's own screen, info and danger
+     are the system's `surface-variant` / `error-container` pairs. */
+  /* The green used for status text and dots. 5.9:1 on white, so it holds at the
+     12px the pills use. */
+  --positive: #137333;
 
-  --tone-success-bg: oklch(0.96 0.04 157); /* green-100 */
-  --tone-success-fg: oklch(0.45 0.11 151); /* green-800 */
-  --tone-info-bg: oklch(0.922 0.005 325.62); /* mauve-200 */
-  --tone-info-fg: oklch(0.435 0.029 321.78); /* mauve-600 */
-  --tone-warning-bg: oklch(0.865 0.012 325.68); /* mauve-300 */
-  --tone-warning-fg: oklch(0.212 0.019 322.12); /* mauve-900 */
-  --tone-danger-bg: oklch(0.263 0.024 320.12); /* mauve-800 */
-  --tone-danger-fg: oklch(0.985 0 0); /* mauve-50  */
+  --tone-success-bg: #e6f4ea;
+  --tone-success-fg: #137333;
+  --tone-info-bg: #d3e4fe; /* surface-variant             */
+  --tone-info-fg: #004395; /* on-secondary-fixed-variant  */
+  --tone-warning-bg: #fff8e1;
+  --tone-warning-fg: #b08d00;
+  --tone-danger-bg: #ffdad6; /* error-container    */
+  --tone-danger-fg: #93000a; /* on-error-container */
 
-  --ink-source: oklch(0.542 0.034 322.5); /* mauve-500 — muted past   */
-  --ink-target: oklch(0.212 0.019 322.12); /* mauve-900 — emphasised   */
-  --ink-accent: oklch(0.435 0.029 321.78); /* mauve-600 — detail       */
+  --ink-source: #64748b; /* steel-500 — the muted past */
+  --ink-target: #0b1c30; /* on-surface — emphasised    */
+  --ink-accent: #0058be; /* accent — a detail          */
+
+  --canvas-dot: #0b1c30;
 }
- 
-/* Dark mode — shadcn's `mauve` dark theme verbatim, with the same deviations
-   (★): no red, the accent step, and mauve-950 chrome. */
+
+/* Dark mode — the "Carbon" implementation the design system's DESIGN.md leaves
+   to us. Every value is still one of its named colours: the page is `on-surface`
+   (the deep navy), cards are `primary-container` (so a card and the sidebar are
+   the same surface), and text is `inverse-on-surface`. */
 .dark {
-  --background: oklch(0.145 0.008 326);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.212 0.019 322.12);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.212 0.019 322.12);
-  --popover-foreground: oklch(0.985 0 0);
+  --background: #0b1c30; /* on-surface          */
+  --foreground: #eaf1ff; /* inverse-on-surface  */
+  --card: #131b2e; /* primary-container   */
+  --card-foreground: #eaf1ff;
+  --popover: #131b2e;
+  --popover-foreground: #eaf1ff;
 
   /* Deliberately the *inverse* of light mode: a filled button here is a light
-     mauve on a dark page. Setting this to mauve-800 (as light mode does) would
-     make every primary button vanish into the mauve-900 card behind it. */
-  --primary: oklch(0.922 0.005 325.62); /* mauve-200 */
-  --primary-foreground: oklch(0.212 0.019 322.12); /* mauve-900 */
+     slate on a dark page. Keeping #0f172a would make every primary button vanish
+     into the card behind it. */
+  --primary: #dae2fd; /* primary-fixed     */
+  --primary-foreground: #131b2e; /* on-primary-fixed  */
 
-  --secondary: oklch(0.263 0.024 320.12);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.263 0.024 320.12);
-  --muted-foreground: oklch(0.711 0.019 323.02);
-  --accent: oklch(0.263 0.024 320.12);
-  --accent-foreground: oklch(0.985 0 0);
+  --secondary: #213145; /* inverse-surface   */
+  --secondary-foreground: #eaf1ff;
+  --muted: #213145;
+  --muted-foreground: #bec6e0; /* primary-fixed-dim */
+  --accent: #213145;
+  --accent-foreground: #eaf1ff;
 
-  /* ★ no red, as in light mode — the *lightest* step here, so a destructive
-     button still reads as the heaviest thing on a dark surface. */
-  --destructive: oklch(0.922 0.005 325.62); /* mauve-200 */
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
+  /* The light *container* red rather than the mid one: on a dark page a
+     destructive button has to read as the heaviest thing on the surface, and
+     #ba1a1a is too close to the background to do that. */
+  --destructive: #ffdad6; /* error-container */
 
-  /* ★ accent step, as in light mode. */
-  --ring: var(--color-accent-step);
+  --border: rgb(255 255 255 / 10%);
+  --input: rgb(255 255 255 / 15%);
+  --ring: #adc6ff; /* secondary-fixed-dim */
 
-  --chart-1: oklch(0.985 0 0); /* mauve-50  */
-  --chart-2: oklch(0.865 0.012 325.68); /* mauve-300 */
-  --chart-3: oklch(0.711 0.019 323.02); /* mauve-400 */
-  --chart-4: oklch(0.542 0.034 322.5); /* mauve-500 */
-  --chart-5: oklch(0.435 0.029 321.78); /* mauve-600 */
+  --chart-1: #adc6ff; /* secondary-fixed-dim */
+  --chart-2: #2170e4;
+  --chart-3: #4edea3; /* tertiary-fixed-dim  */
+  --chart-4: #eaf1ff;
+  --chart-5: #64748b;
 
-  /* ★ shadcn's mauve dark theme sets `sidebar-primary` to a blue
-     (oklch(0.488 0.243 264.376)) that belongs to no other token in the theme.
-     The accent step replaces it, and the sidebar is mauve-950 in both themes so
-     it is literally the same surface either way. */
-  --sidebar: oklch(0.145 0.008 326); /* mauve-950 */
-  --sidebar-foreground: oklch(0.865 0.012 325.68); /* mauve-300 */
+  /* Unchanged from light mode — the whole point of the design's dark chrome is
+     that the sidebar is the same panel in both themes. */
+  --sidebar: #131b2e;
+  --sidebar-foreground: #d3e4fe;
   --sidebar-primary: var(--color-accent-step);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.263 0.024 320.12); /* mauve-800 */
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.263 0.024 320.12); /* mauve-800 */
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #1f2638;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #2b3243;
   --sidebar-ring: var(--color-accent-step);
 
-  /* Status tones, inverted for a dark surface: danger becomes the *lightest*
-     fill (heaviest against dark), success and info the darkest. Same weight
-     ordering as light mode, mirrored. */
-  /* green-300 — light enough to carry against the mauve-950 page. */
-  --positive: oklch(0.87 0.14 154); /* green-300 */
+  /* The palette has no dark containers for these, so the fills follow the
+     brief's own recipe instead — "low-opacity backgrounds of the status colour
+     with high-contrast text" — mixed from each tone's foreground. That keeps
+     dark mode from inventing four new hex values, and the ordering matches
+     light mode. Success and danger foregrounds are the system's
+     `tertiary-fixed-dim` and `error-container`; info is `secondary-fixed-dim`;
+     warning is Material Amber 200, the ramp the light pill's #fff8e1 / #ffecb3
+     already comes from. */
+  --positive: #4edea3; /* tertiary-fixed-dim */
 
-  --tone-success-bg: oklch(0.39 0.09 153); /* green-900 */
-  --tone-success-fg: oklch(0.87 0.14 154); /* green-300 */
-  --tone-info-bg: oklch(0.263 0.024 320.12); /* mauve-800 */
-  --tone-info-fg: oklch(0.711 0.019 323.02); /* mauve-400 */
-  --tone-warning-bg: oklch(0.435 0.029 321.78); /* mauve-600 */
-  --tone-warning-fg: oklch(0.985 0 0); /* mauve-50  */
-  --tone-danger-bg: oklch(0.922 0.005 325.62); /* mauve-200 */
-  --tone-danger-fg: oklch(0.212 0.019 322.12); /* mauve-900 */
+  --tone-success-fg: #4edea3;
+  --tone-success-bg: color-mix(in oklab, var(--tone-success-fg) 18%, transparent);
+  --tone-info-fg: #adc6ff;
+  --tone-info-bg: color-mix(in oklab, var(--tone-info-fg) 18%, transparent);
+  --tone-warning-fg: #ffe082;
+  --tone-warning-bg: color-mix(in oklab, var(--tone-warning-fg) 18%, transparent);
+  --tone-danger-fg: #ffdad6;
+  --tone-danger-bg: color-mix(in oklab, var(--tone-danger-fg) 18%, transparent);
 
-  --ink-source: oklch(0.711 0.019 323.02); /* mauve-400 — muted past */
-  --ink-target: oklch(0.985 0 0); /* mauve-50  — emphasised */
-  --ink-accent: oklch(0.865 0.012 325.68); /* mauve-300 — detail     */
+  --ink-source: #94a3b8; /* steel-400           */
+  --ink-target: #eaf1ff; /* inverse-on-surface  */
+  --ink-accent: #adc6ff; /* secondary-fixed-dim */
+
+  --canvas-dot: #eaf1ff;
 }
- 
+
 @layer base {
   html {
     height: 100%;
   }
   body {
     min-height: 100%;
-    @apply bg-background text-foreground;
+    @apply bg-background font-sans text-foreground;
   }
   * {
     @apply border-border outline-ring/50;
   }
+
+  /* "Custom scrollbar for data density" — the design's own rule, using two steps
+     of the structural ramp. */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-steel-300);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-steel-400);
+  }
+  .dark ::-webkit-scrollbar-thumb {
+    background: var(--color-steel-700);
+  }
+  .dark ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-steel-600);
+  }
 }
+
 @layer utilities {
-  .text-heading-1 {
-    font-size: var(--font-size-heading-1);
-    font-weight: 700;
-    line-height: 1.2;
-  }
-  .text-heading-2 {
-    font-size: var(--font-size-heading-2);
-    font-weight: 700;
-    line-height: 1.3;
-  }
-  .text-heading-3 {
-    font-size: var(--font-size-heading-3);
-    font-weight: 700;
-    line-height: 1.4;
-  }
-  .text-heading-4 {
-    font-size: var(--font-size-heading-4);
-    font-weight: 700;
-    line-height: 1.4;
-  }
-  .text-monospaced {
-    font-size: var(--font-size-monospaced);
-    font-weight: 400;
-    line-height: 1.5;
-    font-family: var(--font-mono);
-  }
- 
-  .text-paragraph-regular {
-    font-size: var(--font-size-paragraph-regular);
-    font-weight: 400;
-    line-height: 1.5;
-  }
-  .text-paragraph-medium {
-    font-size: var(--font-size-paragraph-medium);
-    font-weight: 500;
-    line-height: 1.5;
-  }
-  .text-paragraph-small-regular {
-    font-size: var(--font-size-paragraph-small-regular);
-    font-weight: 400;
-    line-height: 1.5;
-  }
-  .text-paragraph-small-medium {
-    font-size: var(--font-size-paragraph-small-medium);
-    font-weight: 500;
-    line-height: 1.5;
-  }
-  .text-paragraph-mini-regular {
-    font-size: var(--font-size-paragraph-mini-regular);
-    font-weight: 400;
-    line-height: 1.5;
-  }
-  .text-paragraph-mini-medium {
-    font-size: var(--font-size-paragraph-mini-medium);
-    font-weight: 500;
-    line-height: 1.5;
+  /* The content canvas's dot grid — a 24px lattice at 3% opacity behind the
+     page. Decorative only; it is the one place the design puts texture, and it
+     is what keeps the flat, shadowless cards from floating on nothing. Applied
+     to an inset, pointer-events-none overlay so it never sits over content. */
+  .canvas-grid {
+    background-image: radial-gradient(var(--color-canvas-dot) 1px, transparent 1px);
+    background-size: 24px 24px;
+    opacity: 0.03;
   }
 }
+
 /* Tiptap documentation editor — themed via tokens (light + dark). The prose
    classes come from @tailwindcss/typography; these fill in the editing chrome
    and the empty-state placeholder. */

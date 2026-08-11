@@ -37,8 +37,8 @@ function StatTile({
   const body = (
     <Card
       className={cn(
-        'h-full border-border shadow-sm transition-colors',
-        href && 'hover:border-primary/40 hover:bg-muted/40'
+        'h-full rounded-lg border-border shadow-none transition-colors',
+        href && 'hover:border-input hover:bg-muted/40'
       )}
     >
       <CardHeader className="gap-1">
@@ -173,7 +173,10 @@ export function DashboardOverview({ summary }: { summary: DashboardSummary }) {
       : undefined;
 
   return (
-    <div className="flex flex-col gap-6 px-6 py-6">
+    // Same container as every other page body, so the tiles line up with the
+    // page header above them (which is `px-4 sm:px-8`) and the dashboard stops
+    // running full-bleed while its siblings are capped.
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-8 sm:px-8">
       {/* Row 1 — the four headline counts. */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatTile
@@ -216,7 +219,7 @@ export function DashboardOverview({ summary }: { summary: DashboardSummary }) {
 
       {/* Row 2 — progress on the left, activity on the right. */}
       <div className="grid gap-4 lg:grid-cols-5">
-        <Card className="border-border shadow-sm lg:col-span-2">
+        <Card className="rounded-lg border-border shadow-none lg:col-span-2">
           <CardHeader>
             <CardTitle className="text-base">Migration progress</CardTitle>
             <CardDescription>
@@ -227,7 +230,7 @@ export function DashboardOverview({ summary }: { summary: DashboardSummary }) {
             {migration.map((metric) => (
               <ProgressRow key={metric.label} metric={metric} />
             ))}
-            <Separator />
+            <Separator className="h-px w-full" />
             <Link
               href="/tracker"
               className="text-sm font-medium text-primary underline-offset-4 hover:underline"
@@ -237,7 +240,7 @@ export function DashboardOverview({ summary }: { summary: DashboardSummary }) {
           </CardContent>
         </Card>
 
-        <Card className="border-border shadow-sm lg:col-span-3">
+        <Card className="rounded-lg border-border shadow-none lg:col-span-3">
           <CardHeader>
             <CardTitle className="text-base">Recent builds</CardTitle>
             <CardDescription>
@@ -261,7 +264,7 @@ export function DashboardOverview({ summary }: { summary: DashboardSummary }) {
       </div>
 
       {/* Row 3 — the smaller breakdowns. */}
-      <Card className="border-border shadow-sm">
+      <Card className="rounded-lg border-border shadow-none">
         <CardHeader>
           <CardTitle className="text-base">Breakdown</CardTitle>
           <CardDescription>Where the environments and records sit.</CardDescription>

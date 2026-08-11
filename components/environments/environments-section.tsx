@@ -40,6 +40,7 @@ import { isTerminalRunPhase } from '@/types/common/jenkins';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Separator } from '@/components/ui/separator';
 import {
   Table,
   TableBody,
@@ -82,12 +83,12 @@ export function EnvironmentsSection({
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Environments</h2>
+        <h2 className="font-display text-headline-lg">Environments</h2>
         {canEdit ? (
           <EnvironmentForm
             projectId={project.id}
             trigger={
-              <Button size="sm">
+              <Button size="sm" variant="outline">
                 <Plus className="mr-2 h-4 w-4" /> Add Environment
               </Button>
             }
@@ -96,11 +97,13 @@ export function EnvironmentsSection({
       </div>
 
       {project.environments.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
+        <div className="rounded-lg border border-dashed border-border py-10 text-center text-body-sm text-muted-foreground">
           No environments yet.
         </div>
       ) : (
-        <div className="space-y-4">
+        // 24px between cards — `lg` on the design's spacing scale, which is what
+        // it uses "between distinct sections or cards".
+        <div className="space-y-6">
           {project.environments.map((env) => (
             <EnvironmentCard
               key={env.id}
@@ -118,9 +121,11 @@ export function EnvironmentsSection({
 
 // The last build cell content (# + local time), or a dash.
 function LastBuild({ job }: { job?: JenkinsJobSummary }) {
-  if (!job?.lastBuildNumber) return <span className="text-muted-foreground">—</span>;
+  if (!job?.lastBuildNumber) return <span className="text-ink-source">—</span>;
+  // Mono, because the design puts build metadata in the same face as ports and
+  // IPs — a column of these has to be scannable, not just readable.
   return (
-    <span className="text-xs text-muted-foreground">
+    <span className="font-mono text-label-mono text-ink-source">
       #{job.lastBuildNumber}
       {job.lastBuildAt ? <span className="block">{new Date(job.lastBuildAt).toLocaleString()}</span> : null}
     </span>
@@ -147,7 +152,7 @@ function LiveUrlCell({
     const missingPort = !port.port.trim();
     return (
       <span
-        className="text-sm text-muted-foreground"
+        className="text-body-sm text-muted-foreground"
         title={missingPort ? 'Add a port to build the link' : 'This record is not a web endpoint'}
       >
         {missingPort && canEdit ? 'Add a port' : '—'}
@@ -171,7 +176,7 @@ function LiveUrlCell({
         target="_blank"
         rel="noreferrer"
         title={`Open ${url}`}
-        className="inline-flex items-center gap-1 font-mono text-xs text-primary hover:underline"
+        className="inline-flex items-center gap-1 font-mono text-label-mono text-ink-accent hover:underline"
       >
         {hostAndPort(url)}
         <ExternalLink className="h-3 w-3 shrink-0" />
@@ -288,7 +293,7 @@ function PortRow({
       href={port.jenkinsJobUrl}
       target="_blank"
       rel="noreferrer"
-      className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+      className="inline-flex items-center gap-1 text-body-sm font-medium text-ink-accent hover:underline"
     >
       {port.description || port.jenkinsJobUrl}
       <ExternalLink className="h-3 w-3 shrink-0" />
@@ -303,7 +308,7 @@ function PortRow({
       className="h-8"
     />
   ) : (
-    <span className="text-muted-foreground">{port.description || '—'}</span>
+    <span className="text-body-sm font-medium">{port.description || '—'}</span>
   );
 
   // Domain cell: the host this record is served on. Editable for every record,
@@ -318,7 +323,7 @@ function PortRow({
       className="h-8"
     />
   ) : (
-    <span className="text-sm text-muted-foreground">{port.domain || '—'}</span>
+    <span className="font-mono text-label-mono text-muted-foreground">{port.domain || '—'}</span>
   );
 
   return (
@@ -332,10 +337,10 @@ function PortRow({
               onBlur={() => portVal !== port.port && save({ port: portVal })}
               onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
               placeholder="port"
-              className="h-8 w-20 font-mono"
+              className="h-8 w-20 font-mono text-label-mono md:text-label-mono"
             />
           ) : (
-            <span className="font-mono">{port.port || '—'}</span>
+            <span className="font-mono text-label-mono text-ink-target">{port.port || '—'}</span>
           )}
         </TableCell>
       ) : null}
@@ -350,10 +355,10 @@ function PortRow({
               onBlur={() => branchVal !== port.branch && save({ branch: branchVal })}
               onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
               placeholder="main"
-              className="h-8 font-mono"
+              className="h-8 font-mono text-label-mono md:text-label-mono"
             />
           ) : (
-            <span className="font-mono">{port.branch || '—'}</span>
+            <span className="font-mono text-label-mono text-ink-target">{port.branch || '—'}</span>
           )}
         </TableCell>
       ) : null}
@@ -570,23 +575,34 @@ function EnvironmentCard({
   };
 
   return (
-    <div className="rounded-lg border border-border">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
-        <div className="flex items-center gap-2">
-          <span className="font-medium">{env.name || 'unnamed'}</span>
-          <Badge variant="secondary" className="uppercase">
+    // Level 1 elevation: a 1px border and no shadow. Depth comes from the tonal
+    // step between the white card and the tinted canvas behind it.
+    <div className="overflow-hidden rounded-lg border border-border bg-card">
+      {/* The header sits a half-step back from the card body, which is what
+          separates it without a second border. */}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-background/50 px-6 py-4">
+        <div className="flex items-center gap-3">
+          <h3 className="text-body-md font-bold tracking-wide uppercase">
+            {env.name || 'unnamed'}
+          </h3>
+          <Badge variant="secondary" className="rounded-sm text-label-caps font-bold uppercase">
             {env.cicdProvider}
           </Badge>
           {env.vmName ? (
-            <Link
-              href="/tracker"
-              className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-            >
-              <Server className="h-3 w-3" /> {env.vmName}
-              {/* Where the Link column's addresses come from — shown here once
-                  rather than repeated down the column. */}
-              {env.vmIp ? <span className="font-mono">· {env.vmIp}</span> : null}
-            </Link>
+            <>
+              {/* `w-px` because ui/separator.tsx can't supply it on Radix 1.4.3 —
+                  see docs/ui-guidelines.md § Known casualties. */}
+              <Separator orientation="vertical" className="mx-1 h-4 w-px" />
+              <Link
+                href="/tracker"
+                className="inline-flex items-center gap-1.5 font-mono text-label-mono text-muted-foreground transition-colors hover:text-foreground"
+              >
+                <Server className="h-3.5 w-3.5 shrink-0" /> {env.vmName}
+                {/* Where the Link column's addresses come from — shown here once
+                    rather than repeated down the column. */}
+                {env.vmIp ? <span className="text-ink-source">· {env.vmIp}</span> : null}
+              </Link>
+            </>
           ) : null}
         </div>
         <div className="flex items-center gap-3">
@@ -595,7 +611,7 @@ function EnvironmentCard({
               href={env.jenkinsUrl}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+              className="inline-flex items-center gap-1 text-body-sm text-muted-foreground transition-colors hover:text-foreground"
             >
               Jenkins <ExternalLink className="h-3 w-3" />
             </a>
@@ -605,7 +621,7 @@ function EnvironmentCard({
               href={env.deployUrl}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+              className="inline-flex items-center gap-1 text-body-sm text-muted-foreground transition-colors hover:text-foreground"
             >
               Live <ExternalLink className="h-3 w-3" />
             </a>
@@ -738,7 +754,20 @@ function EnvironmentCard({
           inside its own card rather than making the page scroll sideways. Without
           the build columns it's four columns wide and needs far less room — the
           same floor would force a pointless sideways scroll. */}
-      <div className="overflow-x-auto px-4 py-3">
+      {/* Descendant rules rather than classes on ~16 individual cells: every column
+          label gets the design's uppercase, bold, muted `label-caps` treatment, and
+          the first/last cell of every row carries the card's 24px inset. Doing it
+          per-cell is how this header and the next card's header drift apart, and
+          the inset has to hold for `td` and `th` alike or the columns don't line
+          up. The padding lives on the cells, not this wrapper, so a row's hover
+          fill still runs the full width of the card.
+          `font-bold` and `text-muted-foreground` are restated deliberately:
+          `TableHead` ships `font-medium text-foreground`, and `label-caps` carries
+          its weight as `font-weight: var(--tw-font-weight, 700)` — which
+          `font-medium` would resolve to 500. A descendant selector outranks the
+          primitive's plain class, so these win; `p-2` and `px-2` lose to the
+          insets for the same reason. */}
+      <div className="overflow-x-auto [&_td:first-child]:pl-6 [&_td:last-child]:pr-6 [&_td]:py-3 [&_th:first-child]:pl-6 [&_th:last-child]:pr-6 [&_th]:text-label-caps [&_th]:font-bold [&_th]:text-muted-foreground [&_th]:uppercase">
         <Table className={tableMinWidth}>
           <TableHeader>
             <TableRow>
@@ -779,21 +808,26 @@ function EnvironmentCard({
               />
             ))}
             {env.ports.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={columnCount} className="text-center text-sm text-muted-foreground">
+              <TableRow className="hover:bg-transparent">
+                <TableCell
+                  colSpan={columnCount}
+                  className="py-8 text-center text-body-sm text-muted-foreground"
+                >
                   No records yet.
                 </TableCell>
               </TableRow>
             ) : null}
             {canEdit ? (
-              <TableRow>
+              // Tinted a half-step back from the saved rows, so the entry row reads
+              // as a form rather than as another record.
+              <TableRow className="bg-muted/40 hover:bg-muted/40">
                 {showPort ? (
                   <TableCell>
                     <Input
                       value={port}
                       onChange={(e) => setPort(e.target.value)}
                       placeholder="3000"
-                      className="h-8 w-20 font-mono"
+                      className="h-8 w-20 font-mono text-label-mono md:text-label-mono"
                     />
                   </TableCell>
                 ) : null}
@@ -803,7 +837,7 @@ function EnvironmentCard({
                       value={branch}
                       onChange={(e) => setBranch(e.target.value)}
                       placeholder="main"
-                      className="h-8 font-mono"
+                      className="h-8 font-mono text-label-mono md:text-label-mono"
                       onKeyDown={(e) => e.key === 'Enter' && handleAddPort()}
                     />
                   </TableCell>
@@ -822,7 +856,7 @@ function EnvironmentCard({
                     look broken while it's empty. */}
                 {showLiveUrl ? (
                   <TableCell>
-                    <span className="font-mono text-xs text-muted-foreground">
+                    <span className="font-mono text-label-mono text-ink-source">
                       {newRecordUrl ? hostAndPort(newRecordUrl) : '—'}
                     </span>
                   </TableCell>

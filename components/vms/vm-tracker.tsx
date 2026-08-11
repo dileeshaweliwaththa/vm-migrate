@@ -260,6 +260,9 @@ export function VmTracker({ role }: { role: UserRole }) {
   return (
     <div className="flex flex-1 flex-col">
       <PageHeader
+        // The one page that pins its header: the migration counters have to stay
+        // on screen while the (very wide, very long) tracker table scrolls.
+        sticky
         title="VM Migration Tracker"
         stats={
           <>

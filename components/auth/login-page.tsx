@@ -66,7 +66,7 @@ export default function LoginPage() {
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-muted/40 px-6 py-16">
-      <Card className="w-full max-w-md border-border shadow-sm">
+      <Card className="w-full max-w-md rounded-lg border-border shadow-level-2">
         <CardHeader className="space-y-2">
           <CardTitle className="text-2xl font-semibold">Welcome back</CardTitle>
           <CardDescription>

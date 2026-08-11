@@ -96,7 +96,7 @@ function SettingsForm({ settings }: { settings: AppSettings }) {
         }
       />
 
-      <div className="mx-auto w-full max-w-3xl space-y-8 px-4 py-8 sm:px-6">
+      <div className="mx-auto w-full max-w-3xl space-y-8 px-4 py-8 sm:px-8">
         <section className="space-y-4">
           <div>
             <h2 className="text-base font-semibold">AI documentation (Gemini)</h2>
@@ -210,7 +210,7 @@ export function SettingsManager() {
     return (
       <>
         <PageHeader title="Settings" />
-        <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-8 sm:px-6">
+        <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-8 sm:px-8">
           <Skeleton className="h-8 w-48" />
           <Skeleton className="h-24 w-full" />
         </div>
@@ -222,7 +222,7 @@ export function SettingsManager() {
     return (
       <>
         <PageHeader title="Settings" />
-        <div className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6">
+        <div className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-8">
           <p className="text-sm text-destructive">
             {error instanceof Error ? error.message : 'Failed to load settings.'}
           </p>

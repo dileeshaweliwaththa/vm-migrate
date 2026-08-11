@@ -85,7 +85,14 @@ result a published scale does.
 Two bugs fell out of the rework: `bg-primary` inside the sidebar rendered
 invisibly against it (the logo mark), and `SidebarMenuButton` was styling
 **every** nav item as active. See
-[ui-guidelines.md § Theme](./ui-guidelines.md#theme-shadcn-mauve-plus-green-for-success).
+[ui-guidelines.md § Theme](./ui-guidelines.md#theme-kinetic-slate).
+
+> **Superseded.** Everything in this section describes the single-hue `mauve`
+> palette, which round 5 replaced with the **Kinetic Slate** design system —
+> slate structure, one blue accent, and real green/amber/red status hues. The two
+> sidebar bugs above and the "status as text" safety property still hold; the
+> colour values no longer do. The current palette is documented in
+> [ui-guidelines.md § Theme](./ui-guidelines.md#theme-kinetic-slate).
 
 ---
 

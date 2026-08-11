@@ -81,6 +81,22 @@ errors; the element just renders unstyled.
 - `ui/tabs.tsx` — the `data-horizontal` / `group-data-horizontal` paths don't
   resolve, so the tab list renders as an empty block. Use `toggle-group` for
   segmented switches.
+- `ui/separator.tsx` — carries **all** of its sizing on
+  `data-horizontal:h-px data-horizontal:w-full data-vertical:w-px data-vertical:self-stretch`,
+  while the primitive emits only `data-orientation`. So a `Separator` is
+  **zero-area**: it mounts, occupies nothing, and shows nothing. `className="h-4"`
+  on a vertical one is *not* enough — the **width** is the part the primitive was
+  supposed to supply, which is why this reads as "the divider just isn't there"
+  rather than as a sizing bug. Pass the missing axis explicitly:
+
+  ```tsx
+  <Separator orientation="vertical" className="h-4 w-px" />   {/* ✅ */}
+  <Separator className="h-px w-full" />                       {/* ✅ horizontal */}
+  <Separator orientation="vertical" className="h-4" />        {/* ❌ invisible */}
+  ```
+
+  `SidebarSeparator` in `ui/sidebar.tsx` wraps the same primitive and inherits the
+  same problem.
 
 **Before reaching for a primitive from `components/ui/`,** check whether its
 classes depend on a boolean `data-*` variant. If they do, it will render wrong.
@@ -136,100 +152,160 @@ it in `overflow-x-auto`, and make sure every flex ancestor up to `SidebarInset`
 carries `min-w-0`. Block wrappers (`mx-auto w-full max-w-7xl`) are fine as-is —
 this only bites flex and grid items.
 
-## Theme: shadcn `mauve`, plus green for success
+## Theme: "Kinetic Slate"
 
 **Never write a colour value in a component.** No hex, no `rgb()`, no `oklch()`,
 no `bg-emerald-600`. Components use the tokens below; `app/globals.css` is the
 only file that names a colour. That is what makes the palette replaceable — and
-it has been replaced four times already.
+it has been replaced five times already.
 
-**Never invent a colour value either.** Everything in `globals.css` is copied
-from [ui.shadcn.com/colors](https://ui.shadcn.com/colors), which you can fetch
-programmatically rather than eyedropper off the page:
+**Never invent a colour value either.** The palette is the **Kinetic Slate**
+design system, read from Stitch rather than eyedropped off a screenshot:
 
 ```bash
-curl -s https://ui.shadcn.com/r/colors/mauve.json   # a full theme, cssVarsV4 = OKLCH
-curl -s https://ui.shadcn.com/r/colors/index.json   # every scale, every step
+# Any read-only tool works: get_project, list_screens, get_screen,
+# list_design_systems. `theme.namedColors` and `theme.designMd` are the palette.
+curl -sS -X POST https://stitch.googleapis.com/mcp \
+  -H "X-Goog-Api-Key: $STITCH_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_design_systems",
+       "arguments":{"projectId":"11781340808558879699"}}}'
 ```
 
-**`mauve` for everything structural — eleven steps**, with difference expressed as
-**lightness** rather than hue. No orange, no blue, no red.
+The system is seeded from Tailwind's own scales — `#0f172a` (slate-900),
+`#64748b` (slate-500), `#3b82f6` (blue-500), `#10b981` (emerald-500) — so the
+structural ramp is Tailwind `slate` verbatim, and the brief's own callouts
+(`#e2e8f0` card borders, `#cbd5e1` hover borders, `#94a3b8` scrollbar thumbs) are
+three of its steps.
 
-**One exception: success is green** (shadcn `green`, via `--color-positive`). It is
-the single place a second hue earns its keep — a passing build has to read as
-passing at a glance, and mauve-with-more-lightness does not do that. Do not add a
-third hue; for anything else, reach for a different step on the mauve ramp.
+### Three hues, each with a job
 
-`--color-mauve-50 … --color-mauve-950`, plus one indirection:
+This is the big change from the palette this replaced, which was a single hue
+(mauve) where every distinction was carried by **lightness**. Hue is now
+load-bearing:
 
-```css
---color-accent-step: var(--color-mauve-600);
-```
+| Hue | Token | Used for |
+| --- | ----- | -------- |
+| **slate** | `--color-steel-50 … 950` | every structural surface, border, neutral text |
+| **blue** | `--color-accent-step` (#0058be) | the **active** state — current nav item, focus rings, live dots |
+| **status** | `--tone-*`, `--positive`, `--destructive` | status pills only: green / amber / red |
 
-That is the accent — the active nav item, focus rings, the emphasised stat. It
-exists as its own name so the accent can move up or down the ramp in one edit.
+`--color-accent-step` is the one indirection: it exists as its own name so the
+accent can move in a single edit. It marks the active nav item and focus rings
+and **nothing else** — reach for a step of `steel-*` for any other emphasis.
 
-`:root` and `.dark` are shadcn's `mauve` theme verbatim, with exactly **three**
-deviations, each marked `★` in the file:
+Red is back (`--destructive` = the system's `error`), so a delete no longer has
+to be carried by weight alone. Green is `--positive`.
 
-1. **No red.** shadcn's `destructive` is a red; here it is the darkest step
-   (mauve-900 light / mauve-200 dark), so a delete button reads as *heavy* rather
-   than red.
-2. **The accent step** replaces shadcn's mid-mauve `ring`, and also the stray
-   blue shadcn puts in `sidebar-primary` for dark mode — a value that belongs to
-   no other token in the theme.
-3. **Dark chrome.** shadcn ships a *light* sidebar in light mode; here it is
-   **mauve-950** in both themes, so the sidebar is literally the same surface
-   whichever theme you're in.
+**The safety property that makes hue acceptable: every status pill still renders
+its status as text** — `SUCCESS`/`FAILED`, `Yes`/`No`, `Safe to Remove`/`Pending`.
+Never ship a pill that is colour alone.
 
-**Layout rule: dark chrome, light content.** Sidebar is mauve-950 always;
-content stays white in light mode. The accent step marks the **active** nav item
-and focus rings and nothing else.
+### The ramp is named `steel`, not `slate`
 
-### Status without hue
+`--color-steel-*` holds Tailwind's `slate` values but is deliberately not called
+`slate`: that name would shadow Tailwind's built-in scale, and the ramp keeps one
+stable name across future palette swaps. `components/vms/vm-row.tsx` is the main
+consumer — the tracker's expanded-row band is `bg-steel-800` with `text-steel-*`
+on top.
 
-With one hue, status is carried by **weight**:
+### Layout rule: dark chrome, light content
+
+The sidebar is `#131b2e` (`primary-container`) in **both** themes — it is
+literally the same panel whichever theme you are in. This is the design's own
+call, not a local deviation: *"the vertical sidebar uses a dark theme even in the
+Light Mode system to create clear structural separation."* Content stays white on
+a blue-tinted `#f8f9ff` canvas in light mode.
+
+### Status tones
 
 | Tone | Light mode | Dark mode |
 | ---- | ---------- | --------- |
-| `success` | **green**-100 fill, green-800 text | **green**-900 fill, green-300 text |
-| `info` | mauve-200 fill, mauve-600 text | mauve-800 fill, mauve-400 text |
-| `warning` | mauve-300 fill, mauve-900 text | mauve-600 fill, mauve-50 text |
-| `danger` | mauve-800 fill, mauve-50 text | mauve-200 fill, mauve-900 text |
+| `success` | `#e6f4ea` fill, `#137333` text | `tertiary-fixed-dim` text on an 18% mix of itself |
+| `info` | `surface-variant` fill, `on-secondary-fixed-variant` text | `secondary-fixed-dim` text on an 18% mix |
+| `warning` | `#fff8e1` fill, `#b08d00` text | Amber 200 text on an 18% mix |
+| `danger` | `error-container` fill, `on-error-container` text | `error-container` text on an 18% mix |
 
-`success` is green. `danger` is the inverted mauve fill in both modes — the
-heaviest thing on the surface, which is what red used to do. The ordering mirrors
-when the theme flips.
+Light mode uses the design system's real container colours. Dark mode has none for
+these, so the fills follow the brief's own recipe instead — *"low-opacity
+backgrounds of the status colour with high-contrast text"* — via
+`color-mix(in oklab, <fg> 18%, transparent)`. That keeps dark mode from inventing
+four new hex values, and the weight ordering mirrors light mode.
 
-**Failure still has no hue of its own**, so a failed build reads as *heavy* rather
-than as red. What makes that acceptable is that every pill renders its status **as
-text** — `Yes`/`No`, `SUCCESS`/`FAILED`, `Safe to Remove`/`Pending` — so nothing
-depends on colour alone. Keep it that way: never ship a pill that is colour only.
+Reach for `STATUS_TONE_CLASS` in [`lib/vm-utils.ts`](../lib/vm-utils.ts) rather
+than naming tones yourself; it is the shared vocabulary across the tracker, the
+build history and the dashboard. `JenkinsStatusBadge` in
+`components/environments/jenkins-status.tsx` is the Jenkins-specific counterpart.
 
-Green contrast, measured: green-700 is **5.0:1** on white (green-600 is only
-3.3:1 and fails for 12px text, which is why the badge uses 700), green-300 is
-**14.1:1** on the dark page, and both pill pairs are **6.5:1**.
+### Type: three families, one utility each
+
+The design system's type scale is registered in Tailwind's `--text-*` namespace,
+so each name compiles to a **whole style** — size, line-height, weight and
+tracking together. Don't rebuild these from `text-sm font-medium tracking-wide`.
+
+| Utility | Family | Use |
+| ------- | ------ | --- |
+| `text-headline-xl` + `font-display` | Hanken Grotesk 36/44 700 | page hero titles (uppercase) |
+| `text-headline-lg` + `font-display` | Hanken Grotesk 24/32 600 | section headings |
+| `text-headline-md` + `font-display` | Hanken Grotesk 20/28 600 | card titles |
+| `text-body-md` | Inter 16/24 400 | body, nav items |
+| `text-body-sm` | Inter 14/20 400 | secondary text, table cells |
+| `text-label-mono` + `font-mono` | JetBrains Mono 13/16 500 | ports, IPs, domains, timestamps |
+| `text-label-caps` | Hanken Grotesk 12/16 700 | column headers, badges |
+
+`font-sans` (Inter) is on `body`, so body text needs no class. **`font-display`
+and `font-mono` are separate from the size utility** — `text-headline-xl` sets
+the metrics, not the family. And `text-label-caps` does **not** include
+`text-transform`; Tailwind's `--text-*` modifiers cover size, height, weight and
+tracking only, so add `uppercase` at the call site.
+
+Mono is not decoration. It is for values that get **scanned in a column** —
+ports, IPs, build numbers — where digit alignment is the whole point.
+
+### Elevation: borders, not shadows
+
+"Tonal layers and low-contrast outlines." There are only two shadows in the
+system, and cards are not one of them:
+
+- **Level 1 (cards, containers):** `border border-border` and **no shadow**.
+  Depth is the tonal step between the white card and the tinted canvas. Pass
+  `shadow-none` when a primitive ships `shadow-sm` (`ui/card.tsx` does).
+- **Level 2 (dropdowns, popovers, the auth card):** `shadow-level-2`.
+- Hover on an interactive card shifts the **border** (`hover:border-input`), not
+  the shadow.
+- `shadow-nav-active` is the active nav item's glow, derived from
+  `--sidebar-primary` so it moves with the accent.
+
+`--radius` is `0.5rem`, which lands the derived steps on the design's shape
+language: `rounded-sm` 4px (buttons, inputs, chips — "precision-molded, not
+bubbly"), `rounded-lg` 8px (cards), `rounded-full` for status pills only.
+
+### `.canvas-grid`
+
+The one piece of texture in the system: a 24px dot lattice at 3% opacity behind
+the page, applied by the app layout as an inset `pointer-events-none` overlay.
+It is what keeps the flat, shadowless cards from floating on nothing. Content
+sits in a `relative z-10` sibling above it.
 
 ### The tokens
 
 | Use | Token |
 | --- | ----- |
-| Everything structural | `bg-mauve-50 … bg-mauve-950` (and `text-`, `border-`) |
-| Accent | `--color-accent-step` (= mauve-600) |
-| Success | `text-positive` / `bg-positive` (= shadcn green, themed per mode) |
-| Status pills | `STATUS_TONE_CLASS` in [`lib/vm-utils.ts`](../lib/vm-utils.ts) → `bg-tone-{success,info,warning,danger}` + `text-tone-*-fg` |
-| Inline grid values | `text-ink-source` (came from), `text-ink-target` (landed on), `text-ink-accent` (neutral detail) |
-| Semantic fills | `bg-positive`, `bg-negative` |
-| Everything else | the standard shadcn semantics — `bg-background`, `text-muted-foreground`, `border-border`, `bg-card`, `text-destructive`, … |
+| Everything structural | `bg-steel-50 … bg-steel-950` (and `text-`, `border-`) |
+| Accent (active state only) | `--color-accent-step` → `bg-accent-step`, and `--ring` |
+| Success | `text-positive` / `bg-positive` |
+| Status pills | `STATUS_TONE_CLASS` → `bg-tone-{success,info,warning,danger}` + `text-tone-*-fg` |
+| Inline grid values | `text-ink-source` (came from), `text-ink-target` (landed on), `text-ink-accent` (a detail) |
+| Everything else | standard shadcn semantics — `bg-background`, `text-muted-foreground`, `border-border`, `bg-card`, `text-destructive`, … |
 
 `tone-*` and `ink-*` are **themed per mode** in `:root`/`.dark`, so a call site
-never needs a `dark:` counterpart — that is the point of them. Reach for
-`STATUS_TONE_CLASS` rather than naming greens and reds yourself; it is the shared
-vocabulary across the tracker, the build history and the dashboard.
+never needs a `dark:` counterpart — that is the point of them.
 
-`positive` exists (green); **`negative` does not** — failure is carried by weight,
-not by red. If that asymmetry ever needs fixing, add `--negative` from shadcn's
-`red` alongside `--positive` rather than reaching for a Tailwind red utility.
+**`--secondary` is not the accent.** In shadcn's vocabulary `secondary` is a
+muted *fill* (secondary buttons, the JENKINS badge); the design system's own
+`secondary` is the blue accent and lives in `--color-accent-step`. Don't cross
+those two.
 
 ### Verifying a token actually exists
 
@@ -242,35 +318,53 @@ grep -c -F '.bg-your-token' $(grep -l 'sidebar-primary' .next/static/chunks/*.cs
 
 ### Two traps in the sidebar
 
-1. **`--primary` is a dark mauve — the same family the sidebar is painted
-   with.** Inside the sidebar, `bg-primary`/`text-primary-foreground` disappears
-   into the background. Use the `--sidebar-*` tokens there
-   (`bg-sidebar-primary`, `text-sidebar-foreground`, `bg-sidebar-accent`) — never
-   the global ones. Same for `text-muted-foreground` and the default
-   `AvatarFallback` tone: both are tuned for a light surface and wash out on the
-   dark chrome.
+1. **`--primary` is a deep slate — the same family the sidebar is painted with.**
+   Inside the sidebar, `bg-primary`/`text-primary-foreground` disappears into the
+   background. Use the `--sidebar-*` tokens there (`bg-sidebar-primary`,
+   `text-sidebar-foreground`, `bg-sidebar-accent`) — never the global ones. Same
+   for `text-muted-foreground` and the default `AvatarFallback` tone: both are
+   tuned for a light surface and wash out on the dark chrome.
 
-2. **`SidebarMenuButton`'s active styling applies to every item.** The primitive
+2. **`SidebarMenuButton`'s active styling applies to every button.** The primitive
    renders `data-active={isActive}` *unconditionally*, and React stringifies a
    `data-*` `false` — so the attribute is always present as `"false"`. Tailwind's
    `data-active:` variant compiles to `[data-active]`, which tests attribute
-   **presence**, so `data-active:bg-sidebar-accent` matches all of them. With the
-   old near-invisible accent nobody noticed; the moment the active colour became
+   **presence**, so the variant's
+   `data-active:bg-sidebar-accent data-active:font-medium
+   data-active:text-sidebar-accent-foreground` matches all of them. With the old
+   near-invisible accent nobody noticed; the moment the active colour became
    distinct, the entire nav rendered filled.
 
-   The fix in `components/layout/app-sidebar.tsx`: restate the same variant
-   (`data-active:bg-transparent`) so tailwind-merge drops the primitive's rule,
-   then style the real active item from React state with `!` — both selectors land
-   at equal specificity, and emission order shouldn't decide the winner.
+   This hits **every** `SidebarMenuButton`, not just nav items — including the two
+   that can never be active: the logo lockup and the account menu. Both rendered
+   permanently filled.
+
+   The fix is [`components/layout/sidebar-item-styles.ts`](../components/layout/sidebar-item-styles.ts),
+   which exports one `NEVER_ACTIVE` string restating those variants so
+   tailwind-merge drops the primitive's versions (same class group, same variant →
+   last wins). All three call sites use it; `navItemClass()` in `app-sidebar.tsx`
+   layers the *real* active styling on top from React state, with `!` because both
+   land at equal specificity and emission order shouldn't decide the winner. It
+   lives in a shared module because a copy that drifts fails silently — the button
+   just renders filled.
 
    This is the same family as the Radix boolean-attribute trap above, but a
-   *different* root cause — upgrading Radix will not fix it. Don't edit
-   `components/ui/sidebar.tsx` (rule 3); override in the feature component.
+   *different* root cause: it is the primitive's own JSX, so upgrading Radix will
+   not fix it. Don't edit `components/ui/sidebar.tsx` (rule 3); override at the
+   call site.
 
-Chart tokens `--chart-1..5` are five widely-spaced steps of the same ramp
-(mauve-900 → mauve-300 in light mode, reversed in dark). Lightness is the only
-channel available, so keep series counts low — five is the practical ceiling
-before adjacent steps stop being separable.
+3. **Reach for `data-[state=open]`, never `data-open:`.** The variant string also
+   carries `data-open:hover:bg-sidebar-accent`, which is dead on 1.4.3 for the
+   usual reason. When a `SidebarMenuButton` is a `DropdownMenuTrigger` (the
+   account menu), style its open state with `data-[state=open]:` — the valued
+   attribute 1.4.3 actually emits.
+
+The sidebar is **280px**, not the primitive's 16rem. `SidebarProvider` spreads
+`style` *after* its own custom properties, so the app layout overrides
+`--sidebar-width` there.
+
+Chart tokens `--chart-1..5` now differ by **hue** first and lightness second, so
+series stay separable at higher counts than the old single-ramp palette allowed.
 
 ## Where shadcn fits in the architecture
 

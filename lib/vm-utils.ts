@@ -34,12 +34,10 @@ export function safeStatus(vm: Vm): VmStatus {
 // `--tone-*` variables in globals.css, which are themed per mode — so a tone is
 // declared once here and never needs a `dark:` counterpart at the call site.
 //
-// `success` is **green** (shadcn `green`) — the one hue in the app that isn't
-// mauve, because a passing build has to read as passing at a glance. The rest
-// differ by **weight**, not colour: danger is an inverted dark fill, warning a mid
-// fill, info a light one (mirrored in dark mode). Every pill that uses them also
-// renders its label as text, so no meaning depends on colour alone. See
-// docs/ui-guidelines.md § Theme.
+// Each tone carries a real hue: success green, warning amber, danger red, info
+// blue. Every pill that uses them also renders its label as text, so no meaning
+// depends on colour alone — which is what makes the hue cue safe rather than
+// load-bearing. See docs/ui-guidelines.md § Theme.
 export const STATUS_TONE_CLASS: Record<StatusTone, string> = {
   success: 'bg-tone-success text-tone-success-fg',
   info: 'bg-tone-info text-tone-info-fg',

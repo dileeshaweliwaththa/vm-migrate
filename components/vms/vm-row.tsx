@@ -116,20 +116,20 @@ function MigratedFrom({ vm, allVms, allDeleted }: { vm: Vm; allVms: Vm[]; allDel
       {sources.map(({ src, tag }) => (
         <Fragment key={`mig-${vm.id}-${src.id}`}>
           <TableRow className="hover:bg-transparent">
-            <TableCell className="w-9 bg-mauve-700" />
-            <TableCell colSpan={TRACKER_COLUMNS - 1} className="bg-mauve-800 py-1.5 text-mauve-100">
-              <span className="text-[10px] font-bold tracking-wide text-mauve-400 uppercase">
+            <TableCell className="w-9 bg-steel-700" />
+            <TableCell colSpan={TRACKER_COLUMNS - 1} className="bg-steel-800 py-1.5 text-steel-100">
+              <span className="text-[10px] font-bold tracking-wide text-steel-400 uppercase">
                 ⬆ Migrated from:{' '}
               </span>
-              <span className="text-xs font-semibold text-mauve-50">{src.name || '(unnamed)'}</span>
-              <span className="ml-2 text-[10px] text-mauve-300">
+              <span className="text-xs font-semibold text-steel-50">{src.name || '(unnamed)'}</span>
+              <span className="ml-2 text-[10px] text-steel-300">
                 {src.oldIp} → {src.newIp}
               </span>
               {tag ? (
                 <span
                   className={cn(
-                    'ml-2 rounded-full px-2 py-0.5 text-[9px] font-bold text-mauve-900',
-                    tag === 'ARCHIVED' ? 'bg-mauve-400' : 'bg-mauve-50'
+                    'ml-2 rounded-full px-2 py-0.5 text-[9px] font-bold text-steel-900',
+                    tag === 'ARCHIVED' ? 'bg-steel-400' : 'bg-steel-50'
                   )}
                 >
                   {tag}
@@ -139,37 +139,37 @@ function MigratedFrom({ vm, allVms, allDeleted }: { vm: Vm; allVms: Vm[]; allDel
           </TableRow>
           {src.urls.map((u) => (
             <TableRow key={`mig-url-${vm.id}-${src.id}-${u.id}`} className="hover:bg-transparent">
-              <TableCell className="w-9 bg-mauve-700" />
-              <TableCell className="bg-mauve-800 py-1 pl-5">
-                <span className="rounded-full bg-mauve-400 px-2 py-0.5 text-[9px] font-bold tracking-wide text-mauve-900">
+              <TableCell className="w-9 bg-steel-700" />
+              <TableCell className="bg-steel-800 py-1 pl-5">
+                <span className="rounded-full bg-steel-400 px-2 py-0.5 text-[9px] font-bold tracking-wide text-steel-900">
                   MIGRATED
                 </span>
               </TableCell>
-              <TableCell className="bg-mauve-800 text-center text-xs text-mauve-400">
+              <TableCell className="bg-steel-800 text-center text-xs text-steel-400">
                 {src.oldIp}
               </TableCell>
-              <TableCell className="bg-mauve-800 text-center text-xs text-mauve-100">
+              <TableCell className="bg-steel-800 text-center text-xs text-steel-100">
                 {src.newIp}
               </TableCell>
-              <TableCell className="bg-mauve-800 text-center text-xs font-semibold text-mauve-100">
+              <TableCell className="bg-steel-800 text-center text-xs font-semibold text-steel-100">
                 {u.port}
               </TableCell>
-              <TableCell className="bg-mauve-800 text-center text-xs text-mauve-300">
+              <TableCell className="bg-steel-800 text-center text-xs text-steel-300">
                 {u.proto}
               </TableCell>
-              <TableCell className="bg-mauve-800 text-xs text-mauve-300">{u.url}</TableCell>
-              <TableCell className="bg-mauve-800 text-xs font-medium text-mauve-100">
+              <TableCell className="bg-steel-800 text-xs text-steel-300">{u.url}</TableCell>
+              <TableCell className="bg-steel-800 text-xs font-medium text-steel-100">
                 {buildFullUrl(u.proto, src.newIp, u.port)}
               </TableCell>
-              <TableCell className="bg-mauve-800 text-center text-xs text-mauve-200">
+              <TableCell className="bg-steel-800 text-center text-xs text-steel-200">
                 {u.dns ? 'Yes' : 'No'}
               </TableCell>
-              <TableCell className="bg-mauve-800 text-center text-xs text-mauve-200">
+              <TableCell className="bg-steel-800 text-center text-xs text-steel-200">
                 {u.tested ? 'Yes' : 'No'}
               </TableCell>
-              <TableCell className="bg-mauve-800" colSpan={4} />
-              <TableCell className="bg-mauve-800 text-xs text-mauve-400">{u.notes}</TableCell>
-              <TableCell className="bg-mauve-800" />
+              <TableCell className="bg-steel-800" colSpan={4} />
+              <TableCell className="bg-steel-800 text-xs text-steel-400">{u.notes}</TableCell>
+              <TableCell className="bg-steel-800" />
             </TableRow>
           ))}
         </Fragment>
@@ -300,8 +300,8 @@ export function VmRow({
                 className={cn(
                   'inline-flex h-7 items-center justify-center rounded-md border px-2 text-xs font-bold',
                   vm.isClient
-                    ? 'border-transparent bg-mauve-600 text-mauve-50'
-                    : 'border-mauve-400 bg-transparent text-mauve-600 dark:text-mauve-300'
+                    ? 'border-transparent bg-steel-600 text-steel-50'
+                    : 'border-steel-400 bg-transparent text-steel-600 dark:text-steel-300'
                 )}
               >
                 {vm.isClient ? 'C' : 'UV'}

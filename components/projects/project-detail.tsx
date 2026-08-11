@@ -1,15 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { ArrowLeft, Archive, FileText, Pencil, Server, Trash2 } from 'lucide-react';
+import { Archive, FileText, Pencil, Server, Trash2 } from 'lucide-react';
 import { useProject, useArchiveProject, useDeleteProject } from '@/hooks/projects/useProjects';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Separator } from '@/components/ui/separator';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import {
   AlertDialog,
@@ -59,7 +57,7 @@ export function ProjectDetail({
 
   if (isLoading) {
     return (
-      <div className="mx-auto w-full max-w-7xl space-y-4 px-4 py-8 sm:px-6">
+      <div className="mx-auto w-full max-w-7xl space-y-4 px-4 py-8 sm:px-8">
         <Skeleton className="h-8 w-56" />
         <Skeleton className="h-24 w-full" />
       </div>
@@ -68,8 +66,8 @@ export function ProjectDetail({
 
   if (error || !project) {
     return (
-      <div className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6">
-        <p className="text-sm text-destructive">
+      <div className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-8">
+        <p className="text-body-sm text-destructive">
           {error instanceof Error ? error.message : 'Project not found.'}
         </p>
       </div>
@@ -82,14 +80,15 @@ export function ProjectDetail({
         title={project.name}
         stats={
           <>
+            <span>
+              {project.environments.length} environment
+              {project.environments.length === 1 ? '' : 's'} configured
+            </span>
             {project.tags.map((t) => (
-              <Badge key={t} variant="outline">
+              <Badge key={t} variant="outline" className="rounded-sm text-label-caps font-bold uppercase">
                 {t}
               </Badge>
             ))}
-            <span>
-              {project.environments.length} environment{project.environments.length === 1 ? '' : 's'}
-            </span>
           </>
         }
         actions={
@@ -174,35 +173,33 @@ export function ProjectDetail({
         }
       />
 
-      <div className="mx-auto w-full max-w-7xl space-y-6 px-4 py-8 sm:px-6">
-        <Link
-          href="/projects"
-          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="h-4 w-4" /> Projects
-        </Link>
-
+      {/* No back-link: the top bar's breadcrumb ("Projects › <name>") is what
+          navigates up now, which is where the design puts it. */}
+      <div className="mx-auto w-full max-w-7xl space-y-6 px-4 py-8 sm:px-8">
         {project.description ? (
-          <p className="max-w-2xl text-sm text-muted-foreground">{project.description}</p>
+          <p className="max-w-2xl text-body-sm text-muted-foreground">{project.description}</p>
         ) : null}
 
-        <Separator />
-
+        {/* Underlined tabs, per the design: the selected view is marked by a 2px
+            rule in `primary` and a faint card fill, not by a pill.
+            `ToggleGroup` rather than `ui/tabs`, which styles on the Radix 2.x
+            boolean `data-active` and renders as an empty block on 1.4.3 — see
+            docs/ui-guidelines.md. `data-[state=on]` is emitted by 1.4.3. */}
         <ToggleGroup
           type="single"
           value={view}
           onValueChange={(v) => v && setView(v as 'environments' | 'documentation')}
-          className="border border-border bg-muted p-1"
+          className="w-full justify-start gap-1 rounded-none border-b border-border bg-transparent p-0"
         >
           <ToggleGroupItem
             value="environments"
-            className="px-3 data-[state=on]:bg-background data-[state=on]:shadow-sm"
+            className="h-auto rounded-none rounded-t-sm border-b-2 border-transparent px-4 py-3 text-body-sm text-muted-foreground data-[state=on]:border-primary data-[state=on]:bg-card/50 data-[state=on]:font-medium data-[state=on]:text-foreground"
           >
             <Server className="mr-2 h-4 w-4" /> Environments
           </ToggleGroupItem>
           <ToggleGroupItem
             value="documentation"
-            className="px-3 data-[state=on]:bg-background data-[state=on]:shadow-sm"
+            className="h-auto rounded-none rounded-t-sm border-b-2 border-transparent px-4 py-3 text-body-sm text-muted-foreground data-[state=on]:border-primary data-[state=on]:bg-card/50 data-[state=on]:font-medium data-[state=on]:text-foreground"
           >
             <FileText className="mr-2 h-4 w-4" /> Documentation
           </ToggleGroupItem>

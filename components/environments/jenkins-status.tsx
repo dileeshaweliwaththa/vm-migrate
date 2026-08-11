@@ -1,19 +1,24 @@
+import { cn } from '@/lib/utils';
 import type { JenkinsBuildStatus, JenkinsRunPhase } from '@/types/common/jenkins';
 
 // Shared Jenkins build-status pill (used by the browse-jobs dialog and the
 // environment records table) so the two render status identically.
+//
+// A filled pill rather than bare text, per the design: "small, uppercase labels
+// … low-opacity backgrounds of the status colour with high-contrast text". The
+// fills are the `tone-*` tokens from globals.css, so they're themed per mode and
+// no call site here names a colour. Every pill still carries its status as text —
+// the hue is a second channel, never the only one.
 const STATUS_CLASS: Record<JenkinsBuildStatus, string> = {
-  // The one hue in the app that isn't mauve. `text-positive` is themed per mode,
-  // and the dot picks it up via `bg-current`, so both stay in step.
-  SUCCESS: 'text-positive',
-  FAILED: 'text-destructive',
-  UNSTABLE: 'text-ink-source dark:text-ink-source',
-  ABORTED: 'text-muted-foreground',
-  DISABLED: 'text-muted-foreground',
-  NOT_BUILT: 'text-muted-foreground',
-  PENDING: 'text-muted-foreground',
-  BUILDING: 'text-ink-accent',
-  UNKNOWN: 'text-muted-foreground',
+  SUCCESS: 'bg-tone-success text-tone-success-fg',
+  FAILED: 'bg-tone-danger text-tone-danger-fg',
+  UNSTABLE: 'bg-tone-warning text-tone-warning-fg',
+  ABORTED: 'bg-muted text-muted-foreground',
+  DISABLED: 'bg-muted text-muted-foreground',
+  NOT_BUILT: 'bg-muted text-muted-foreground',
+  PENDING: 'bg-tone-warning text-tone-warning-fg',
+  BUILDING: 'bg-tone-info text-tone-info-fg',
+  UNKNOWN: 'bg-muted text-muted-foreground',
 };
 
 export function JenkinsStatusBadge({
@@ -33,11 +38,19 @@ export function JenkinsStatusBadge({
   const text = label ?? (building ? 'BUILDING' : status);
   const cls = building ? STATUS_CLASS.BUILDING : STATUS_CLASS[status];
   return (
+    // `cn()` rather than a template literal (UI guidelines rule 5): the tone
+    // classes carry both a fill and a text colour, and interpolation gives up the
+    // merge safety net that keeps a later override from landing alongside them.
     <span
-      className={`inline-flex items-center gap-1.5 text-xs font-medium ${cls}`}
+      className={cn(
+        'inline-flex w-fit items-center gap-1.5 rounded-full px-2 py-0.5 text-label-caps font-bold uppercase',
+        cls
+      )}
       title={title}
     >
-      <span className={`size-2 rounded-full bg-current ${building ? 'animate-pulse' : ''}`} />
+      {/* The dot inherits the pill's text colour, so the two can't drift. It
+          pulses only while a build is actually in flight. */}
+      <span className={cn('size-1.5 shrink-0 rounded-full bg-current', building && 'animate-pulse')} />
       {text}
     </span>
   );

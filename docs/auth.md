@@ -46,6 +46,13 @@ touches all five architecture layers (see [architecture.md](./architecture.md)).
   keep the name consistent across `client.ts`, `server.ts`, and `proxy.ts`.
 - `lib/supabase/session.ts` exposes `getUserEmail()` as a small server-side
   helper example.
+- **Sign-out lives in exactly one place:** the account menu in the sidebar footer
+  ([`components/layout/user-menu.tsx`](../components/layout/user-menu.tsx)), which
+  is also the only place the app displays who you are. It runs
+  `signOut()` on the *browser* client so the cookies are cleared where they live,
+  then `router.refresh()` re-runs the server layout, whose guard redirects to
+  `/login`. Identity used to be rendered twice — plain text in the sidebar and a
+  second menu in the top bar; the top bar now has neither.
 
 ## Where access is enforced
 

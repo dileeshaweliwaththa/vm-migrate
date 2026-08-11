@@ -86,7 +86,7 @@ export function DocToolbar({ editor }: { editor: Editor }) {
         <Code className="h-4 w-4" />
       </ToolbarButton>
 
-      <Separator orientation="vertical" className="mx-1 h-6" />
+      <Separator orientation="vertical" className="mx-1 h-6 w-px" />
 
       <ToolbarButton label="Heading 1" active={state.h1} onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}>
         <Heading1 className="h-4 w-4" />
@@ -98,7 +98,7 @@ export function DocToolbar({ editor }: { editor: Editor }) {
         <Heading3 className="h-4 w-4" />
       </ToolbarButton>
 
-      <Separator orientation="vertical" className="mx-1 h-6" />
+      <Separator orientation="vertical" className="mx-1 h-6 w-px" />
 
       <ToolbarButton label="Bullet list" active={state.bulletList} onClick={() => editor.chain().focus().toggleBulletList().run()}>
         <List className="h-4 w-4" />
@@ -110,7 +110,7 @@ export function DocToolbar({ editor }: { editor: Editor }) {
         <Quote className="h-4 w-4" />
       </ToolbarButton>
 
-      <Separator orientation="vertical" className="mx-1 h-6" />
+      <Separator orientation="vertical" className="mx-1 h-6 w-px" />
 
       <ToolbarButton label="Undo" disabled={!state.canUndo} onClick={() => editor.chain().focus().undo().run()}>
         <Undo2 className="h-4 w-4" />

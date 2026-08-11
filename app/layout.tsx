@@ -1,18 +1,28 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Hanken_Grotesk, Inter, JetBrains_Mono } from "next/font/google";
 import QueryProvider from "@/components/providers/query-provider";
 import ThemeProvider from "@/components/providers/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// The three faces of the "Kinetic Slate" design system, one per job — headlines,
+// body, and technical metadata. All three are variable fonts, so no `weight` is
+// needed and every weight the design asks for (600/700 display, 500 mono) is
+// available from a single file. `--font-*` names are consumed by the
+// `--font-display` / `--font-sans` / `--font-mono` theme tokens in globals.css.
+const hankenGrotesk = Hanken_Grotesk({
+  variable: "--font-hanken-grotesk",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const inter = Inter({
+  variable: "--font-inter",
+  subsets: ["latin"],
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-jetbrains-mono",
   subsets: ["latin"],
 });
 
@@ -31,7 +41,7 @@ export default function RootLayout({
     // the client before hydration, which would otherwise flag a mismatch.
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${hankenGrotesk.variable} ${inter.variable} ${jetbrainsMono.variable} h-full antialiased`}
       suppressHydrationWarning
     >
       {/* suppressHydrationWarning: browser extensions (e.g. Grammarly) inject
