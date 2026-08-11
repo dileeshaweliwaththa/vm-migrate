@@ -102,6 +102,28 @@ three files today — that grep is the audit.
   environment, and per [A7](#accepted-risks) deployment authority is effectively
   "editor" — but it does widen where the value is *stored*, which is why the modal
   names the VM it is borrowing from rather than filling the fields silently.
+- **A token is also *used* across rows, not only copied.** `resolveEnvJenkinsServer`
+  falls back to the same VM's donor for the server root, username, and token when an
+  environment has none of its own, so an unconfigured environment can list the jobs
+  on its VM's Jenkins ([jenkins-sync.md § Inheritance at read
+  time](./jenkins-sync.md#inheritance-at-read-time-not-just-on-save)). This does not
+  widen where the token is *stored* — nothing is written — and it holds the
+  write-only rule: the value is read through the service-role repository and used to
+  sign an outbound request, never returned to a client. It is the same blast radius
+  already accepted for the copy above, reached one step earlier: an editor could
+  trigger builds against that server through the donor environment anyway.
+  Three properties to preserve:
+  - the donor must be on the **same VM**, as with the copy;
+  - the **SSRF guard applies to the inherited base too** — `isDeniedJenkinsTarget`
+    is re-checked on whatever address is about to be fetched, so a denied target
+    cannot become reachable by way of a sibling row;
+  - only the **server** is inheritable, never the job. `resolveEnvJenkins` — the
+    resolver behind port sync and build triggering — still requires the
+    environment's own `jenkins_url`, so an inherited server can never cause a sync
+    or a deploy to hit a sibling's pipeline.
+
+  `jenkinsInherited` on the environment payload is a UI affordance only; the
+  resolver re-derives the donor server-side, so a forged value grants nothing.
 - The Gemini key is likewise reduced to `hasGeminiKey`. Provider errors are
   translated by `interpretGeminiError` rather than passed through raw.
 - `SUPABASE_SERVICE_ROLE_KEY` is read inside `createServiceClient()` at request

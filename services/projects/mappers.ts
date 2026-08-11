@@ -68,6 +68,11 @@ export const rowToEnvironment = (row: EnvironmentRow): Environment => {
     cicdProvider: row.cicd_provider as CicdProvider,
     jenkinsUrl: row.jenkins_url,
     jenkinsUsername: row.jenkins_username ?? '',
+    // Resolving this needs a look at the environment's VM siblings and their
+    // tokens, which is more than a row mapper should do. `false` is the safe
+    // default — it only ever hides an affordance; `annotateJenkinsInheritance`
+    // turns it on where it applies.
+    jenkinsInherited: false,
     deployUrl: row.deploy_url,
     vmId: row.vm_id,
     vmName: row.vms?.name ?? null,

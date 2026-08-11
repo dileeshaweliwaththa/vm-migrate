@@ -57,6 +57,17 @@ export interface Environment {
   cicdProvider: CicdProvider;
   jenkinsUrl: string;
   jenkinsUsername: string;
+  // True when this environment has **no** Jenkins server of its own but sits on a
+  // VM that can lend one — another environment on that VM has a server, a user
+  // and a token. A VM runs one Jenkins, so the server is the VM's property and
+  // only the *job* is this environment's; that is what makes "browse jobs" usable
+  // before this environment has been configured at all.
+  //
+  // Set by `annotateJenkinsInheritance`, not by the row mapper — it takes queries
+  // the mapper has no business making, so anything built straight from a row gets
+  // `false`. Never a reason to skip a server-side check: the resolver re-derives
+  // the donor itself.
+  jenkinsInherited: boolean;
   deployUrl: string;
   vmId: string | null;
   vmName: string | null;

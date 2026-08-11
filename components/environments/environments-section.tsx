@@ -467,6 +467,16 @@ function EnvironmentCard({
   const [dockerOpen, setDockerOpen] = useState(false);
   const isJenkins = env.cicdProvider === 'jenkins';
 
+  // Can this environment reach a Jenkins *server*? Either it has one of its own,
+  // or it sits on a VM that lends one (`jenkinsInherited`). A VM runs one Jenkins,
+  // so browsing what jobs exist only needs the server — which is why this, not
+  // `env.jenkinsUrl`, gates the browse-jobs action. Gating it on the job URL meant
+  // an environment whose VM was already configured had no way to pick its first
+  // job: the affordance that sets the URL was hidden until the URL was set.
+  //
+  // Advisory only — the service re-derives the donor and enforces access itself.
+  const canReachJenkinsServer = isJenkins && (Boolean(env.jenkinsUrl.trim()) || env.jenkinsInherited);
+
   // Live Jenkins status/last-build for records that link a job — one request per
   // card (not per row) covering every record, matched by URL.
   //
@@ -639,30 +649,38 @@ function EnvironmentCard({
                   >
                     <Settings2 className="h-4 w-4" />
                   </Button>
+                  {/* Server-level: available as soon as a server is reachable, so
+                      this is where an inheriting environment picks its first job. */}
+                  {canReachJenkinsServer ? (
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Browse Jenkins jobs"
+                      title={
+                        env.jenkinsUrl
+                          ? 'Browse Jenkins jobs & run builds'
+                          : 'Browse Jenkins jobs on this VM’s server'
+                      }
+                      onClick={() => setJobsOpen(true)}
+                    >
+                      <ListChecks className="h-4 w-4" />
+                    </Button>
+                  ) : null}
+                  {/* Job-level: the sync parses *this* environment's job config to
+                      derive its ports, so it stays gated on having a job. */}
                   {env.jenkinsUrl ? (
-                    <>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label="Browse Jenkins jobs"
-                        title="Browse Jenkins jobs & run builds"
-                        onClick={() => setJobsOpen(true)}
-                      >
-                        <ListChecks className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label="Sync ports from Jenkins"
-                        title="Sync ports from Jenkins"
-                        onClick={handleSyncJenkins}
-                        disabled={syncFromJenkins.isPending}
-                      >
-                        <RefreshCw
-                          className={`h-4 w-4 ${syncFromJenkins.isPending ? 'animate-spin' : ''}`}
-                        />
-                      </Button>
-                    </>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Sync ports from Jenkins"
+                      title="Sync ports from Jenkins"
+                      onClick={handleSyncJenkins}
+                      disabled={syncFromJenkins.isPending}
+                    >
+                      <RefreshCw
+                        className={`h-4 w-4 ${syncFromJenkins.isPending ? 'animate-spin' : ''}`}
+                      />
+                    </Button>
                   ) : null}
                   <JenkinsConfigDialog
                     projectId={projectId}
@@ -671,7 +689,8 @@ function EnvironmentCard({
                     open={jenkinsOpen}
                     onOpenChange={setJenkinsOpen}
                   />
-                  {env.jenkinsUrl ? (
+                  {/* Mounted on the same condition as the button that opens it. */}
+                  {canReachJenkinsServer ? (
                     <JenkinsJobsDialog
                       projectId={projectId}
                       envId={env.id}

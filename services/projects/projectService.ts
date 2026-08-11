@@ -13,6 +13,7 @@ import { getCurrentRole } from '@/services/auth/authService';
 import { isAdmin } from '@/lib/rbac';
 import type { Project, ProjectDetail, ProjectInput } from '@/types/common/project';
 import { rowToProject, rowToEnvironment, slugify } from '@/services/projects/mappers';
+import { annotateJenkinsInheritance } from '@/services/jenkins/inheritance';
 
 // Service layer: business logic for projects. Maps rows to domain types and
 // owns slug generation. Write-role enforcement is handled by RLS (see the projects
@@ -63,7 +64,14 @@ export const getProject = async (id: string): Promise<ProjectDetail | null> => {
   const row = await findProjectById(id);
   if (!row) return null;
   const envRows = await findProjectEnvironments(id);
-  return { ...rowToProject(row), environments: envRows.map(rowToEnvironment) };
+  // `jenkinsInherited` needs the environments' VM siblings and their tokens, so it
+  // is resolved here rather than in the row mapper. Batched across the whole
+  // project — one query per distinct VM, not per environment — and it no-ops
+  // entirely when nothing is waiting to borrow. Imported from
+  // `services/jenkins/inheritance` rather than `jenkinsService`, which imports
+  // *this* module and would close a cycle.
+  const environments = await annotateJenkinsInheritance(envRows.map(rowToEnvironment));
+  return { ...rowToProject(row), environments };
 };
 
 export const createProject = async (input: ProjectInput): Promise<Project> => {

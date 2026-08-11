@@ -8,12 +8,8 @@ import {
   listAllJobs,
   triggerBuild,
 } from '@/repositories/jenkins/jenkinsRepository';
+import { updateEnvironment } from '@/repositories/environments/environmentRepository';
 import {
-  findEnvironmentsByVmId,
-  updateEnvironment,
-} from '@/repositories/environments/environmentRepository';
-import {
-  findEnvironmentIdsWithToken,
   getEnvironmentToken,
   setEnvironmentToken,
   hasEnvironmentToken,
@@ -26,7 +22,7 @@ import {
   type BuildRunWriteColumns,
 } from '@/repositories/environmentBuildRuns/environmentBuildRunRepository';
 import { rowToBuildRun } from '@/services/jenkins/mappers';
-import { rowToEnvironment } from '@/services/projects/mappers';
+import { findVmJenkinsDonor } from '@/services/jenkins/inheritance';
 import {
   deriveJenkinsBase,
   isDeniedJenkinsTarget,
@@ -175,53 +171,75 @@ const flattenJobs = (jobs: JenkinsRawJob[], base: string, prefix = ''): JenkinsJ
   return out;
 };
 
-// Resolves an environment's Jenkins auth + server base, or a clear error.
 type ResolvedJenkins = { env: Environment; auth: JenkinsAuth; base: string };
-const resolveEnvJenkins = async (
-  projectId: string,
-  envId: string
-): Promise<{ ok: true; value: ResolvedJenkins } | { ok: false; message: string }> => {
+type Resolution =
+  | { ok: true; value: ResolvedJenkins }
+  | { ok: false; message: string };
+
+// **Server-level** resolution: the Jenkins root and the credentials to talk to
+// it, falling back to the environment's VM for anything this environment has not
+// been given.
+//
+// A VM runs one Jenkins, so the server is the VM's property. Listing jobs needs
+// only the server and the credentials — not a job — which is why this exists
+// separately from `resolveEnvJenkins` below. Without it, an environment could
+// never reach the server that its own VM already had configured, and the only way
+// out was to type the address a second time.
+//
+// Each of the three parts falls back independently: an environment may have been
+// given a URL but no token (the common case, since the token is the part that
+// can't be prefilled into the browser), or nothing at all.
+const resolveEnvJenkinsServer = async (projectId: string, envId: string): Promise<Resolution> => {
   const env = await findEnv(projectId, envId);
   if (!env) return { ok: false, message: 'Environment not found.' };
-  if (!env.jenkinsUrl.trim()) {
+
+  let base = env.jenkinsUrl.trim() ? deriveJenkinsBase(env.jenkinsUrl) : '';
+  let username = env.jenkinsUsername.trim();
+  let apiToken = (await getEnvironmentToken(envId)).trim();
+
+  if (!base || !username || !apiToken) {
+    const donor = await findVmJenkinsDonor(env);
+    if (donor) {
+      // The donor's *server root*, never its job URL — the job differs per
+      // environment, and borrowing one would point this environment's builds at
+      // another's pipeline.
+      if (!base) base = deriveJenkinsBase(donor.jenkinsUrl);
+      if (!username) username = donor.jenkinsUsername.trim();
+      if (!apiToken) apiToken = (await getEnvironmentToken(donor.id)).trim();
+    }
+  }
+
+  if (!base) {
     return { ok: false, message: 'Set the Jenkins URL first (Jenkins settings).' };
   }
-  if (isDeniedJenkinsTarget(env.jenkinsUrl)) return { ok: false, message: DENIED_TARGET };
-  const apiToken = (await getEnvironmentToken(envId)).trim();
+  // The SSRF guard applies to whatever address is actually about to be fetched,
+  // inherited or not — a denied target must not become reachable by way of a
+  // sibling environment. See docs/security.md.
+  if (isDeniedJenkinsTarget(base)) return { ok: false, message: DENIED_TARGET };
   if (!apiToken) return { ok: false, message: 'No Jenkins API token set for this environment.' };
-  const username = env.jenkinsUsername.trim();
   if (!username) {
     return { ok: false, message: 'Set the Jenkins username (the token must be paired with its user).' };
   }
-  return {
-    ok: true,
-    value: { env, auth: { username, apiToken }, base: deriveJenkinsBase(env.jenkinsUrl) },
-  };
+
+  return { ok: true, value: { env, auth: { username, apiToken }, base } };
 };
 
-// The environment on this one's VM whose Jenkins credentials can be reused.
+// **Job-level** resolution: everything above, plus this environment's own job.
 //
-// A VM runs **one** Jenkins, so the second environment placed on it is being
-// pointed at a server that is already configured — asking for the same URL, user,
-// and token again is asking the editor to re-enter what the app knows. This finds
-// the donor; the two callers below decide what to do with it: the modal is told
-// what it may prefill (server root + username, never the token), and the save
-// copies the token itself, server-side.
-//
-// Most recently updated first, so a rotated token is what gets lent, not the
-// oldest one on the VM.
-const findVmJenkinsDonor = async (env: Environment): Promise<Environment | null> => {
-  if (!env.vmId) return null;
+// Anything that reads or runs *this* environment's pipeline goes through here —
+// syncing ports parses its job config, and a build triggers it. Those cannot be
+// inherited: the job is what distinguishes two environments on one server, so
+// falling back to a sibling's would sync or deploy the wrong pipeline.
+const resolveEnvJenkins = async (projectId: string, envId: string): Promise<Resolution> => {
+  const resolved = await resolveEnvJenkinsServer(projectId, envId);
+  if (!resolved.ok) return resolved;
 
-  const candidates = (await findEnvironmentsByVmId(env.vmId))
-    .map(rowToEnvironment)
-    // A donor is only useful if it carries the whole pair: Basic auth is
-    // username + token, and a URL to derive the server root from.
-    .filter((e) => e.id !== env.id && e.jenkinsUrl.trim() && e.jenkinsUsername.trim());
-  if (candidates.length === 0) return null;
-
-  const withToken = new Set(await findEnvironmentIdsWithToken(candidates.map((e) => e.id)));
-  return candidates.find((e) => withToken.has(e.id)) ?? null;
+  const { env } = resolved.value;
+  if (!env.jenkinsUrl.trim()) {
+    return { ok: false, message: 'Link a Jenkins job to this environment first (browse jobs).' };
+  }
+  if (isDeniedJenkinsTarget(env.jenkinsUrl)) return { ok: false, message: DENIED_TARGET };
+  return resolved;
 };
 
 // Public, secret-free config for the modal (token replaced by a boolean).
@@ -329,37 +347,24 @@ export const syncEnvironmentPorts = async (
   const role = await getCurrentRole();
   if (!canEdit(role)) return { success: false, message: EDITOR_REQUIRED, data: null };
 
-  const env = await findEnv(projectId, envId);
-  if (!env) return { success: false, message: 'Environment not found.', data: null };
-  if (!env.jenkinsUrl.trim()) {
-    return { success: false, message: 'Set the Jenkins job URL first (Jenkins settings).', data: null };
-  }
-  // This path fetches the job config directly rather than through
-  // resolveEnvJenkins, so it carries the same target check itself.
-  if (isDeniedJenkinsTarget(env.jenkinsUrl)) {
-    return { success: false, message: DENIED_TARGET, data: null };
-  }
+  // Job-level: the sync parses *this* environment's own `config.xml`, so its job
+  // URL is required and never inherited — but the credentials behind it are, which
+  // is the case that matters right after an inheriting environment links its first
+  // job through the browse dialog. Resolving here rather than re-deriving the token
+  // inline is what keeps that working; the inline version required a token on this
+  // row and failed for exactly that environment.
+  const resolved = await resolveEnvJenkins(projectId, envId);
+  if (!resolved.ok) return { success: false, message: resolved.message, data: null };
+  const { env, auth } = resolved.value;
 
   try {
-    // Re-trim on read: guards against a stray space/newline pasted into the
-    // token or username field that would otherwise silently 401.
-    const apiToken = (await getEnvironmentToken(envId)).trim();
-    if (!apiToken) {
-      return { success: false, message: 'No Jenkins API token set for this environment.', data: null };
-    }
-    const username = env.jenkinsUsername.trim();
-    if (!username) {
+    const result = await fetchJobConfigXml(auth, env.jenkinsUrl);
+    if (!result.ok || result.xml === null) {
       return {
         success: false,
-        message:
-          'Set the Jenkins username. A Jenkins API token only authenticates when sent with the username that owns it (Basic auth = username:token).',
+        message: configErrorMessage(result.status, result.error, auth.username),
         data: null,
       };
-    }
-
-    const result = await fetchJobConfigXml({ username, apiToken }, env.jenkinsUrl);
-    if (!result.ok || result.xml === null) {
-      return { success: false, message: configErrorMessage(result.status, result.error, username), data: null };
     }
 
     const ports = extractPorts(result.xml);
@@ -407,7 +412,10 @@ export const listJenkinsJobs = async (
   if (!canRunBuild(role)) return { success: false, message: SIGN_IN_REQUIRED, data: null };
 
   try {
-    const resolved = await resolveEnvJenkins(projectId, envId);
+    // Server-level: listing what jobs exist needs the server and credentials, not
+    // a job. This is the path an environment takes *before* it has one — including
+    // one that inherits both from its VM.
+    const resolved = await resolveEnvJenkinsServer(projectId, envId);
     if (!resolved.ok) return { success: false, message: resolved.message, data: null };
 
     const { auth, base } = resolved.value;
@@ -741,10 +749,13 @@ export const linkJenkinsJob = async (
   const role = await getCurrentRole();
   if (!canEdit(role)) return { success: false, message: EDITOR_REQUIRED, data: null };
 
-  const env = await findEnv(projectId, envId);
-  if (!env) return { success: false, message: 'Environment not found.', data: null };
+  // Server-level, so the *first* job can be linked to an environment that has no
+  // URL of its own — it is the browse-jobs dialog that calls this, and requiring
+  // a job in order to link a job would make the affordance unusable.
+  const resolved = await resolveEnvJenkinsServer(projectId, envId);
+  if (!resolved.ok) return { success: false, message: resolved.message, data: null };
+  const { base } = resolved.value;
 
-  const base = deriveJenkinsBase(env.jenkinsUrl);
   // Stored re-mounted on the base the environment already points at, so linking a
   // job never writes back the host Jenkins reports itself as.
   const target = rebaseOnJenkinsServer(jobUrl, base);

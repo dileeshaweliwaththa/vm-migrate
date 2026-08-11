@@ -95,17 +95,20 @@ On a project page, each environment whose CI/CD provider is **Jenkins** shows
    token saves to `environment_secrets`. If the environment's VM already has
    Jenkins configured elsewhere, the modal arrives pre-filled — see
    [Inheriting a VM's Jenkins credentials](#inheriting-a-vms-jenkins-credentials).
-2. **Browse jobs** (list icon, shown once a URL is set) — lists **all jobs on
-   the server** (the base is derived from the Job URL, so a bare base URL is
-   enough to browse). For each job it shows status (from `color` + last build
-   result), last build #/time, and description, with:
+2. **Browse jobs** (list icon) — lists **all jobs on the server**. Needs only a
+   server, not a job, so it is also shown when the environment has nothing of its
+   own and inherits both from its VM — that is how an environment picks its *first*
+   job. For each job it shows status (from `color` + last build result), last build
+   #/time, and description, with:
    - **Run** — triggers a build (POST `{jobUrl}/build` with a CSRF crumb),
      behind a confirm. Needs `Job → Build` permission.
    - **Use** — adds the job as a **record in the environment's ports table**
      (`source='jenkins'`, description from the job, job URL stored on the row,
      port left blank). The dialog stays open so several jobs can be added.
 3. **Sync from Jenkins** (⟳) — reads the job's `config.xml` and refreshes only
-   the `jenkins`-sourced ports (manual entries preserved).
+   the `jenkins`-sourced ports (manual entries preserved). Shown only once the
+   environment has a job URL of its own: it parses *that* job, and there is no
+   sibling's job it could sensibly fall back to.
 4. **Records** — each row in the ports table is editable inline (fill in the
    **port** and **domain** later, tweak the name) and, when it carries a Jenkins
    job, shows a **Run build** ▶ action and a deep link to the job. The ▶ action
@@ -163,6 +166,36 @@ one on the VM.
 **When the offer appears:** only while the environment has no token of its own.
 Once it has one, its own configuration is the answer, and a standing offer would be
 a second source of truth for the same field.
+
+### Inheritance at *read* time, not just on save
+
+Pre-filling the modal is only half of it. An environment that has never been
+configured also **resolves** its server and credentials through the donor, so the
+Jenkins actions work before anything has been saved to its row. Resolution is
+therefore split in two, and which one a call uses is a real decision:
+
+| Resolver | Needs | Falls back to the VM's donor for | Used by |
+| -------- | ----- | -------------------------------- | ------- |
+| `resolveEnvJenkinsServer` | a server root + credentials | server root, username, token — each independently | **Browse jobs**, **link a job** |
+| `resolveEnvJenkins` | all of the above **plus this environment's own job URL** | credentials only — never the job | **Sync ports**, **trigger a build**, job status |
+
+The split follows the same asymmetry as the pre-fill: the **server is the VM's**,
+the **job is the environment's**. Listing what jobs exist needs only a server, so
+requiring a job URL first made the affordance that *sets* the job URL unreachable —
+an environment whose VM was already configured had no way to pick its first job
+except to type the server address a second time. Anything that reads or runs *this*
+environment's pipeline still requires its own job: falling back to a sibling's would
+sync ports from, or deploy, the wrong one.
+
+`jenkinsInherited` on the environment payload is what lets the card show the
+browse-jobs action in that state. It is set by `annotateJenkinsInheritance`
+(`services/jenkins/inheritance.ts`) rather than the row mapper, which has no
+business making the queries it needs — one per distinct VM plus one for the tokens,
+batched across the project and skipped entirely when nothing is waiting to borrow.
+It is advisory: the service re-derives the donor and re-checks access itself, so a
+forged `true` buys nothing. That module exists separately from `jenkinsService`
+because `projectService` needs it and `jenkinsService` already imports
+`projectService` — putting it there would close an import cycle.
 
 Two consequences worth knowing:
 
