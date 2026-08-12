@@ -29,7 +29,10 @@ import {
   useDeleteUrl,
   useImportTracker,
 } from '@/hooks/vms/useVmTracker';
-import { VmRow, TRACKER_COLUMNS, type VmRowHandlers } from './vm-row';
+import type { VmHandlers } from './vm-fields';
+import { VmRow, TRACKER_COLUMNS } from './vm-row';
+import { VmCard } from './vm-card';
+import { VmViewToggle, useVmView } from './vm-view-toggle';
 import { VmTrash } from './vm-trash';
 
 const COLUMN_HEADERS = [
@@ -67,6 +70,9 @@ export function VmTracker({ role }: { role: UserRole }) {
 
   const { data: loaded, isLoading, error, refetch } = useTrackerData();
   const [data, setData] = useState<TrackerData | null>(null);
+  // Table or cards. Remembered per browser, not per user — it is a viewing
+  // preference, not data, and both views read and write the same rows.
+  const [view, setView] = useVmView();
 
   // Local state is the source of truth for rendering (instant edits, no
   // per-keystroke requests). It re-syncs whenever the query payload changes —
@@ -104,7 +110,7 @@ export function VmTracker({ role }: { role: UserRole }) {
         : d
     );
 
-  const handlers: VmRowHandlers = {
+  const handlers: VmHandlers = {
     onToggleExpand: (vm) => patchLocalVm(vm.id, { expanded: !vm.expanded }),
     onVmLocalChange: patchLocalVm,
     onVmCommit: (id, patch) => {
@@ -300,6 +306,10 @@ export function VmTracker({ role }: { role: UserRole }) {
         }
         actions={
           <>
+            {/* Layout only — it changes nothing about the data, so every role
+                gets it. Expand All / Collapse All below drive both views: the
+                open/closed flag lives on the VM, not on a view. */}
+            <VmViewToggle value={view} onChange={setView} />
             {/* Export is a read of data already on screen — open to viewers. */}
             <Button variant="outline" size="sm" onClick={handleExport}>
               <Download className="size-4" /> Export
@@ -351,62 +361,97 @@ export function VmTracker({ role }: { role: UserRole }) {
                 </span>
               </div>
 
-              <div className="overflow-x-auto rounded-xl border border-border">
-                <Table className="min-w-[1800px]">
-                  <TableHeader>
-                    <TableRow>
-                      {COLUMN_HEADERS.map((columnLabel, i) => (
-                        <TableHead
-                          key={`${columnLabel}-${i}`}
-                          className={i >= 4 && i <= 13 ? 'text-center' : undefined}
-                        >
-                          {columnLabel}
-                        </TableHead>
-                      ))}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {sectionVms.length === 0 ? (
-                      <TableRow className="hover:bg-transparent">
-                        <TableCell
-                          colSpan={TRACKER_COLUMNS}
-                          className="py-6 text-center text-sm text-muted-foreground"
-                        >
-                          No {isClient ? 'client' : 'UPVIEW'} VMs yet.
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      sectionVms.map((vm) => (
-                        <VmRow
-                          key={vm.id}
-                          vm={vm}
-                          // Deliberately the *full* lists, not this section's: the
-                          // "Migrated from" history matches on destination IP, and a
-                          // client VM can migrate onto an UPVIEW VM (or vice versa).
-                          // Passing sectionVms would silently hide those rows.
-                          allVms={data.vms}
-                          allDeleted={data.deleted}
-                          h={handlers}
-                          canWrite={canWrite}
-                        />
-                      ))
-                    )}
-                    {canWrite && (
-                      <TableRow className="hover:bg-transparent">
-                        <TableCell colSpan={TRACKER_COLUMNS} className="p-3">
-                          <button
-                            type="button"
-                            onClick={() => handleAddVm(isClient)}
-                            className="w-full rounded-lg border-2 border-dashed border-primary/40 py-2.5 text-sm font-semibold text-primary hover:bg-primary/5"
+              {view === 'cards' ? (
+                // `items-start` so a card left collapsed doesn't stretch to the
+                // height of an expanded neighbour in the same row.
+                <div className="grid items-start gap-4 md:grid-cols-2 2xl:grid-cols-3">
+                  {sectionVms.length === 0 ? (
+                    <p className="col-span-full rounded-xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
+                      No {isClient ? 'client' : 'UPVIEW'} VMs yet.
+                    </p>
+                  ) : (
+                    sectionVms.map((vm) => (
+                      <VmCard
+                        key={vm.id}
+                        vm={vm}
+                        // The full lists, for the same reason as the grid: the
+                        // "Migrated from" history matches on destination IP and
+                        // crosses the UPVIEW/Client split.
+                        allVms={data.vms}
+                        allDeleted={data.deleted}
+                        h={handlers}
+                        canWrite={canWrite}
+                      />
+                    ))
+                  )}
+                  {canWrite ? (
+                    <button
+                      type="button"
+                      onClick={() => handleAddVm(isClient)}
+                      className="col-span-full rounded-lg border-2 border-dashed border-primary/40 py-2.5 text-sm font-semibold text-primary hover:bg-primary/5"
+                    >
+                      + Add {isClient ? 'Client' : 'UPVIEW'} VM
+                    </button>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-xl border border-border">
+                  <Table className="min-w-[1800px]">
+                    <TableHeader>
+                      <TableRow>
+                        {COLUMN_HEADERS.map((columnLabel, i) => (
+                          <TableHead
+                            key={`${columnLabel}-${i}`}
+                            className={i >= 4 && i <= 13 ? 'text-center' : undefined}
                           >
-                            + Add {isClient ? 'Client' : 'UPVIEW'} VM
-                          </button>
-                        </TableCell>
+                            {columnLabel}
+                          </TableHead>
+                        ))}
                       </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
+                    </TableHeader>
+                    <TableBody>
+                      {sectionVms.length === 0 ? (
+                        <TableRow className="hover:bg-transparent">
+                          <TableCell
+                            colSpan={TRACKER_COLUMNS}
+                            className="py-6 text-center text-sm text-muted-foreground"
+                          >
+                            No {isClient ? 'client' : 'UPVIEW'} VMs yet.
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        sectionVms.map((vm) => (
+                          <VmRow
+                            key={vm.id}
+                            vm={vm}
+                            // Deliberately the *full* lists, not this section's: the
+                            // "Migrated from" history matches on destination IP, and a
+                            // client VM can migrate onto an UPVIEW VM (or vice versa).
+                            // Passing sectionVms would silently hide those rows.
+                            allVms={data.vms}
+                            allDeleted={data.deleted}
+                            h={handlers}
+                            canWrite={canWrite}
+                          />
+                        ))
+                      )}
+                      {canWrite && (
+                        <TableRow className="hover:bg-transparent">
+                          <TableCell colSpan={TRACKER_COLUMNS} className="p-3">
+                            <button
+                              type="button"
+                              onClick={() => handleAddVm(isClient)}
+                              className="w-full rounded-lg border-2 border-dashed border-primary/40 py-2.5 text-sm font-semibold text-primary hover:bg-primary/5"
+                            >
+                              + Add {isClient ? 'Client' : 'UPVIEW'} VM
+                            </button>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
             </section>
           );
         })}

@@ -9,111 +9,26 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Input } from '@/components/ui/input';
 import { TableCell, TableRow } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
-import { buildFullUrl, safeStatus, STATUS_TONE_CLASS } from '@/lib/vm-utils';
-import { PROTOCOLS, type Vm, type VmUrl, type Protocol } from '@/types/common/vm';
+import { buildFullUrl, migratedSources } from '@/lib/vm-utils';
+import { PROTOCOLS, type Vm, type Protocol } from '@/types/common/vm';
+import { CellInput, StatusPill, type VmHandlers } from './vm-fields';
 import { YesNoToggle } from './yes-no-toggle';
 
 export const TRACKER_COLUMNS = 16;
 
-export interface VmRowHandlers {
-  onToggleExpand: (vm: Vm) => void;
-  onVmLocalChange: (id: string, patch: Partial<Vm>) => void;
-  onVmCommit: (id: string, patch: Partial<Vm>) => void;
-  onToggleClient: (vm: Vm) => void;
-  onTrash: (id: string) => void;
-  onAddUrl: (vmId: string) => void;
-  onUrlLocalChange: (vmId: string, urlId: string, patch: Partial<VmUrl>) => void;
-  onUrlCommit: (vmId: string, urlId: string, patch: Partial<VmUrl>) => void;
-  onDeleteUrl: (vmId: string, urlId: string) => void;
-}
-
-// A borderless, transparent cell editor composed from the shadcn Input.
-//
-// `readOnly` renders the value as plain text rather than a disabled input: a
-// viewer gets a clean grid instead of a form full of dead fields.
-function CellInput({
-  value,
-  onChange,
-  onCommit,
-  placeholder,
-  className,
-  readOnly = false,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  onCommit: (v: string) => void;
-  placeholder?: string;
-  className?: string;
-  readOnly?: boolean;
-}) {
-  if (readOnly) {
-    return (
-      <div
-        className={cn(
-          'flex h-7 items-center px-1 text-sm',
-          !value && 'text-muted-foreground/50',
-          className
-        )}
-      >
-        {value || '—'}
-      </div>
-    );
-  }
-
-  return (
-    <Input
-      value={value}
-      placeholder={placeholder}
-      onChange={(e) => onChange(e.target.value)}
-      onBlur={(e) => onCommit(e.target.value)}
-      className={cn(
-        'h-7 rounded-none border-0 bg-transparent px-1 shadow-none focus-visible:ring-0 dark:bg-transparent',
-        className
-      )}
-    />
-  );
-}
-
-function StatusPill({ vm }: { vm: Vm }) {
-  const status = safeStatus(vm);
-  return (
-    <span
-      className={cn(
-        'inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap',
-        STATUS_TONE_CLASS[status.tone]
-      )}
-    >
-      {status.label}
-    </span>
-  );
-}
-
 // Read-only rows shown under a "primary" destination VM for every source VM
-// (active, trashed, or archived) that migrated its URLs onto this IP.
+// (active, trashed, or archived) that migrated its URLs onto this IP. Which
+// sources those are is `migratedSources` in lib/vm-utils — shared with the card
+// view, which renders the same set without the per-URL detail.
 function MigratedFrom({ vm, allVms, allDeleted }: { vm: Vm; allVms: Vm[]; allDeleted: Vm[] }) {
-  const isPrimary = vm.oldIp === vm.newIp && !!vm.newIp;
-  if (!isPrimary) return null;
-
-  const active = allVms
-    .filter((s) => s.id !== vm.id && s.newIp === vm.newIp && s.oldIp !== s.newIp)
-    .map((s) => ({ src: s, tag: null as string | null }));
-  const trashed = allDeleted
-    .filter((s) => s.newIp === vm.newIp && s.oldIp !== s.newIp)
-    .map((s) => ({ src: s, tag: 'IN TRASH' as const }));
-  const archived = (vm.migratedArchive ?? []).map((s) => ({
-    src: { ...s, urls: s.urls } as unknown as Vm,
-    tag: 'ARCHIVED' as const,
-  }));
-
-  const sources = [...active, ...trashed, ...archived];
+  const sources = migratedSources(vm, allVms, allDeleted);
   if (sources.length === 0) return null;
 
   return (
     <>
-      {sources.map(({ src, tag }) => (
+      {sources.map(({ tag, ...src }) => (
         <Fragment key={`mig-${vm.id}-${src.id}`}>
           <TableRow className="hover:bg-transparent">
             <TableCell className="w-9 bg-steel-700" />
@@ -188,7 +103,7 @@ export function VmRow({
   vm: Vm;
   allVms: Vm[];
   allDeleted: Vm[];
-  h: VmRowHandlers;
+  h: VmHandlers;
   // Editor+ — false for a viewer, who sees the grid but no editing controls.
   // Expand/collapse stays available either way: it is local view state, not data.
   canWrite: boolean;

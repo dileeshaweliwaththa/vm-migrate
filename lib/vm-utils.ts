@@ -1,4 +1,4 @@
-import type { Vm, Protocol } from '@/types/common/vm';
+import type { Vm, VmUrl, Protocol } from '@/types/common/vm';
 
 // Presentation helpers for the VM tracker. Pure functions, no React, no data
 // access — shared by the tracker UI components.
@@ -44,6 +44,55 @@ export const STATUS_TONE_CLASS: Record<StatusTone, string> = {
   warning: 'bg-tone-warning text-tone-warning-fg',
   danger: 'bg-tone-danger text-tone-danger-fg',
 };
+
+// Where a VM's endpoints came from. A VM is a "primary" destination when its old
+// and new IP are the same — nothing moved, so it is the address others moved
+// *onto* — and its sources are every VM pointing at that IP from somewhere else,
+// in three states: still active, in the trash, or purged and archived onto this
+// row. The archived entries are already this shape, which is why the return type
+// is a subset of `Vm` rather than `Vm` itself (it also removes a cast that
+// claimed an archive entry was a whole VM).
+//
+// Derived here rather than in a component because both tracker views render it,
+// and a second copy of the matching rule is a second answer to "what migrated
+// onto this box".
+export type MigratedTag = 'IN TRASH' | 'ARCHIVED';
+
+export interface MigratedSource {
+  id: string;
+  name: string;
+  oldIp: string;
+  newIp: string;
+  urls: VmUrl[];
+  // null when the source is still an active VM in the grid.
+  tag: MigratedTag | null;
+}
+
+export function migratedSources(vm: Vm, allVms: Vm[], allDeleted: Vm[]): MigratedSource[] {
+  const isPrimary = vm.oldIp === vm.newIp && !!vm.newIp;
+  if (!isPrimary) return [];
+
+  const movedOntoThis = (s: { newIp: string; oldIp: string }) =>
+    s.newIp === vm.newIp && s.oldIp !== s.newIp;
+
+  const entry = (
+    s: { id: string; name: string; oldIp: string; newIp: string; urls: VmUrl[] },
+    tag: MigratedTag | null
+  ): MigratedSource => ({
+    id: s.id,
+    name: s.name,
+    oldIp: s.oldIp,
+    newIp: s.newIp,
+    urls: s.urls,
+    tag,
+  });
+
+  return [
+    ...allVms.filter((s) => s.id !== vm.id && movedOntoThis(s)).map((s) => entry(s, null)),
+    ...allDeleted.filter(movedOntoThis).map((s) => entry(s, 'IN TRASH')),
+    ...(vm.migratedArchive ?? []).map((s) => entry(s, 'ARCHIVED')),
+  ];
+}
 
 export interface TrackerStats {
   vms: number;
