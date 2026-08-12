@@ -44,6 +44,16 @@ ratio + bar, computed with the tracker's own `computeStats`
 with job, build number, who triggered it, and outcome. Result pills reuse
 `STATUS_TONE_CLASS`, so green means the same thing here as in the tracker.
 
+A run is **two stacked lines**, not one row: job + outcome pill, then `who ·
+when`. The pill is fixed-width and can't shrink, so sharing a line with it cost
+the text ~5rem it didn't have on a phone. On the meta line the timestamp is
+fixed-length and pinned (`shrink-0`) while the user label ellipsizes — the *when*
+is what has to survive a narrow screen. It's formatted `12 Aug, 15:04` and the
+locale is pinned, because this page renders on the **server**: an implicit locale
+would be the container's, not the reader's, and seconds and the year say nothing
+in a 7-day feed. The same shrink discipline is why **Migration progress** never
+breaks a ratio across two lines.
+
 **Breakdown** — environments by stage and CI/CD provider, records by source, plus
 the client tag list.
 

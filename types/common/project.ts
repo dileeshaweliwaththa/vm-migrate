@@ -115,8 +115,13 @@ export interface InlineVmInput {
   isClient?: boolean;
 }
 
+// Note what is **not** here: `jenkinsUrl` (and `jenkinsUsername`). Jenkins
+// configuration is one unit — server/job URL, username, token — and the token can
+// only be written by `saveEnvironmentJenkinsConfig`, which is also the only writer
+// of the other two. Accepting a URL here as well would give one field two write
+// paths, one of which skips the SSRF check on the target. See docs/jenkins-sync.md.
 export type EnvironmentInput = Partial<
-  Pick<Environment, 'name' | 'cicdProvider' | 'jenkinsUrl' | 'deployUrl' | 'vmId' | 'notes' | 'position'>
+  Pick<Environment, 'name' | 'cicdProvider' | 'deployUrl' | 'vmId' | 'notes' | 'position'>
 > & { newVm?: InlineVmInput };
 
 export type EnvironmentPortInput = Partial<

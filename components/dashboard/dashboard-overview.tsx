@@ -72,9 +72,14 @@ function ProgressRow({ metric }: { metric: ProgressMetric }) {
 
   return (
     <div className="space-y-1.5">
+      {/* Two auto-width items on one baseline. On a phone neither could shrink,
+          so the ratio broke across lines mid-expression ("12 / 340 ·" above
+          "35%") and a wrapped label left the baseline alignment pointing at its
+          first line. The ratio is the row's payload, so it never wraps and the
+          label ellipsizes instead. */}
       <div className="flex items-baseline justify-between gap-2 text-sm">
-        <span className="font-medium">{metric.label}</span>
-        <span className="text-xs text-muted-foreground tabular-nums">
+        <span className="min-w-0 truncate font-medium">{metric.label}</span>
+        <span className="shrink-0 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
           {empty ? '—' : `${metric.done} / ${metric.total} · ${percent}%`}
         </span>
       </div>
@@ -132,11 +137,28 @@ const resultLabel = (run: EnvironmentBuildRun): string => {
   return (run.result as JenkinsBuildStatus | null) ?? 'UNKNOWN';
 };
 
+// "12 Aug, 15:04". `toLocaleString()`'s default runs to ~22 characters
+// ("8/12/2026, 3:04:11 PM"), and on a phone it was the tail of the meta line —
+// so the half that got truncated away was the half that says *when*. Seconds and
+// the year carry nothing in a 7-day feed. The locale is pinned because this
+// renders on the server, where an implicit one is the container's, not the
+// reader's.
+const BUILD_TIME_FORMAT: Intl.DateTimeFormatOptions = {
+  day: 'numeric',
+  month: 'short',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+};
+
 function BuildRow({ run }: { run: EnvironmentBuildRun }) {
   return (
-    <li className="flex items-center justify-between gap-3 py-2">
-      <div className="min-w-0">
-        <p className="truncate text-sm font-medium">
+    // Two stacked lines rather than one row of [text | pill]: the pill is
+    // fixed-width and unshrinkable, so on a narrow screen it was taking its
+    // ~5rem out of the only column that had anything to say.
+    <li className="space-y-1 py-2.5">
+      <div className="flex items-start justify-between gap-3">
+        <p className="min-w-0 truncate text-sm font-medium">
           {run.jobName || 'Unnamed job'}
           {run.buildNumber !== null ? (
             <span className="ml-1.5 text-xs font-normal text-muted-foreground">
@@ -144,18 +166,25 @@ function BuildRow({ run }: { run: EnvironmentBuildRun }) {
             </span>
           ) : null}
         </p>
-        <p className="truncate text-xs text-muted-foreground">
-          {run.triggeredByLabel} · {new Date(run.startedAt).toLocaleString()}
-        </p>
+        <span
+          className={cn(
+            'shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold',
+            STATUS_TONE_CLASS[resultTone(run)]
+          )}
+        >
+          {resultLabel(run)}
+        </span>
       </div>
-      <span
-        className={cn(
-          'shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold',
-          STATUS_TONE_CLASS[resultTone(run)]
-        )}
-      >
-        {resultLabel(run)}
-      </span>
+      {/* Who · when, across the full width. The time is fixed-length and the one
+          part that has to survive, so the user label — an email of any length —
+          is what gives way. */}
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <span className="min-w-0 truncate">{run.triggeredByLabel}</span>
+        <span aria-hidden="true">·</span>
+        <span className="shrink-0">
+          {new Date(run.startedAt).toLocaleString('en-GB', BUILD_TIME_FORMAT)}
+        </span>
+      </p>
     </li>
   );
 }
@@ -217,9 +246,14 @@ export function DashboardOverview({ summary }: { summary: DashboardSummary }) {
         />
       </div>
 
-      {/* Row 2 — progress on the left, activity on the right. */}
+      {/* Row 2 — progress on the left, activity on the right.
+
+          Both cards carry `min-w-0`: a grid item's default `min-width: auto` is
+          its content's min-content width, so one long job name or ratio would
+          widen the track and give the whole page a horizontal scrollbar on a
+          phone rather than being ellipsized inside the card. */}
       <div className="grid gap-4 lg:grid-cols-5">
-        <Card className="rounded-lg border-border shadow-none lg:col-span-2">
+        <Card className="min-w-0 rounded-lg border-border shadow-none lg:col-span-2">
           <CardHeader>
             <CardTitle className="text-base">Migration progress</CardTitle>
             <CardDescription>
@@ -240,7 +274,7 @@ export function DashboardOverview({ summary }: { summary: DashboardSummary }) {
           </CardContent>
         </Card>
 
-        <Card className="rounded-lg border-border shadow-none lg:col-span-3">
+        <Card className="min-w-0 rounded-lg border-border shadow-none lg:col-span-3">
           <CardHeader>
             <CardTitle className="text-base">Recent builds</CardTitle>
             <CardDescription>

@@ -4,6 +4,32 @@ Jenkins is configured **per environment**: each environment carries its own
 Jenkins job URL + credentials, and you sync ports from that job. There is no
 global Jenkins connection.
 
+## One place to set it
+
+The **Jenkins settings** modal (⚙ on the environment card) is the *only* place
+Jenkins gets configured. The Add/Edit Environment form deliberately has no
+"Jenkins job URL" box — it shows a pointer to the modal instead.
+
+The URL, username and token are one unit of configuration, and the token can
+only be set in the modal (it never travels through a form that a non-secret
+field shares). A second box for one third of that unit gave the same field two
+owners: a URL typed in the environment form and a URL typed in the modal both
+wrote `environments.jenkins_url`, with no ordering between them, and only the
+modal's path ran `isDeniedJenkinsTarget` on the value before storing it.
+
+So the write path is closed at three layers, not just hidden in the UI:
+
+| Layer | What enforces it |
+| ----- | ---------------- |
+| UI | `environment-form.tsx` has no Jenkins field |
+| Type | `EnvironmentInput` (`types/common/project.ts`) doesn't include `jenkinsUrl` |
+| Service | `envInputToColumns` never maps `jenkins_url`, so `PATCH /environments/[envId]` can't set it either |
+
+`saveEnvironmentJenkinsConfig` remains the sole writer (plus `linkJenkinsJob`,
+which is the **Use**/link action feeding the same field through the same
+SSRF-checked service). It also sets `cicd_provider = 'jenkins'` on save, so
+configuring an environment can't leave the provider disagreeing with the config.
+
 ## Why the token is split out
 
 An environment's Jenkins **URL and username** are not secret, so they live on

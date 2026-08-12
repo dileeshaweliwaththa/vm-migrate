@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { toast } from 'sonner';
+import { Settings2 } from 'lucide-react';
 import {
   CICD_PROVIDERS,
   ENVIRONMENT_NAMES,
@@ -47,7 +48,6 @@ export function EnvironmentForm({
 
   const [name, setName] = useState<EnvironmentName>(environment?.name ?? 'DEV');
   const [cicdProvider, setCicdProvider] = useState<CicdProvider>(environment?.cicdProvider ?? 'jenkins');
-  const [jenkinsUrl, setJenkinsUrl] = useState(environment?.jenkinsUrl ?? '');
   const [deployUrl, setDeployUrl] = useState(environment?.deployUrl ?? '');
   const [notes, setNotes] = useState(environment?.notes ?? '');
   const [vm, setVm] = useState<VmSelection>(
@@ -57,7 +57,7 @@ export function EnvironmentForm({
   const pending = addEnvironment.isPending || updateEnvironment.isPending;
 
   const handleSave = () => {
-    const input: EnvironmentInput = { name, cicdProvider, jenkinsUrl, deployUrl, notes };
+    const input: EnvironmentInput = { name, cicdProvider, deployUrl, notes };
     if (vm.mode === 'existing') input.vmId = vm.vmId || null;
     else if (vm.mode === 'none') input.vmId = null;
     else input.newVm = vm.newVm;
@@ -118,11 +118,18 @@ export function EnvironmentForm({
               </Select>
             </div>
           </div>
+          {/* No Jenkins job URL here. The URL, username and token are one unit of
+              configuration, and the token can only be set in the Jenkins settings
+              modal (it never travels through this form) — a second box for one
+              third of it just gave the same field two owners. See
+              docs/jenkins-sync.md. */}
           {cicdProvider === 'jenkins' ? (
-            <div className="space-y-2">
-              <Label htmlFor="e-jenkins">Jenkins job URL</Label>
-              <Input id="e-jenkins" value={jenkinsUrl} onChange={(e) => setJenkinsUrl(e.target.value)} placeholder="https://jenkins…/job/chex-api" />
-            </div>
+            <p className="rounded-md border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+              <Settings2 className="mr-1 inline h-3 w-3 align-[-2px]" />
+              Set the Jenkins server, job and credentials in{' '}
+              <span className="font-medium text-foreground">Jenkins settings</span> on the
+              environment card{environment ? '' : ', once this environment exists'}.
+            </p>
           ) : null}
           <div className="space-y-2">
             <Label htmlFor="e-deploy">Deployed URL</Label>
