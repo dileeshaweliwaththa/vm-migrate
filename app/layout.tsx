@@ -26,9 +26,13 @@ const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
 });
 
+// The tab name matches the sidebar wordmark's `aria-label` ("DevOps Portal"),
+// not its display casing — DEVOPS is set in caps as a design treatment, and an
+// all-caps tab title next to ordinary ones reads as shouting. The icon is
+// `app/icon.svg`; there is no `favicon.ico`, so this is the only mark.
 export const metadata: Metadata = {
-  title: "VM Migration Tracker",
-  description: "Track VMs and their endpoints through an infrastructure migration",
+  title: "DevOps Portal",
+  description: "Projects, environments, deployments and the VM migration tracker",
 };
 
 export default function RootLayout({

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- Tab mark for the DevOps Portal. Geometry only, no <text>: a favicon is
+       rendered by the browser chrome with no access to the app's webfonts, so a
+       lettered mark would fall back to whatever the OS supplies and change shape
+       per platform.
+
+       A terminal prompt, echoing the Terminal glyph the sidebar already uses.
+       Filled with the accent (`--color-accent-step`, #0058be) rather than the
+       navy chrome (#131b2e): at 16px in a tab strip the navy goes to near-black
+       against a dark browser theme, while the accent stays legible on both.
+       White strokes for maximum contrast at that size — thick (3.2 of 32) so
+       nothing thins away when it is scaled down to a 16px tab. -->
+  <rect width="32" height="32" rx="7" fill="#0058be" />
+  <g fill="none" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Chevron and underscore are placed so the mark's ink — not the chevron
+         alone — is centred in the tile: 7.6 of clearance on the left, 7.6 on the
+         right once the stroke width is counted. -->
+    <path d="M9.2 10.5 14.7 16 9.2 21.5" />
+    <path d="M17.2 21.5h5.6" />
+  </g>
+</svg>
