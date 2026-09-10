@@ -35,7 +35,10 @@ const DEFAULT_PORTS: Partial<Record<Protocol, string>> = {
 };
 
 // Tolerate a host that was pasted with a scheme or a trailing slash already.
-const bareHost = (value: string): string =>
+// Exported because the endpoint-adoption check compares a tracker row's URL with
+// a project record's domain, and they have to be compared the same way this
+// builds them.
+export const bareHost = (value: string): string =>
   value
     .trim()
     .replace(/^[a-z][a-z0-9+.-]*:\/\//i, '')

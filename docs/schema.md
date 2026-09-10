@@ -27,13 +27,15 @@ update all profiles, which powers the admin user-management flow.
 
 Fixed-value columns use Postgres **enum types** (not `text` + `CHECK`):
 `user_role` (`profiles.role`), `cicd_provider` (`projects`/`environments`),
-`net_protocol` (`environment_ports.protocol`), `port_source`
-(`environment_ports.source`), `environment_name` (`environments.name` —
+`net_protocol` (`endpoints.protocol`), `port_source`
+(`endpoints.source`), `environment_name` (`environments.name` —
 `DEV`/`STAGE`/`PRODUCTION`), and `jenkins_run_phase` / `jenkins_build_status`
 (`environment_build_runs`). Each mirrors a TS constant of the same values
 (`USER_ROLES`, `CICD_PROVIDERS`, `PROTOCOLS`, `PORT_SOURCES`,
 `ENVIRONMENT_NAMES`, `JENKINS_RUN_PHASES`, `JENKINS_STATUSES`). The legacy
-`vm_urls.proto` remains `text` for tracker-data compatibility.
+`vm_urls.proto` was the one exception, kept as `text` for tracker-data
+compatibility; it became `endpoints.protocol` (`net_protocol`) when the two URL
+tables were unified, its free-text values normalized in that migration.
 
 `public.current_user_role()` is a `SECURITY DEFINER` helper that returns the
 signed-in user's role; every Phase 2 table's RLS reuses it to gate writes
@@ -68,33 +70,116 @@ table originally shipped with full write access for any authenticated user;
 | `migrated_archive` | `jsonb`       | purged source VMs whose URLs were archived here    |
 | `deleted`          | `boolean`     | soft-delete flag (in trash)                        |
 | `deleted_at`       | `timestamptz` | when trashed                                       |
+| `group_id`         | `uuid`        | FK -> `vm_groups.id`, `on delete set null`; null = ungrouped |
 | `created_at`       | `timestamptz` | default `now()`                                    |
 | `updated_at`       | `timestamptz` | kept fresh by the `set_updated_at` trigger         |
 
-## `vm_urls`
+## `vm_urls` — removed
 
-Endpoints belonging to a VM (port + protocol + domain). Deleting a VM cascades
-to its URLs (a cascade is not subject to RLS on this table, so an admin purge
-is never blocked by the policy below).
+Folded into [`endpoints`](#endpoints) and dropped. See
+`…_unify_urls_into_endpoints.sql`.
 
-RLS: read = any authenticated user; insert/update/**delete** =
-`editor`/`admin`. Delete sits at editor+ here, unlike `vms`, because removing a
-URL row is ordinary editing work — its VM-level equivalent (moving a VM to the
-trash) is an update an editor can already make.
+## `vm_groups`
 
-| column       | type          | notes                                    |
-| ------------ | ------------- | ---------------------------------------- |
-| `id`         | `uuid`        | primary key                              |
-| `vm_id`      | `uuid`        | FK → `vms.id`, `on delete cascade`       |
-| `port`       | `text`        | e.g. `443`                               |
-| `proto`      | `text`        | HTTP/HTTPS/TCP/UDP/WS/WSS                 |
-| `url`        | `text`        | domain / URL                             |
-| `dns`        | `boolean`     | DNS updated?                             |
-| `tested`     | `boolean`     | endpoint tested?                         |
-| `notes`      | `text`        | free text                                |
-| `position`   | `integer`     | display order within the VM              |
-| `created_at` | `timestamptz` | default `now()`                          |
+A named group of VMs — one client's or provider's fleet (every `EUKHOST-*`
+machine under one `EUKHOST` header). **One group, many VMs:** the FK lives on
+`vms.group_id`, so a VM belongs to at most one group.
+
+Deliberately *not* a many-to-many join table like `project_tags`. A machine sits
+on exactly one account, and letting it be in two groups would make "how many VMs
+does EUKHOST have" ambiguous and the tracker's grouped rendering impossible — a
+row would have to appear under two headers.
+
+The FK is `on delete set null`, so deleting a group **ungroups** its VMs and
+never deletes them. That is also why delete sits at `editor`+ here rather than
+`admin` (following `endpoints`, not `vms`): nothing but the grouping is lost.
+
+RLS: read = any authenticated user; insert/update/delete = `editor`/`admin`.
+
+| column       | type          | notes                                      |
+| ------------ | ------------- | ------------------------------------------ |
+| `id`         | `uuid`        | primary key                                |
+| `name`       | `text`        | unique — e.g. `EUKHOST`                    |
+| `notes`      | `text`        | free text (account references, contacts)   |
+| `created_at` | `timestamptz` | default `now()`                            |
 | `updated_at` | `timestamptz` | kept fresh by the `set_updated_at` trigger |
+
+## `vm_jenkins` / `vm_jenkins_secrets`
+
+**A VM runs one Jenkins, so the server belongs to the machine.** `vm_jenkins`
+holds the server URL and the Basic-auth username (one row per VM, PK = `vm_id`,
+cascade); `vm_jenkins_secrets` holds the API token. An environment on that VM
+keeps only its **job** (`environments.jenkins_url`).
+
+The URL is normalized on write and a missing port becomes **8080** — Jenkins'
+default, and what these servers run on — so the form only needs the machine's
+address (`normalizeJenkinsServerUrl` in [lib/jenkins-url.ts](../lib/jenkins-url.ts)).
+
+`vm_jenkins` RLS: read = any authenticated user (which machines run Jenkins is
+not a secret — the tracker marks them for everyone), insert/update/delete =
+`editor`/`admin`.
+
+`vm_jenkins_secrets` has **RLS on with no policies**, exactly like
+`environment_secrets`: no authenticated client can read or write it, only server
+code via the service-role client behind an editor check. That is what lets a
+viewer trigger a build without ever being sent the token.
+
+| table                | columns                                                                 |
+| -------------------- | ----------------------------------------------------------------------- |
+| `vm_jenkins`         | `vm_id uuid pk → vms`, `base_url text`, `username text`, `created_at`, `updated_at` |
+| `vm_jenkins_secrets` | `vm_id uuid pk → vms`, `jenkins_api_token text`, `created_at`, `updated_at` |
+
+The per-environment columns (`environments.jenkins_username`,
+`environment_secrets`) are **not** dropped: they remain a read-only fallback for
+an environment with no VM to inherit from. See
+[jenkins-sync.md](./jenkins-sync.md#where-jenkins-is-configured).
+
+## `backup_targets` / `backup_target_secrets` / `backup_dispatches`
+
+The **Backups** tab. A *target* is a MySQL server we back up: what to connect to,
+where the dumps go, when it runs, and which worker container does the dumping.
+Supabase owns the configuration, the credentials and the schedule; the worker owns
+the dump itself (Edge Functions cap CPU at 2s — see
+[backups.md](./backups.md#why-the-dump-is-not-an-edge-function)).
+
+There is no `vm_id`: a backup target is a *database server* (mencartdb is Azure
+Database for MySQL), and tying it to a machine in the tracker said something
+untrue about most of them. `worker_url` is normalized on write, where a missing
+port becomes **2999** (the worker's default). `db_name` is deliberately absent —
+the worker enumerates the server's databases and dumps each one, which is what
+makes "18 databases" a property of the server rather than 18 rows.
+
+`cron_schedule` is handed to **pg_cron** by
+`public.sync_backup_target_schedule()`, which a trigger keeps in step with the
+row — so this column *is* the schedule. See
+[backups.md § Scheduling](./backups.md#scheduling).
+
+RLS: `backup_targets` and `backup_dispatches` read = any authenticated user,
+writes = `editor`/`admin` (the schedule columns are gated to admin in the service
+layer). `backup_target_secrets` has **RLS on with no policies** — service-role
+only, like `vm_jenkins_secrets`.
+
+| column            | type          | notes                                       |
+| ----------------- | ------------- | ------------------------------------------- |
+| `id`              | `uuid`        | primary key                                 |
+| `name`            | `text`        | e.g. `mencartdb (Azure MySQL)`; defaults to the host |
+| `worker_url`      | `text`        | the backup container, e.g. `http://20.197.41.68:2999` |
+| `db_host` / `db_port` / `db_user` | `text` / `integer` / `text` | what the worker connects to |
+| `azure_account` / `azure_container` | `text` | where the dumps go            |
+| `retention_days`  | `integer`     | how long dumps are kept                     |
+| `cron_schedule`   | `text`        | five-field cron, run by pg_cron             |
+| `schedule_enabled`| `boolean`     | whether the pg_cron job exists at all       |
+| `notes` / `position` | `text` / `integer` | free text, display order            |
+| `created_at` / `updated_at` | `timestamptz` | `set_updated_at` trigger        |
+
+| table                   | columns                                                        |
+| ----------------------- | -------------------------------------------------------------- |
+| `backup_target_secrets` | `target_id uuid pk → backup_targets`, `db_password text`, `azure_connection_string text`, timestamps |
+| `backup_dispatches`     | `id`, `target_id → backup_targets`, `source backup_dispatch_source`, `status backup_dispatch_status`, `http_status int`, `error text`, `requested_by → auth.users`, `created_at` |
+
+`backup_dispatches` records that a run was *asked for*: the worker can report the
+outcome of a run but not whether it was ever triggered, and a schedule that
+stopped firing looks exactly like a schedule with nothing to do.
 
 ## `projects`
 
@@ -140,32 +225,72 @@ role-based RLS as `projects` (writes = `editor`/`admin`).
 | `cicd_provider` | `text`        | overrides the project default                    |
 | `jenkins_url`   | `text`        | Jenkins job URL (secret token lives in `environment_secrets`) |
 | `jenkins_username` | `text`     | Jenkins Basic-auth username (non-secret)         |
-| `deploy_url`    | `text`        | live/deployed URL                                |
+| `deploy_url`    | `text`        | live/deployed URL. Asked for (and the card's **Live** link shown) only on **non-Jenkins** providers: a Jenkins environment's address comes from its Jenkins wiring and its records' own domains |
 | `vm_id`         | `uuid`        | FK → `vms.id`, `on delete set null` (optional); its IPs are what the records table's Link column is built from |
 | `notes`         | `text`        | free text                                        |
 | `position`      | `integer`     | display order within the project                 |
 | `created_at` / `updated_at` | `timestamptz` | `set_updated_at` trigger             |
 
-## `environment_ports`
+## `endpoints`
 
-Phase 2. One row per deployed record (mirrors `vm_urls`). `source` records
-provenance: `manual` (typed by hand), `jenkins` (the Phase 2b sync, or "Use" in
-the browse-jobs dialog), or `docker` (imported from a pasted `docker ps` — see
-[docker-import.md](./docker-import.md)).
+**The one URL table.** Every URL in the app is a row here — the tracker's
+endpoints and the projects pages' deployed records both read and write this
+table, so a URL added to a project environment shows up in the VM tracker with
+no second copy anywhere. It began as `environment_ports`, was renamed and
+widened, and `vm_urls` was folded into it (see
+`…_unify_urls_into_endpoints.sql`).
+
+**Exactly one parent**, enforced by the `endpoints_one_parent` CHECK
+(`num_nonnulls(environment_id, vm_id) = 1`):
+
+- `environment_id` set — **a project's record.** The VM it appears on is
+  *derived* from `environments.vm_id` at read time, never copied onto the row:
+  move an environment to another host and its endpoints follow, with no second
+  value to fall out of step. A managed-platform environment (Amplify/AWS/Azure)
+  has no VM, so its records never appear in the tracker — correct, there is no
+  machine.
+- `vm_id` set — **a VM-owned endpoint**, added from the tracker for a machine
+  with no project behind it. Cascade-deletes with the VM, as `vm_urls` did.
+
+Who may do what, by owner (enforced in `vmService`/`environmentService`, hidden
+in the UI):
+
+| | add | edit | delete |
+| --- | --- | --- | --- |
+| project record | the project's environment only | either page | the project's environment only |
+| VM-owned | the tracker only | either page | the tracker only |
+
+Adding a project record for a port the tracker already holds as a VM-owned row
+**adopts** that row (same id, DNS/tested/notes kept) rather than inserting a
+second one — see
+[tracker.md](./tracker.md#urls-live-in-one-table-shared-with-projects). There is
+no unique constraint behind it: one host legitimately serves several domains on
+one port, so uniqueness is a judgement the service makes, not a key.
+
+`source` records provenance: `manual` (typed by hand), `jenkins` (the Phase 2b
+sync, or "Use" in the browse-jobs dialog), or `docker` (imported from a pasted
+`docker ps` — see [docker-import.md](./docker-import.md)).
 
 | column           | type          | notes                                   |
 | ---------------- | ------------- | --------------------------------------- |
 | `id`             | `uuid`        | primary key                             |
-| `environment_id` | `uuid`        | FK → `environments.id`, `on delete cascade` |
+| `environment_id` | `uuid`        | FK → `environments.id`, `on delete cascade`; null on a VM-owned row |
+| `vm_id`          | `uuid`        | FK → `vms.id`, `on delete cascade`; null on a project record |
 | `port`           | `text`        | e.g. `3000` — shown for port-bearing providers |
 | `branch`         | `text`        | e.g. `main` — the deployed branch, shown **instead of** `port` on `aws`/`azure`/`amplify` (`providerHasBranch`) |
-| `protocol`       | `text`        | HTTP/HTTPS/TCP/UDP/WS/WSS               |
-| `description`    | `text`        | the record's label — surfaced as the **Name** column (a Jenkins job name, or hand-typed) |
-| `domain`         | `text`        | assigned domain/host, e.g. `dev.imaui.upview.tech` |
+| `protocol`       | `net_protocol`| HTTP/HTTPS/TCP/UDP/WS/WSS               |
+| `description`    | `text`        | the record's label — surfaced as the projects table's **Name** column |
+| `domain`         | `text`        | where it answers, e.g. `dev.imaui.upview.tech` (was `vm_urls.url`) |
+| `dns`            | `boolean`     | DNS updated? — the tracker's migration checklist |
+| `tested`         | `boolean`     | endpoint tested?                        |
+| `notes`          | `text`        | free text (distinct from `description`, which is the name) |
 | `source`         | `port_source` | `manual` \| `jenkins` \| `docker`        |
 | `jenkins_job_url`| `text`        | Jenkins job this record represents (non-secret; powers per-record "Run build") |
-| `position`       | `integer`     | display order                           |
+| `position`       | `integer`     | display order within its parent         |
 | `created_at` / `updated_at` | `timestamptz` | `set_updated_at` trigger     |
+
+RLS: read = any authenticated user; insert/update/delete = `editor`/`admin` —
+adding or removing a URL row is ordinary editing work in either view.
 
 ## `environment_build_runs`
 
@@ -184,7 +309,7 @@ whoever started it; delete = `admin`. Nobody can rewrite someone else's row.
 | -------------------- | ----------------------- | ---------------------------------------------------- |
 | `id`                 | `uuid`                  | primary key                                          |
 | `environment_id`     | `uuid`                  | FK → `environments.id`, `on delete cascade`          |
-| `port_id`            | `uuid`                  | FK → `environment_ports.id`, `on delete set null` — the record it was run from; what the per-record history filters on |
+| `port_id`            | `uuid`                  | FK → `endpoints.id`, `on delete set null` — the record it was run from; what the per-record history filters on |
 | `job_url`            | `text`                  | the Jenkins job that was built                       |
 | `job_name`           | `text`                  | label snapshot (the record's name, else derived from the URL) |
 | `queue_url`          | `text`                  | Jenkins queue item — the handle on *this* run at trigger time |
@@ -302,10 +427,32 @@ In `supabase/migrations/`, applied in timestamp order:
 - `…_create_environment_build_runs.sql` — the `jenkins_run_phase` and
   `jenkins_build_status` enums plus `environment_build_runs`, the audit trail of
   triggered builds (insert/update restricted to the run's own user).
+- `…_create_backup_services_table.sql` — the first cut of the Backups registry
+  (a worker URL and an optional FK to `vms`). Reshaped by the next two.
+- `…_backup_targets_config.sql` — renames it to `backup_targets`, drops `vm_id`,
+  adds the MySQL/Azure/retention/schedule columns, and adds
+  `backup_target_secrets` (service-role only) plus the `backup_dispatches` audit.
+  See [`backup_targets`](#backup_targets--backup_target_secrets--backup_dispatches).
+- `…_backup_schedule_cron.sql` — enables `pg_cron` + `pg_net` and adds
+  `sync_backup_target_schedule()` with the triggers that keep one cron job per
+  target in step with its row.
+- `…_vm_jenkins_credentials.sql` — `vm_jenkins` + `vm_jenkins_secrets`: the
+  Jenkins server, user and token move from each environment onto the **VM** that
+  runs them, seeded from the most recently updated configured environment per VM
+  (its token included). See [`vm_jenkins`](#vm_jenkins--vm_jenkins_secrets).
+- `…_unify_urls_into_endpoints.sql` — **one URL table.** Renames
+  `environment_ports` to `endpoints`, adds `vm_id`/`dns`/`tested`/`notes` and the
+  exactly-one-parent CHECK, folds every `vm_urls` row in (merging those that
+  describe the same endpoint as a project record — same VM, same port, same
+  protocol — one-to-one, and carrying the checklist over), then drops `vm_urls`.
+  See [`endpoints`](#endpoints).
+- `…_create_vm_groups_table.sql` — the `vm_groups` table plus `vms.group_id`
+  (FK, `on delete set null`) and its index: the tracker's one-to-many grouping.
+  See [`vm_groups`](#vm_groups).
 - `…_restrict_vm_tracker_writes.sql` — replaces the Phase 1 "any authenticated
   user has full access" policies on `vms` and `vm_urls` with the standard role
   split, making the tracker **read-only for viewers**. See
-  [`vms`](#vms) and [`vm_urls`](#vm_urls).
+  [`vms`](#vms) and [`endpoints`](#endpoints).
 
 ## Deploying migrations
 

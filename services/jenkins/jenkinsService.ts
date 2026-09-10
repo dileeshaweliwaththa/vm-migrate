@@ -14,7 +14,12 @@ import {
   setEnvironmentToken,
   hasEnvironmentToken,
 } from '@/repositories/environmentSecrets/environmentSecretRepository';
-import { insertPort, deletePort } from '@/repositories/environmentPorts/environmentPortRepository';
+import { deleteEndpoint } from '@/repositories/endpoints/endpointRepository';
+// The sync writes its records through the service, not the repository, so a
+// synced port adopts an endpoint the tracker already has instead of adding a
+// second row for it — same rule as a hand-added record. See
+// `addPort`/`findAdoptableEndpoint`.
+import { addPort } from '@/services/environments/environmentService';
 import {
   findBuildRuns,
   insertBuildRun,
@@ -23,6 +28,10 @@ import {
 } from '@/repositories/environmentBuildRuns/environmentBuildRunRepository';
 import { rowToBuildRun } from '@/services/jenkins/mappers';
 import { findVmJenkinsDonor } from '@/services/jenkins/inheritance';
+import {
+  getVmJenkinsConfig,
+  getVmJenkinsCredentials,
+} from '@/services/jenkins/vmJenkinsService';
 import {
   deriveJenkinsBase,
   isDeniedJenkinsTarget,
@@ -177,25 +186,32 @@ type Resolution =
   | { ok: false; message: string };
 
 // **Server-level** resolution: the Jenkins root and the credentials to talk to
-// it, falling back to the environment's VM for anything this environment has not
-// been given.
+// it. Listing jobs needs only the server and the credentials — not a job — which
+// is why this exists separately from `resolveEnvJenkins` below.
 //
-// A VM runs one Jenkins, so the server is the VM's property. Listing jobs needs
-// only the server and the credentials — not a job — which is why this exists
-// separately from `resolveEnvJenkins` below. Without it, an environment could
-// never reach the server that its own VM already had configured, and the only way
-// out was to type the address a second time.
+// A VM runs one Jenkins, so **the VM's own configuration comes first**
+// (`vm_jenkins`, set from the tracker). Two older sources remain behind it, each
+// part falling back independently:
 //
-// Each of the three parts falls back independently: an environment may have been
-// given a URL but no token (the common case, since the token is the part that
-// can't be prefilled into the browser), or nothing at all.
+//   1. the VM's server (the one place it is now configured),
+//   2. this environment's own stored URL/username/token — the pre-VM layout, and
+//      the only home an environment with no linked VM has,
+//   3. a sibling environment on the same VM (`findVmJenkinsDonor`), which is how
+//      inheritance worked before the VM held the server itself.
+//
+// 2 and 3 are legacy read paths, not places anything new is written: they exist
+// so no setup that worked before this moved stops working.
 const resolveEnvJenkinsServer = async (projectId: string, envId: string): Promise<Resolution> => {
   const env = await findEnv(projectId, envId);
   if (!env) return { ok: false, message: 'Environment not found.' };
 
-  let base = env.jenkinsUrl.trim() ? deriveJenkinsBase(env.jenkinsUrl) : '';
-  let username = env.jenkinsUsername.trim();
-  let apiToken = (await getEnvironmentToken(envId)).trim();
+  const vmConfig = env.vmId
+    ? await getVmJenkinsCredentials(env.vmId)
+    : { base: '', username: '', apiToken: '' };
+
+  let base = vmConfig.base || (env.jenkinsUrl.trim() ? deriveJenkinsBase(env.jenkinsUrl) : '');
+  let username = vmConfig.username || env.jenkinsUsername.trim();
+  let apiToken = vmConfig.apiToken || (await getEnvironmentToken(envId)).trim();
 
   if (!base || !username || !apiToken) {
     const donor = await findVmJenkinsDonor(env);
@@ -210,13 +226,25 @@ const resolveEnvJenkinsServer = async (projectId: string, envId: string): Promis
   }
 
   if (!base) {
-    return { ok: false, message: 'Set the Jenkins URL first (Jenkins settings).' };
+    return {
+      ok: false,
+      message: env.vmId
+        ? "Set up this VM's Jenkins server in the VM tracker first."
+        : 'Link a VM to this environment, then set up that VM\'s Jenkins server.',
+    };
   }
   // The SSRF guard applies to whatever address is actually about to be fetched,
   // inherited or not — a denied target must not become reachable by way of a
   // sibling environment. See docs/security.md.
   if (isDeniedJenkinsTarget(base)) return { ok: false, message: DENIED_TARGET };
-  if (!apiToken) return { ok: false, message: 'No Jenkins API token set for this environment.' };
+  if (!apiToken) {
+    return {
+      ok: false,
+      message: env.vmId
+        ? "No Jenkins API token stored for this VM — add it in the VM tracker."
+        : 'No Jenkins API token set for this environment.',
+    };
+  }
   if (!username) {
     return { ok: false, message: 'Set the Jenkins username (the token must be paired with its user).' };
   }
@@ -255,6 +283,9 @@ export const getEnvironmentJenkinsConfig = async (
 
   try {
     const hasToken = await hasEnvironmentToken(envId);
+    // The machine's own server, which is where Jenkins is configured now. When
+    // it is set, the dialog asks for the job and nothing else.
+    const vmConfig = env.vmId ? await getVmJenkinsConfig(env.vmId) : null;
     // Only offered to an environment with nothing of its own — once it has a
     // token, its own configuration is the answer and the offer would just be a
     // second, confusing source of truth.
@@ -266,6 +297,7 @@ export const getEnvironmentJenkinsConfig = async (
         jenkinsUrl: env.jenkinsUrl,
         jenkinsUsername: env.jenkinsUsername,
         hasToken,
+        vmJenkins: vmConfig ? { ...vmConfig, vmName: env.vmName ?? '' } : null,
         inherited: donor
           ? {
               vmName: env.vmName ?? '',
@@ -329,6 +361,14 @@ export const saveEnvironmentJenkinsConfig = async (
         // Whatever was on offer has just been taken (or was declined by typing a
         // token) — either way this environment now stands on its own.
         inherited: null,
+        // Re-read rather than assumed null: the VM's server is not something
+        // this save can change, and the dialog re-renders from this payload.
+        vmJenkins: env.vmId
+          ? await (async () => {
+              const config = await getVmJenkinsConfig(env.vmId as string);
+              return config ? { ...config, vmName: env.vmName ?? '' } : null;
+            })()
+          : null,
       },
     };
   } catch (error) {
@@ -371,12 +411,11 @@ export const syncEnvironmentPorts = async (
 
     // Replace only the jenkins-sourced ports; keep manual ones.
     for (const p of env.ports.filter((p) => p.source === 'jenkins')) {
-      await deletePort(p.id);
+      await deleteEndpoint(p.id);
     }
     let position = env.ports.filter((p) => p.source !== 'jenkins').length;
     for (const p of ports) {
-      await insertPort({
-        environment_id: envId,
+      await addPort(envId, {
         port: p.port,
         protocol: p.protocol,
         description: p.description,

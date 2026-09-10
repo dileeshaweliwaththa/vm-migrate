@@ -1,4 +1,4 @@
-import type { Vm, VmUrl, Protocol } from '@/types/common/vm';
+import type { Vm, VmGroup, VmUrl, Protocol } from '@/types/common/vm';
 
 // Presentation helpers for the VM tracker. Pure functions, no React, no data
 // access — shared by the tracker UI components.
@@ -116,4 +116,44 @@ export function computeStats(vms: Vm[]): TrackerStats {
     dns: urls.filter((u) => u.dns).length,
     tested: urls.filter((u) => u.tested).length,
   };
+}
+
+// A group and the VMs filed under it. `group: null` is the ungrouped remainder —
+// every VM starts there, and it stays the normal state for a machine that isn't
+// part of a client's fleet.
+export interface VmGrouping {
+  group: VmGroup | null;
+  vms: Vm[];
+}
+
+// Splits a section's VMs into their groups for rendering: each group that has
+// members here, in the order the groups arrive (by name, from the repository),
+// then the ungrouped ones last.
+//
+// Only groups with a member in *this* list appear. A section renders one half of
+// the tracker (UPVIEW or Client), so a group whose VMs all sit on the other side
+// would otherwise draw an empty header — and an empty group would draw one in
+// both. The full group list still reaches the "add to group" menu, which is what
+// keeps an empty group reachable.
+export function groupVms(vms: Vm[], groups: VmGroup[]): VmGrouping[] {
+  const byGroup = new Map<string, Vm[]>();
+  const ungrouped: Vm[] = [];
+
+  for (const vm of vms) {
+    // A `groupId` pointing at a group that isn't in the payload counts as
+    // ungrouped rather than vanishing from the grid.
+    if (!vm.groupId || !groups.some((g) => g.id === vm.groupId)) {
+      ungrouped.push(vm);
+      continue;
+    }
+    const list = byGroup.get(vm.groupId) ?? [];
+    list.push(vm);
+    byGroup.set(vm.groupId, list);
+  }
+
+  const grouped: VmGrouping[] = groups
+    .filter((group) => byGroup.has(group.id))
+    .map((group) => ({ group, vms: byGroup.get(group.id) ?? [] }));
+
+  return ungrouped.length ? [...grouped, { group: null, vms: ungrouped }] : grouped;
 }

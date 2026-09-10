@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
+import { toast } from 'sonner';
 import { Download, Plus, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -12,10 +13,16 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { PageHeader } from '@/components/layout/page-header';
-import { computeStats } from '@/lib/vm-utils';
+import { computeStats, groupVms } from '@/lib/vm-utils';
 import { canEdit, isAdmin } from '@/lib/rbac';
 import type { UserRole } from '@/types/common';
 import type { TrackerData, Vm, VmUrl, TrashType } from '@/types/common/vm';
+import {
+  useAssignVmsToGroup,
+  useCreateVmGroup,
+  useDeleteVmGroup,
+  useUpdateVmGroup,
+} from '@/hooks/vms/useVmGroups';
 import {
   useTrackerData,
   useCreateVm,
@@ -30,29 +37,43 @@ import {
   useImportTracker,
 } from '@/hooks/vms/useVmTracker';
 import type { VmHandlers } from './vm-fields';
+import { VmSelectCheckbox } from './vm-fields';
+import { VmGroupHeaderRow, VmGroupHeading, VmSelectionBar } from './vm-groups';
 import { VmRow, TRACKER_COLUMNS } from './vm-row';
 import { VmCard } from './vm-card';
 import { VmViewToggle, useVmView } from './vm-view-toggle';
 import { VmTrash } from './vm-trash';
 
-const COLUMN_HEADERS = [
-  '',
-  'VM Name',
-  'Old IP',
-  'New IP',
-  'Port',
-  'Protocol',
-  'URL / Domain',
-  'Full New URL',
-  'DNS Updated?',
-  'URL Tested?',
-  'VM Migrated?',
-  'Supabase?',
-  'Not Migrating?',
-  'Safe to Remove?',
-  'Notes',
-  'Actions',
+// The grid's columns and their **fixed** widths, in one place.
+//
+// The table is `table-fixed` with a `<colgroup>`, so a column is the same width
+// in the UPVIEW table as in the Client one, and stays that width when a VM is
+// expanded. With the browser's automatic layout it sized to content instead:
+// expanding a row introduced long URLs, every column re-flowed, and the two
+// sections' headers stopped lining up with each other — the table appeared to
+// jump around as rows opened and closed.
+//
+// The sum is the table's min-width, so the columns keep these widths and the
+// container scrolls sideways rather than squeezing them.
+const COLUMNS: { label: string; width: number }[] = [
+  { label: '', width: 64 },
+  { label: 'VM Name', width: 210 },
+  { label: 'Old IP', width: 140 },
+  { label: 'New IP', width: 140 },
+  { label: 'Port', width: 90 },
+  { label: 'URL / Domain', width: 210 },
+  { label: 'Full New URL', width: 210 },
+  { label: 'DNS Updated?', width: 110 },
+  { label: 'URL Tested?', width: 105 },
+  { label: 'VM Migrated?', width: 110 },
+  { label: 'Supabase?', width: 95 },
+  { label: 'Not Migrating?', width: 115 },
+  { label: 'Safe to Remove?', width: 125 },
+  { label: 'Notes', width: 190 },
+  { label: 'Actions', width: 150 },
 ];
+
+const TABLE_MIN_WIDTH = COLUMNS.reduce((total, column) => total + column.width, 0);
 
 const SECTIONS: { label: string; isClient: boolean }[] = [
   { label: '🖥️ UPVIEW VMs — Our Servers', isClient: false },
@@ -79,8 +100,21 @@ export function VmTracker({ role }: { role: UserRole }) {
   // which only happens on the initial load and after an explicit refetch
   // (purge / clear trash / import), so in-progress edits are never clobbered.
   useEffect(() => {
-    if (loaded) setData(loaded);
+    // The page opens with every VM **collapsed** — 14 VMs with 48 URLs between
+    // them is more than a screen of rows before you have chosen what to look at.
+    // Expand what you need, or use Expand All.
+    //
+    // Forced here rather than read from the row: `expanded` is view state (the
+    // chevron and the two bulk buttons are all local), so the page always starts
+    // from the same place instead of from whatever was left open last time.
+    if (loaded) {
+      setData({ ...loaded, vms: loaded.vms.map((vm) => ({ ...vm, expanded: false })) });
+    }
   }, [loaded]);
+
+  // Which VMs are ticked for a grouping action. View state, never persisted:
+  // a selection is a gesture in progress, not data about a machine.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const createVm = useCreateVm();
   const updateVm = useUpdateVm();
@@ -92,6 +126,16 @@ export function VmTracker({ role }: { role: UserRole }) {
   const updateUrl = useUpdateUrl();
   const deleteUrl = useDeleteUrl();
   const importTracker = useImportTracker();
+  const createGroup = useCreateVmGroup();
+  const updateGroup = useUpdateVmGroup();
+  const deleteGroup = useDeleteVmGroup();
+  const assignGroup = useAssignVmsToGroup();
+
+  const groupPending =
+    createGroup.isPending ||
+    updateGroup.isPending ||
+    deleteGroup.isPending ||
+    assignGroup.isPending;
 
   const patchLocalVm = (id: string, patch: Partial<Vm>) =>
     setData((d) => (d ? { ...d, vms: d.vms.map((v) => (v.id === id ? { ...v, ...patch } : v)) } : d));
@@ -110,8 +154,117 @@ export function VmTracker({ role }: { role: UserRole }) {
         : d
     );
 
+  // ---- grouping ------------------------------------------------------------
+
+  const toggleSelected = (id: string) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  // Ticks or clears a whole list at once — a section's select-all header and a
+  // group header's "Select all" both land here.
+  const setManySelected = (vms: Vm[], on: boolean) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const vm of vms) {
+        if (on) next.add(vm.id);
+        else next.delete(vm.id);
+      }
+      return next;
+    });
+
+  // Every group mutation is local-first, like every other edit in the tracker:
+  // patch local state so the grid re-renders immediately, fire the request, and
+  // refetch only if it failed — which is the one case where local state is now
+  // a lie.
+  const revert = (message: string) => (error: unknown) => {
+    toast.error(error instanceof Error ? error.message : message);
+    refetch();
+  };
+
+  const applyGroupToVms = (ids: string[], groupId: string | null) =>
+    setData((d) =>
+      d
+        ? { ...d, vms: d.vms.map((v) => (ids.includes(v.id) ? { ...v, groupId } : v)) }
+        : d
+    );
+
+  const handleAssignSelection = (groupId: string | null) => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    applyGroupToVms(ids, groupId);
+    setSelectedIds(new Set());
+    assignGroup.mutate({ vmIds: ids, groupId }, { onError: revert('Failed to group the VMs.') });
+  };
+
+  // Create-then-assign: the name dialog is reached from the selection bar, so
+  // the group only exists because there are VMs to put in it. The assign waits
+  // for the create because it needs the new group's id.
+  const handleCreateGroupForSelection = (name: string) => {
+    const ids = Array.from(selectedIds);
+    createGroup.mutate(
+      { name },
+      {
+        onSuccess: (group) => {
+          setData((d) =>
+            d
+              ? {
+                  ...d,
+                  groups: [...d.groups, group].sort((a, b) => a.name.localeCompare(b.name)),
+                  vms: d.vms.map((v) => (ids.includes(v.id) ? { ...v, groupId: group.id } : v)),
+                }
+              : d
+          );
+          setSelectedIds(new Set());
+          if (ids.length) {
+            assignGroup.mutate(
+              { vmIds: ids, groupId: group.id },
+              { onError: revert('The group was created, but the VMs were not moved into it.') }
+            );
+          }
+          toast.success(`Group “${group.name}” created.`);
+        },
+        onError: (error) =>
+          toast.error(error instanceof Error ? error.message : 'Failed to create the group.'),
+      }
+    );
+  };
+
+  const handleRenameGroup = (id: string, name: string) => {
+    setData((d) =>
+      d
+        ? {
+            ...d,
+            groups: d.groups
+              .map((g) => (g.id === id ? { ...g, name } : g))
+              .sort((a, b) => a.name.localeCompare(b.name)),
+          }
+        : d
+    );
+    updateGroup.mutate({ id, input: { name } }, { onError: revert('Failed to rename the group.') });
+  };
+
+  // The FK is `on delete set null`, so the members survive — they just come back
+  // ungrouped. Mirrored locally so the grid doesn't wait for a round trip.
+  const handleDeleteGroup = (id: string) => {
+    setData((d) =>
+      d
+        ? {
+            ...d,
+            groups: d.groups.filter((g) => g.id !== id),
+            vms: d.vms.map((v) => (v.groupId === id ? { ...v, groupId: null } : v)),
+          }
+        : d
+    );
+    deleteGroup.mutate(id, { onError: revert('Failed to delete the group.') });
+  };
+
   const handlers: VmHandlers = {
     onToggleExpand: (vm) => patchLocalVm(vm.id, { expanded: !vm.expanded }),
+    onToggleSelect: toggleSelected,
     onVmLocalChange: patchLocalVm,
     onVmCommit: (id, patch) => {
       patchLocalVm(id, patch);
@@ -125,7 +278,10 @@ export function VmTracker({ role }: { role: UserRole }) {
       setData((d) => {
         if (!d) return d;
         const vm = d.vms.find((v) => v.id === id);
+        // `...d` first: the payload also carries the groups, and rebuilding it
+        // field by field silently dropped them.
         return {
+          ...d,
           vms: d.vms.filter((v) => v.id !== id),
           deleted: vm
             ? [{ ...vm, deleted: true, deletedAt: new Date().toISOString() }, ...d.deleted]
@@ -183,14 +339,12 @@ export function VmTracker({ role }: { role: UserRole }) {
     }
   };
 
-  const setAllExpanded = (expanded: boolean) =>
-    setData((d) => (d ? { ...d, vms: d.vms.map((v) => ({ ...v, expanded })) } : d));
-
   const handleRestore = (id: string) => {
     setData((d) => {
       if (!d) return d;
       const vm = d.deleted.find((v) => v.id === id);
       return {
+        ...d,
         deleted: d.deleted.filter((v) => v.id !== id),
         vms: vm ? [...d.vms, { ...vm, deleted: false, deletedAt: null }] : d.vms,
       };
@@ -215,6 +369,9 @@ export function VmTracker({ role }: { role: UserRole }) {
     clearTrash.mutate(type, { onSuccess: () => refetch() });
   };
 
+  const setAllExpanded = (expanded: boolean) =>
+    setData((d) => (d ? { ...d, vms: d.vms.map((v) => ({ ...v, expanded })) } : d));
+
   const handleExport = () => {
     if (!data) return;
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -238,7 +395,13 @@ export function VmTracker({ role }: { role: UserRole }) {
           const parsed = JSON.parse(String(ev.target?.result)) as TrackerData;
           if (!parsed.vms) throw new Error('missing vms');
           if (!confirm('Importing will REPLACE all current tracker data. Continue?')) return;
-          await importTracker.mutateAsync({ vms: parsed.vms, deleted: parsed.deleted ?? [] });
+          // A backup from before groups existed has none — it imports as an
+          // ungrouped tracker rather than failing.
+          await importTracker.mutateAsync({
+            vms: parsed.vms,
+            deleted: parsed.deleted ?? [],
+            groups: parsed.groups ?? [],
+          });
           await refetch();
           alert('Data imported successfully!');
         } catch {
@@ -352,6 +515,14 @@ export function VmTracker({ role }: { role: UserRole }) {
             push it out of view. */}
         {SECTIONS.map(({ label, isClient }) => {
           const sectionVms = data.vms.filter((v) => v.isClient === isClient);
+          // The section's rows, split into their groups (ungrouped last). Group
+          // headers only appear once something in *this* section is grouped — an
+          // all-ungrouped section keeps the flat grid it has always had rather
+          // than growing a header that says nothing.
+          const groupings = groupVms(sectionVms, data.groups);
+          const showGroupHeaders = groupings.some((g) => g.group);
+          const allSelected =
+            sectionVms.length > 0 && sectionVms.every((vm) => selectedIds.has(vm.id));
           return (
             <section key={label} aria-label={label} className="space-y-2">
               <div className="flex items-center gap-2">
@@ -362,33 +533,52 @@ export function VmTracker({ role }: { role: UserRole }) {
               </div>
 
               {view === 'cards' ? (
-                // `items-start` so a card left collapsed doesn't stretch to the
-                // height of an expanded neighbour in the same row.
-                <div className="grid items-start gap-4 md:grid-cols-2 2xl:grid-cols-3">
+                <div className="space-y-4">
                   {sectionVms.length === 0 ? (
-                    <p className="col-span-full rounded-xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
+                    <p className="rounded-xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
                       No {isClient ? 'client' : 'UPVIEW'} VMs yet.
                     </p>
                   ) : (
-                    sectionVms.map((vm) => (
-                      <VmCard
-                        key={vm.id}
-                        vm={vm}
-                        // The full lists, for the same reason as the grid: the
-                        // "Migrated from" history matches on destination IP and
-                        // crosses the UPVIEW/Client split.
-                        allVms={data.vms}
-                        allDeleted={data.deleted}
-                        h={handlers}
-                        canWrite={canWrite}
-                      />
+                    groupings.map(({ group, vms }) => (
+                      <div key={group?.id ?? 'ungrouped'} className="space-y-2">
+                        {showGroupHeaders ? (
+                          <VmGroupHeading
+                            group={group}
+                            memberCount={vms.length}
+                            canWrite={canWrite}
+                            pending={groupPending}
+                            onRename={(name) => group && handleRenameGroup(group.id, name)}
+                            onDelete={() => group && handleDeleteGroup(group.id)}
+                            onSelectAll={() => setManySelected(vms, true)}
+                          />
+                        ) : null}
+                        {/* `items-start` so a card left collapsed doesn't stretch
+                            to the height of an expanded neighbour in the same
+                            row. */}
+                        <div className="grid items-start gap-4 md:grid-cols-2 2xl:grid-cols-3">
+                          {vms.map((vm) => (
+                            <VmCard
+                              key={vm.id}
+                              vm={vm}
+                              // The full lists, for the same reason as the grid: the
+                              // "Migrated from" history matches on destination IP and
+                              // crosses the UPVIEW/Client split.
+                              allVms={data.vms}
+                              allDeleted={data.deleted}
+                              h={handlers}
+                              canWrite={canWrite}
+                              selected={selectedIds.has(vm.id)}
+                            />
+                          ))}
+                        </div>
+                      </div>
                     ))
                   )}
                   {canWrite ? (
                     <button
                       type="button"
                       onClick={() => handleAddVm(isClient)}
-                      className="col-span-full rounded-lg border-2 border-dashed border-primary/40 py-2.5 text-sm font-semibold text-primary hover:bg-primary/5"
+                      className="w-full rounded-lg border-2 border-dashed border-primary/40 py-2.5 text-sm font-semibold text-primary hover:bg-primary/5"
                     >
                       + Add {isClient ? 'Client' : 'UPVIEW'} VM
                     </button>
@@ -396,15 +586,40 @@ export function VmTracker({ role }: { role: UserRole }) {
                 </div>
               ) : (
                 <div className="overflow-x-auto rounded-xl border border-border">
-                  <Table className="min-w-[1800px]">
+                  <Table className="table-fixed" style={{ minWidth: TABLE_MIN_WIDTH }}>
+                    {/* The widths live here rather than on the cells: one
+                        declaration per column, applied to both sections and to
+                        every row shape (VM row, URL row, group band). */}
+                    <colgroup>
+                      {COLUMNS.map((column, i) => (
+                        <col key={`${column.label}-${i}`} style={{ width: column.width }} />
+                      ))}
+                    </colgroup>
                     <TableHeader>
                       <TableRow>
-                        {COLUMN_HEADERS.map((columnLabel, i) => (
+                        {/* The gutter column's header carries this section's
+                            select-all. Rendered outside the map because it is a
+                            control, not a label — every other header is a
+                            string. */}
+                        <TableHead className="w-16">
+                          {canWrite ? (
+                            <div className="flex justify-center">
+                              <VmSelectCheckbox
+                                checked={allSelected}
+                                onCheckedChange={(on) => setManySelected(sectionVms, on)}
+                                label={`Select all ${isClient ? 'client' : 'UPVIEW'} VMs`}
+                              />
+                            </div>
+                          ) : null}
+                        </TableHead>
+                        {COLUMNS.slice(1).map((column, i) => (
                           <TableHead
-                            key={`${columnLabel}-${i}`}
-                            className={i >= 4 && i <= 13 ? 'text-center' : undefined}
+                            key={`${column.label}-${i}`}
+                            // `i` counts from the second column now, so the
+                            // centred range shifts down by one.
+                            className={i >= 3 && i <= 12 ? 'text-center' : undefined}
                           >
-                            {columnLabel}
+                            {column.label}
                           </TableHead>
                         ))}
                       </TableRow>
@@ -420,19 +635,36 @@ export function VmTracker({ role }: { role: UserRole }) {
                           </TableCell>
                         </TableRow>
                       ) : (
-                        sectionVms.map((vm) => (
-                          <VmRow
-                            key={vm.id}
-                            vm={vm}
-                            // Deliberately the *full* lists, not this section's: the
-                            // "Migrated from" history matches on destination IP, and a
-                            // client VM can migrate onto an UPVIEW VM (or vice versa).
-                            // Passing sectionVms would silently hide those rows.
-                            allVms={data.vms}
-                            allDeleted={data.deleted}
-                            h={handlers}
-                            canWrite={canWrite}
-                          />
+                        groupings.map(({ group, vms }) => (
+                          <Fragment key={group?.id ?? 'ungrouped'}>
+                            {showGroupHeaders ? (
+                              <VmGroupHeaderRow
+                                group={group}
+                                memberCount={vms.length}
+                                columnCount={TRACKER_COLUMNS}
+                                canWrite={canWrite}
+                                pending={groupPending}
+                                onRename={(name) => group && handleRenameGroup(group.id, name)}
+                                onDelete={() => group && handleDeleteGroup(group.id)}
+                                onSelectAll={() => setManySelected(vms, true)}
+                              />
+                            ) : null}
+                            {vms.map((vm) => (
+                              <VmRow
+                                key={vm.id}
+                                vm={vm}
+                                // Deliberately the *full* lists, not this section's: the
+                                // "Migrated from" history matches on destination IP, and a
+                                // client VM can migrate onto an UPVIEW VM (or vice versa).
+                                // Passing sectionVms would silently hide those rows.
+                                allVms={data.vms}
+                                allDeleted={data.deleted}
+                                h={handlers}
+                                canWrite={canWrite}
+                                selected={selectedIds.has(vm.id)}
+                              />
+                            ))}
+                          </Fragment>
                         ))
                       )}
                       {canWrite && (
@@ -455,6 +687,18 @@ export function VmTracker({ role }: { role: UserRole }) {
             </section>
           );
         })}
+
+        {/* Editor+ only: every action on a selection is a write. */}
+        {canWrite ? (
+          <VmSelectionBar
+            selectedCount={selectedIds.size}
+            groups={data.groups}
+            pending={groupPending}
+            onAssign={handleAssignSelection}
+            onCreateGroup={handleCreateGroupForSelection}
+            onClear={() => setSelectedIds(new Set())}
+          />
+        ) : null}
 
         <VmTrash
           deleted={data.deleted}

@@ -39,6 +39,9 @@ URLs, pass/fail split) and the first two link onward to `/projects`.
 **Migration progress** — VMs migrated, DNS updated, URLs tested, each as a
 ratio + bar, computed with the tracker's own `computeStats`
 ([lib/vm-utils.ts](../lib/vm-utils.ts)) so the numbers match `/tracker` exactly.
+The URL counts come from the one `endpoints` table, so they include the records
+added from projects — see
+[tracker.md](./tracker.md#urls-live-in-one-table-shared-with-projects).
 
 **Recent builds** — the last 8 runs from `environment_build_runs`, newest first,
 with job, build number, who triggered it, and outcome. Result pills reuse

@@ -19,7 +19,14 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-    await importTracker({ vms: body.vms, deleted: body.deleted ?? [] });
+    // `groups` defaults to empty: a backup written before VM groups existed is
+    // still a valid backup, and it imports as an ungrouped tracker rather than
+    // being rejected.
+    await importTracker({
+      vms: body.vms,
+      deleted: body.deleted ?? [],
+      groups: body.groups ?? [],
+    });
     return NextResponse.json({ data: { ok: true } });
   } catch (error) {
     return NextResponse.json(

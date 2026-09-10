@@ -1,10 +1,46 @@
 # Jenkins Sync (Phase 2b · M3)
 
-Jenkins is configured **per environment**: each environment carries its own
-Jenkins job URL + credentials, and you sync ports from that job. There is no
-global Jenkins connection.
+Jenkins is configured **per VM**, and an environment names the **job** it runs
+there. There is no global Jenkins connection.
 
-## One place to set it
+## Where Jenkins is configured
+
+A VM runs one Jenkins, so the server, its Basic-auth user and its API token
+belong to the machine: they live in
+[`vm_jenkins` / `vm_jenkins_secrets`](./schema.md#vm_jenkins--vm_jenkins_secrets)
+and are set from the **VM tracker** — the `J` marker on each VM row, which is
+also how you see at a glance which machines run Jenkins (filled = server +
+token, outlined = server but no token yet).
+
+The address is normally just the machine's IP: `normalizeJenkinsServerUrl` adds
+`http://` and port **8080** (Jenkins' default, and what these servers use). A
+port or scheme that is typed is kept, so the rare server on another port still
+works.
+
+An environment then only needs its job — and when its VM is configured, the
+environment's Jenkins settings modal shows where the credentials come from and
+asks for nothing else. Username and token fields appear there only when there is
+no VM-level config to use.
+
+The VM dialog verifies as well as configures: `testVmJenkinsConnection` pings
+the server (`pingJenkins` — `/api/json?tree=mode`, the cheapest authenticated
+call) and reports what failed, and a save runs it automatically. The SSRF guard
+re-runs on the address being tested, including one typed into the form.
+
+**Resolution order** (`resolveEnvJenkinsServer`), each part falling back
+independently:
+
+1. the environment's **VM** (`vm_jenkins` + `vm_jenkins_secrets`) — the one place
+   anything new is written;
+2. the environment's own stored URL / username / token — the pre-VM layout, and
+   the only home an environment with **no linked VM** has;
+3. a sibling environment on the same VM (`findVmJenkinsDonor`) — how inheritance
+   worked before the VM held the server.
+
+2 and 3 are legacy *read* paths kept so no working setup broke when this moved;
+the migration seeded every VM that had a configured environment.
+
+## One place to set the job
 
 The **Jenkins settings** modal (⚙ on the environment card) is the *only* place
 Jenkins gets configured. The Add/Edit Environment form deliberately has no
@@ -253,7 +289,7 @@ provider, so the columns follow the provider:
 **Port and Branch are alternatives, never both.** A managed platform doesn't
 deploy a port on a host — an Amplify deployment is a *branch*, AWS/Azure ones are
 services behind their own endpoints — so the leading column there is the branch
-that gets deployed (`environment_ports.branch`), and `docker ps`, which is nothing
+that gets deployed (`endpoints.branch`), and `docker ps`, which is nothing
 but host-port mappings, has nothing to import into it. `other`/`none` keep ports:
 those are the hand-tracked, VM-hosted records the docker import was built for.
 

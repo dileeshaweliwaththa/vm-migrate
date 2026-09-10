@@ -10,11 +10,13 @@
 // `http://20.197.41.68:8080` with jobs at `http://20.204.129.96:8080/job/…`.
 //
 // Left alone, that stale host is what gets stored on a record
-// (`environment_ports.jenkins_job_url`), what the row's job link opens, and what
+// (`endpoints.jenkins_job_url`), what the row's job link opens, and what
 // ▶ Run posts back — where the SSRF guard correctly refuses it ("That job URL
 // doesn't belong to this Jenkins server"). So every URL that comes *from* Jenkins
 // or out of a stored record is re-mounted on the base the environment is actually
 // configured with, keeping only its path. See docs/jenkins-sync.md.
+
+import { isDeniedOutboundTarget, normalizeServiceUrl } from '@/lib/outbound-url';
 
 // Derives the Jenkins server root from a job URL (handles context paths and plain
 // roots): everything before "/job/", else the URL itself.
@@ -41,6 +43,17 @@ const parseUrl = (value: string): URL | null => {
 // `https://jenkins.corp` the URL `https://jenkins.corp.attacker.test/job/x`
 // passes it, and the token would be handed to that host. Compare parsed origins
 // instead, which also pins the scheme and port.
+// Jenkins' own default, and what every server in this fleet runs on. A VM's
+// Jenkins address is therefore almost always "the VM's IP" — so that is all the
+// form asks for, and this fills in the rest.
+export const DEFAULT_JENKINS_PORT = '8080';
+
+// Turns what someone types into a server root: `20.197.41.68` becomes
+// `http://20.197.41.68:8080`. Shared with the backup services, which do the same
+// thing with their own default port — see `normalizeServiceUrl`.
+export const normalizeJenkinsServerUrl = (value: string): string =>
+  normalizeServiceUrl(value, DEFAULT_JENKINS_PORT);
+
 export const isSameJenkinsServer = (candidate: string | undefined, base: string): boolean => {
   if (!candidate || !base) return false;
 
@@ -61,33 +74,12 @@ export const isSameJenkinsServer = (candidate: string | undefined, base: string)
   return targetPath === rootPath || targetPath.startsWith(`${rootPath}/`);
 };
 
-// Hosts that are never a Jenkins server, and are the first thing an SSRF probe
-// reaches for. Every outbound Jenkins request is built from a URL an editor typed
-// into Jenkins settings, so the server can be pointed at whatever that URL names.
-//
-// The list is deliberately narrow. This tool exists to reach build servers on
-// internal networks, so private ranges (10/8, 172.16/12, 192.168/16) stay allowed
-// — blocking them would break the product. What is refused is the link-local
-// range, which carries the cloud instance-metadata endpoints (169.254.169.254 on
-// AWS/Azure, metadata.google.internal on GCP) and answers no Jenkins, and the
-// unspecified address. See docs/security.md § SSRF.
-const isDeniedHostname = (hostname: string): boolean => {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
-  if (host === '0.0.0.0' || host === '::' || host === '::0') return true;
-  if (host === 'metadata.google.internal') return true;
-  // IPv4 link-local (169.254.0.0/16) and IPv6 link-local (fe80::/10).
-  if (/^169\.254\./.test(host)) return true;
-  if (/^fe[89ab][0-9a-f]:/.test(host)) return true;
-  return false;
-};
-
-// Is this URL one the app must refuse to fetch, whatever the credentials? Returns
-// false for a URL it cannot parse — the callers already reject those on their own
-// terms, and this predicate answers only the question it is named for.
-export const isDeniedJenkinsTarget = (url: string): boolean => {
-  const parsed = parseUrl(url.trim());
-  return parsed ? isDeniedHostname(parsed.hostname) : false;
-};
+// The host denylist and the parse rules are shared with the backup-service
+// integration — see `lib/outbound-url.ts`. This name stays because every caller
+// in the Jenkins slice reads better for it, and because the guard's meaning here
+// is specific: *this* is the check that stands between a client-supplied URL and
+// an outbound request carrying an API token.
+export const isDeniedJenkinsTarget = (url: string): boolean => isDeniedOutboundTarget(url);
 
 // Where a Jenkins path begins, for the case where the reported URL carries a
 // different context path than the one we connect through — splice there so the

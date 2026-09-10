@@ -3,9 +3,9 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
-import { Archive, ArchiveRestore, Plus, Search } from 'lucide-react';
+import { Archive, ArchiveRestore, Layers, Plus, Search } from 'lucide-react';
 import { useArchiveProject, useProjects } from '@/hooks/projects/useProjects';
-import type { Project } from '@/types/common/project';
+import type { Project, ProjectEnvironmentSummary } from '@/types/common/project';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,6 +13,7 @@ import { Toggle } from '@/components/ui/toggle';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { PageHeader } from '@/components/layout/page-header';
 import { ProjectDialog } from '@/components/projects/project-dialog';
 
@@ -172,6 +173,79 @@ export function ProjectsDashboard({
   );
 }
 
+// The project's environment tally, as one chip. The card used to list the VMs
+// as chips instead, which made every card a different height — a project on six
+// environments pushed its own row of the grid taller than the two beside it. So
+// the count is the only thing on the card, and the breakdown (each environment
+// and the VM behind it) lives in a hover.
+//
+// Hover-only, deliberately: it is a shortcut, not the record. Touch has no hover,
+// and the same list is on the project's own page one tap away — which is where
+// this chip already goes, since the whole card is a Link.
+function EnvironmentsTally({ environments }: { environments: ProjectEnvironmentSummary[] }) {
+  const label = `${environments.length} environment${environments.length === 1 ? '' : 's'}`;
+
+  // Same chip either way, so an empty project still reads as a box with a number
+  // rather than as a card that's missing a row. Nothing to reveal, so no tooltip.
+  const chip = (
+    <Badge
+      variant="outline"
+      // A tab stop, so the tooltip is reachable from the keyboard — Radix opens it
+      // on focus, and `asChild` means the Badge itself is the trigger.
+      tabIndex={environments.length ? 0 : undefined}
+      className="rounded-sm bg-muted/50 px-1.5 font-mono text-label-mono font-medium text-muted-foreground"
+    >
+      <Layers aria-hidden />
+      {label}
+    </Badge>
+  );
+
+  if (!environments.length) return chip;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{chip}</TooltipTrigger>
+      {/* `TooltipContent` ships `inline-flex items-center` for a one-line bubble;
+          a list needs it stacked, and `flex-col`/`items-stretch` are separate
+          tailwind-merge groups from `inline-flex`, so both land. `max-w-none`
+          replaces its `max-w-xs`, which was narrow enough to truncate the IPs —
+          the one thing in the bubble you'd copy. */}
+      <TooltipContent
+        side="top"
+        align="start"
+        sideOffset={6}
+        className="max-w-none flex-col items-stretch gap-2 px-3 py-2.5"
+      >
+        <p className="border-b border-background/15 pb-1.5 text-label-caps uppercase text-background/60">
+          {label}
+        </p>
+        {/* Three columns, not a `justify-between` row per environment: the VM and
+            its address have to start at the same x on every row and every card,
+            or the bubble reads as three ragged fragments. `grid-cols-subgrid` on
+            each row is what shares the parent's column widths — the environment
+            name column is as wide as the longest name, and no wider. */}
+        <ul className="grid grid-cols-[max-content_minmax(0,1fr)_max-content] items-baseline gap-x-4 gap-y-1">
+          {environments.map((env) => (
+            <li key={env.id} className="col-span-3 grid grid-cols-subgrid items-baseline">
+              <span className="text-label-caps uppercase">{env.name}</span>
+              {/* Mono for the machine and its address — the same treatment they
+                  get everywhere else they're scanned, and it puts the IP digits
+                  in a column. The name truncates if it has to; the address never
+                  does. */}
+              <span className="max-w-[16rem] truncate font-mono text-label-mono">
+                {env.vmName || '—'}
+              </span>
+              <span className="whitespace-nowrap font-mono text-label-mono text-background/60">
+                {env.vmIp}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 function ProjectCard({ project, canRestore }: { project: Project; canRestore: boolean }) {
   const archive = useArchiveProject();
 
@@ -240,9 +314,11 @@ function ProjectCard({ project, canRestore }: { project: Project; canRestore: bo
           <p className="line-clamp-2 min-h-8 text-body-sm text-muted-foreground">
             {project.description || 'No description yet.'}
           </p>
-          {/* Mono, like every other count and identifier in the system. */}
-          <div className="font-mono text-label-mono text-ink-source">
-            {project.environmentCount} environment{project.environmentCount === 1 ? '' : 's'}
+          {/* One chip, left-aligned with the title and the tags — the card's whole
+              footprint is now fixed regardless of how many environments a project
+              has. */}
+          <div className="flex items-center gap-2">
+            <EnvironmentsTally environments={project.environmentSummaries} />
           </div>
         </CardContent>
       </Card>

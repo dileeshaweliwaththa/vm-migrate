@@ -15,13 +15,19 @@ The main feature is the tracker at `/tracker` (protected): a spreadsheet-style
 grid of VMs split into UPVIEW (our servers) and Client sections, each with
 per-endpoint rows, live migration stats, soft-delete trash with restore/purge,
 migrated-URL archiving, and JSON import/export. Data lives in the `vms` and
-`vm_urls` Supabase tables (shared across all authenticated users). Access is
+`endpoints` Supabase tables (shared across all authenticated users; `endpoints`
+is the one URL table, shared with the projects pages). Access is
 gated by the passwordless email sign-in flow shipped in the auth slice.
+
+`repositories/jenkins/jenkinsRepository.ts` and
+`repositories/backups/backupApiRepository.ts` are the **only** repositories that
+talk to something other than Supabase — the documented external-HTTP exception.
+Both share the outbound URL rules in [lib/outbound-url.ts](lib/outbound-url.ts).
 
 The tracker feature is the reference example of a full vertical slice through
 all five layers: `app/api/vms/*` (routing) → `components/vms/*` (UI) →
 `hooks/vms/useVmTracker.ts` (hooks) → `services/vms/vmService.ts` (service) →
-`repositories/vms` + `repositories/vmUrls` (repositories).
+`repositories/vms` + `repositories/endpoints` (repositories).
 
 # Project conventions
 
@@ -50,6 +56,9 @@ Before implementing any feature, request, or fix, read and follow:
   port sync, and how a triggered build is followed to completion.
 - [docs/docker-import.md](docs/docker-import.md) — importing environment records
   from pasted `docker ps` output.
+- [docs/backups.md](docs/backups.md) — the **Backups** tab: the registry of MySQL
+  backup services, what is read through to them rather than stored, and the role
+  split on running vs deleting a backup.
 
 ## Database / migration workflow
 

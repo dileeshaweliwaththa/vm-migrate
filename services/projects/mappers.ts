@@ -1,8 +1,9 @@
 import type { ProjectRow } from '@/types/supabase/response/projects';
 import type { EnvironmentRow } from '@/types/supabase/response/environments';
-import type { EnvironmentPortRow } from '@/types/supabase/response/environmentPorts';
+import type { EndpointRow } from '@/types/supabase/response/endpoints';
+import type { VmSummaryRow } from '@/types/supabase/response/vms';
 import type { Protocol } from '@/types/common/vm';
-import { PORT_SOURCES } from '@/types/common/project';
+import { ENVIRONMENT_NAMES, PORT_SOURCES } from '@/types/common/project';
 import { deriveJenkinsBase, rebaseOnJenkinsServer } from '@/lib/jenkins-url';
 import { vmLiveIp } from '@/lib/endpoints';
 import type {
@@ -12,10 +13,51 @@ import type {
   EnvironmentPort,
   PortSource,
   Project,
+  ProjectEnvironmentSummary,
 } from '@/types/common/project';
 
 // Shared row -> domain mappers for the projects/environments slice. Kept in one
 // place so both projectService and environmentService map consistently.
+
+// A set of environment rows as the project list wants them: name, the VM behind
+// each one, and its live address. Takes rows rather than mapped `Environment`s
+// because `migrated` (which decides the live IP) is on the joined VM and never
+// reaches the domain type.
+//
+// Sorted by **lifecycle** — DEV, STAGE, PRODUCTION, the order `ENVIRONMENT_NAMES`
+// declares — not by each project's own `position`. The list card shows a dozen of
+// these side by side, and per-project ordering meant DEV led one card's hover and
+// trailed the next one's; a fixed order is what makes them comparable at a
+// glance. The project's own page still honours `position`.
+export const collectProjectEnvironments = (
+  rows: {
+    id: string;
+    name: string;
+    vm_id: string | null;
+    vms?: VmSummaryRow | null;
+  }[]
+): ProjectEnvironmentSummary[] =>
+  [...rows]
+    .sort(
+      (a, b) =>
+        ENVIRONMENT_NAMES.indexOf(a.name as EnvironmentName) -
+          ENVIRONMENT_NAMES.indexOf(b.name as EnvironmentName) ||
+        // Two environments can share a name (two PRODUCTIONs on different hosts),
+        // so the machine breaks the tie and the pair keeps a stable order.
+        (a.vms?.name ?? '').localeCompare(b.vms?.name ?? '')
+    )
+    .map((row) => ({
+      id: row.id,
+      name: row.name as EnvironmentName,
+      vmName: row.vm_id ? row.vms?.name ?? '' : '',
+      vmIp: row.vms
+        ? vmLiveIp({
+            oldIp: row.vms.old_ip ?? '',
+            newIp: row.vms.new_ip ?? '',
+            migrated: row.vms.migrated ?? false,
+          })
+        : '',
+    }));
 
 export const rowToProject = (row: ProjectRow): Project => ({
   id: row.id,
@@ -30,7 +72,10 @@ export const rowToProject = (row: ProjectRow): Project => ({
   archivedAt: row.archived_at,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
-  environmentCount: row.environments?.[0]?.count ?? 0,
+  // Both derived from the same embed, so a write-path select that doesn't ask for
+  // environments yields 0 and `[]` together — never a count without its breakdown.
+  environmentCount: row.environments?.length ?? 0,
+  environmentSummaries: collectProjectEnvironments(row.environments ?? []),
 });
 
 // `jenkinsBase` is the environment's Jenkins server root, when the caller has it.
@@ -39,9 +84,11 @@ export const rowToProject = (row: ProjectRow): Project => ({
 // moment the server moves. Re-mounting it here fixes every consumer at once (the
 // row's link, the ▶ Run payload, and the job-list match behind Status / Last
 // build) without a migration, and keeps working if the address changes again.
-export const rowToPort = (row: EnvironmentPortRow, jenkinsBase = ''): EnvironmentPort => ({
+export const rowToPort = (row: EndpointRow, jenkinsBase = ''): EnvironmentPort => ({
   id: row.id,
-  environmentId: row.environment_id,
+  // Non-null for every row that reaches this mapper: it only ever maps a
+  // project's own records, which are the rows that carry an environment.
+  environmentId: row.environment_id ?? '',
   port: row.port,
   branch: row.branch ?? '',
   protocol: row.protocol as Protocol,
@@ -87,7 +134,7 @@ export const rowToEnvironment = (row: EnvironmentRow): Environment => {
       : null,
     notes: row.notes,
     position: row.position,
-    ports: (row.environment_ports ?? [])
+    ports: (row.endpoints ?? [])
       .map((port) => rowToPort(port, jenkinsBase))
       .sort((a, b) => a.position - b.position),
   };

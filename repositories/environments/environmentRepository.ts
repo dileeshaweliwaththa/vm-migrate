@@ -23,7 +23,7 @@ export const findAllEnvironments = async (): Promise<EnvironmentRow[]> => {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from('environments')
-    .select('*, environment_ports(*), vms(name, old_ip, new_ip, migrated)')
+    .select('*, endpoints(*), vms(name, old_ip, new_ip, migrated)')
     .order('project_id', { ascending: true })
     .order('position', { ascending: true });
   if (error) throw new Error(error.message);
@@ -34,6 +34,17 @@ export const findAllEnvironments = async (): Promise<EnvironmentRow[]> => {
 // the Jenkins credentials a VM already has configured — a VM runs one Jenkins, so
 // its newest configuration is the one worth offering to the next environment.
 // Ports aren't selected: no caller of this needs them.
+export const findEnvironmentById = async (id: string): Promise<EnvironmentRow | null> => {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('environments')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as EnvironmentRow | null) ?? null;
+};
+
 export const findEnvironmentsByVmId = async (vmId: string): Promise<EnvironmentRow[]> => {
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -52,7 +63,7 @@ export const insertEnvironment = async (
   const { data, error } = await supabase
     .from('environments')
     .insert(values)
-    .select('*, environment_ports(*), vms(name, old_ip, new_ip, migrated)')
+    .select('*, endpoints(*), vms(name, old_ip, new_ip, migrated)')
     .single();
   if (error) throw new Error(error.message);
   return data as EnvironmentRow;
@@ -67,7 +78,7 @@ export const updateEnvironment = async (
     .from('environments')
     .update(values)
     .eq('id', id)
-    .select('*, environment_ports(*), vms(name, old_ip, new_ip, migrated)')
+    .select('*, endpoints(*), vms(name, old_ip, new_ip, migrated)')
     .single();
   if (error) throw new Error(error.message);
   return data as EnvironmentRow;

@@ -20,6 +20,7 @@ export type VmWriteColumns = Partial<{
   migrated_archive: MigratedArchiveEntry[];
   deleted: boolean;
   deleted_at: string | null;
+  group_id: string | null;
 }>;
 
 export const findAllVms = async (): Promise<VmRow[]> => {
@@ -56,6 +57,22 @@ export const updateVm = async (id: string, values: VmWriteColumns): Promise<VmRo
     .single();
   if (error) throw new Error(error.message);
   return data as VmRow;
+};
+
+// Puts a set of VMs in one group (or ungroups them, with `groupId` null) in a
+// single statement. One request rather than one per VM: grouping is a bulk
+// action by nature — you select a client's whole fleet and file it at once — and
+// a loop would leave a half-applied selection behind on the first failure.
+export const setVmsGroup = async (ids: string[], groupId: string | null): Promise<VmRow[]> => {
+  if (ids.length === 0) return [];
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('vms')
+    .update({ group_id: groupId })
+    .in('id', ids)
+    .select('*');
+  if (error) throw new Error(error.message);
+  return (data ?? []) as VmRow[];
 };
 
 export const deleteVm = async (id: string): Promise<void> => {

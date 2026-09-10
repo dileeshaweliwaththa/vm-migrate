@@ -1,5 +1,8 @@
 'use client';
 
+import Link from 'next/link';
+import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { safeStatus, STATUS_TONE_CLASS } from '@/lib/vm-utils';
@@ -13,6 +16,9 @@ import type { Vm, VmUrl } from '@/types/common/vm';
 
 export interface VmHandlers {
   onToggleExpand: (vm: Vm) => void;
+  // Selection for the grouping actions. Both views take it for the same reason
+  // they share everything else: a VM ticked in the grid is ticked in the cards.
+  onToggleSelect: (id: string) => void;
   onVmLocalChange: (id: string, patch: Partial<Vm>) => void;
   onVmCommit: (id: string, patch: Partial<Vm>) => void;
   onToggleClient: (vm: Vm) => void;
@@ -79,6 +85,77 @@ export function CellInput({
         className
       )}
     />
+  );
+}
+
+// The selection tick shared by the grid, the cards and the select-all header.
+//
+// `ui/checkbox.tsx` is one of the generated primitives written for Radix 2.x: its
+// checked styling is all `data-checked:*`, a boolean attribute 1.4.3 never emits,
+// so a ticked box would render as a bare check with no fill. The overrides below
+// restate it on `data-[state=checked]`, which 1.4.3 does emit — same class
+// groups, so tailwind-merge drops the dead ones. Kept here, in one place, rather
+// than copied into each view: a copy that drifts fails silently. See
+// docs/ui-guidelines.md § Generated primitives target Radix 2.x.
+export function VmSelectCheckbox({
+  checked,
+  onCheckedChange,
+  label,
+  className,
+}: {
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+  label: string;
+  className?: string;
+}) {
+  return (
+    <Checkbox
+      checked={checked}
+      onCheckedChange={(v) => onCheckedChange(v === true)}
+      aria-label={label}
+      title={label}
+      className={cn(
+        'border-input data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground',
+        className
+      )}
+    />
+  );
+}
+
+// Where a URL row comes from. There is one `endpoints` table behind both
+// pages, so a row shown here may have been added from a project environment —
+// this says which one, and links to it, because that is where it is added and
+// deleted. A VM-owned row (added in the tracker) gets no badge: unlabelled is
+// the tracker's own, which keeps the dense grid quiet in the common case.
+//
+// Shared by the grid and the cards. Tolerates a row read back from a
+// `migrated_archive` snapshot written before endpoints were unified, where the
+// ownership fields simply aren't there.
+export function UrlOwnerBadge({ url }: { url: VmUrl }) {
+  if (!url.environmentId) return null;
+
+  const label = [url.projectName, url.environmentName].filter(Boolean).join(' · ');
+  const badge = (
+    <Badge
+      variant="outline"
+      title={
+        label
+          ? `Added from ${label} — edit here, but add or remove it on the project`
+          : 'Belongs to a project environment'
+      }
+      className="max-w-[12rem] rounded-sm bg-muted/50 px-1.5 font-mono text-label-mono font-medium text-muted-foreground"
+    >
+      <span className="truncate">{label || 'Project'}</span>
+    </Badge>
+  );
+
+  // The project id is what the badge needs to link anywhere; without it (an
+  // archived snapshot) the label still tells you where the row came from.
+  if (!url.projectId) return badge;
+  return (
+    <Link href={`/projects/${url.projectId}`} className="min-w-0">
+      {badge}
+    </Link>
   );
 }
 

@@ -45,6 +45,40 @@ export const fetchJobConfigXml = async (
   }
 };
 
+export interface PingResult {
+  ok: boolean;
+  status: number;
+  // Jenkins reports its version in the `X-Jenkins` response header on every API
+  // call — the cheapest proof that what answered is actually a Jenkins.
+  version: string;
+  error?: string;
+}
+
+// The smallest authenticated call a Jenkins server answers: is this address a
+// Jenkins, and do these credentials work on it? `tree=mode` keeps the response
+// to a few bytes — nothing here needs the payload, only the status.
+export const pingJenkins = async (auth: JenkinsAuth, baseUrl: string): Promise<PingResult> => {
+  try {
+    const res = await fetch(`${stripTrailingSlash(baseUrl)}/api/json?tree=mode`, {
+      headers: { Authorization: authHeader(auth), Accept: 'application/json' },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      cache: 'no-store',
+    });
+    return {
+      ok: res.ok,
+      status: res.status,
+      version: res.headers.get('x-jenkins') ?? '',
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: 0,
+      version: '',
+      error: error instanceof Error ? error.message : 'network error',
+    };
+  }
+};
+
 export interface ListJobsResult {
   ok: boolean;
   status: number;

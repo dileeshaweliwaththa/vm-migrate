@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
+  DatabaseBackup,
   LayoutGrid,
   Layers,
   SlidersHorizontal,
@@ -40,6 +41,7 @@ const NAV: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutGrid },
   { href: '/projects', label: 'Projects', icon: Layers },
   { href: '/tracker', label: 'VM Tracker', icon: Terminal },
+  { href: '/backups', label: 'Backups', icon: DatabaseBackup },
   { href: '/admin/users', label: 'Users', icon: Users, adminOnly: true },
 ];
 

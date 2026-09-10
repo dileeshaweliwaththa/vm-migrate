@@ -80,6 +80,21 @@ export interface Environment {
   ports: EnvironmentPort[];
 }
 
+// One environment as the *project list* shows it: its name and the VM behind it,
+// nothing else. The card no longer chips out a project's machines — six
+// environments made six cards six different heights — it shows the tally and
+// reveals this list on hover, so this is the whole per-environment payload the
+// list needs. `vmIp` is the VM's live address (old or new depending on whether it
+// has migrated, see `vmLiveIp`), empty when there is no VM or it has no address
+// on record yet — the migration state itself belongs to the tracker and the
+// project's own page, not to a hover on a list card.
+export interface ProjectEnvironmentSummary {
+  id: string;
+  name: EnvironmentName;
+  vmName: string;
+  vmIp: string;
+}
+
 export interface Tag {
   id: string;
   name: string;
@@ -96,6 +111,10 @@ export interface Project {
   createdAt: string;
   updatedAt: string;
   environmentCount: number;
+  // This project's environments in lifecycle order (DEV → STAGE → PRODUCTION) —
+  // the hover breakdown behind the tally. Fixed rather than per-project so every
+  // card's hover reads the same way; see `collectProjectEnvironments`.
+  environmentSummaries: ProjectEnvironmentSummary[];
 }
 
 export interface ProjectDetail extends Project {

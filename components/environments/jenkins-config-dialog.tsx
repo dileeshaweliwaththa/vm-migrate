@@ -68,10 +68,35 @@ function ConfigForm({
   // two non-secret fields — the third is a promise the server keeps on save.
   const inherited = config.inherited;
 
+  // A VM runs one Jenkins, and it is configured on the VM (tracker → the J
+  // button). So when this environment's machine has a server, this form is about
+  // the **job** only: showing username and token here as well would be a second
+  // place to maintain one set of credentials, which is exactly what moving them
+  // to the VM was for. Without a configured VM — an environment with no VM
+  // linked, or one whose VM hasn't been set up — the old per-environment fields
+  // remain, or there would be nowhere to put them.
+  const vmJenkins = config.vmJenkins?.baseUrl ? config.vmJenkins : null;
+
   return (
     <>
       <div className="space-y-4">
-        {inherited ? (
+        {vmJenkins ? (
+          <div className="rounded-md border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+            <Server className="mr-1 inline h-3 w-3 align-[-2px]" />
+            Server and credentials come from{' '}
+            <span className="font-medium text-foreground">{vmJenkins.vmName || 'this VM'}</span> —{' '}
+            <span className="font-mono">{vmJenkins.baseUrl}</span>
+            {vmJenkins.hasToken ? (
+              <> as {vmJenkins.username || 'its configured user'}. Set the job below.</>
+            ) : (
+              <>
+                , but <span className="font-medium text-foreground">no API token is stored</span>{' '}
+                for it yet — add one on the VM in the tracker.
+              </>
+            )}
+          </div>
+        ) : null}
+        {inherited && !vmJenkins ? (
           <div className="rounded-md border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
             <Server className="mr-1 inline h-3 w-3 align-[-2px]" />
             {inherited.vmName ? (
@@ -95,6 +120,7 @@ function ConfigForm({
             placeholder="https://jenkins.example.com/job/chex-api/job/dev/"
           />
         </div>
+        {vmJenkins ? null : (
         <div className="space-y-2">
           <Label htmlFor="jk-user">Username</Label>
           <Input
@@ -105,6 +131,8 @@ function ConfigForm({
             placeholder="jenkins user"
           />
         </div>
+        )}
+        {vmJenkins ? null : (
         <div className="space-y-2">
           <Label htmlFor="jk-token">API token</Label>
           <div className="relative">
@@ -130,6 +158,7 @@ function ConfigForm({
             environment.
           </p>
         </div>
+        )}
       </div>
 
       <DialogFooter>

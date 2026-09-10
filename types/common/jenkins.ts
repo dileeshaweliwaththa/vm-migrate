@@ -142,12 +142,37 @@ export interface InheritedJenkinsConfig {
   jenkinsUsername: string;
 }
 
+// A VM's Jenkins server, as the tracker and the config dialog see it. A VM runs
+// one Jenkins, so this is where the server, its user and its token live; an
+// environment only names the *job* on it.
+//
+// Secret-free by construction: `hasToken` is a boolean, never the token.
+export interface VmJenkinsConfig {
+  vmId: string;
+  baseUrl: string;
+  username: string;
+  hasToken: boolean;
+}
+
+export interface VmJenkinsInput {
+  baseUrl: string;
+  username: string;
+  // Blank means "keep the token already stored". The dialog is never sent the
+  // token, so it cannot send one back — an empty field has to mean unchanged.
+  apiToken?: string;
+}
+
 export interface EnvironmentJenkinsConfig {
   jenkinsUrl: string;
   jenkinsUsername: string;
   hasToken: boolean;
   // Null unless this environment has no token and its VM has one to lend.
   inherited: InheritedJenkinsConfig | null;
+  // The **VM's own** Jenkins server, when this environment sits on a machine
+  // that has one. This is where the server and credentials now live, so when it
+  // is set the environment's dialog asks for nothing but the job — the three
+  // credential fields would be a second place to maintain the same thing.
+  vmJenkins: (VmJenkinsConfig & { vmName: string }) | null;
 }
 
 // Write payload from the modal. Token is only sent when (re)set; undefined keeps

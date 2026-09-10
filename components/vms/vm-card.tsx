@@ -2,17 +2,17 @@
 
 import { ChevronDown, ChevronRight, X } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { buildFullUrl, migratedSources } from '@/lib/vm-utils';
-import { PROTOCOLS, type Vm, type VmUrl, type Protocol } from '@/types/common/vm';
-import { CellInput, StatusPill, type VmHandlers } from './vm-fields';
+import type { Vm, VmUrl } from '@/types/common/vm';
+import { VmJenkinsDialog } from './vm-jenkins-dialog';
+import {
+  CellInput,
+  StatusPill,
+  UrlOwnerBadge,
+  VmSelectCheckbox,
+  type VmHandlers,
+} from './vm-fields';
 import { YesNoToggle } from './yes-no-toggle';
 
 // The card arrangement of a VM — the same data, the same handlers, and the same
@@ -68,28 +68,9 @@ function UrlItem({
           className="w-16 shrink-0 text-center font-semibold text-ink-accent"
           readOnly={readOnly}
         />
-        {canWrite ? (
-          <Select
-            value={url.proto}
-            onValueChange={(v) => h.onUrlCommit(vm.id, url.id, { proto: v as Protocol })}
-          >
-            <SelectTrigger size="sm" className="h-8 flex-1">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {PROTOCOLS.map((p) => (
-                <SelectItem key={p} value={p}>
-                  {p}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        ) : (
-          <div className="flex h-8 flex-1 items-center rounded-md border border-border bg-muted/40 px-3 text-sm">
-            {url.proto}
-          </div>
-        )}
-        {canWrite ? (
+        {/* VM-owned rows only — a project's record is deleted from its project
+            (the badge below links there), same rule as the grid. */}
+        {canWrite && !url.environmentId ? (
           <button
             type="button"
             onClick={() => h.onDeleteUrl(vm.id, url.id)}
@@ -110,10 +91,14 @@ function UrlItem({
         readOnly={readOnly}
       />
 
-      {/* The built address, same helper as the grid's "Full New URL" column. */}
-      <p className="truncate font-mono text-label-mono text-muted-foreground">
-        {full || <span className="text-muted-foreground/60">auto-built</span>}
-      </p>
+      {/* The built address, same helper as the grid's "Full New URL" column, and
+          the owner badge the grid puts in its Name column. */}
+      <div className="flex min-w-0 items-center justify-between gap-2">
+        <p className="truncate font-mono text-label-mono text-muted-foreground">
+          {full || <span className="text-muted-foreground/60">auto-built</span>}
+        </p>
+        <UrlOwnerBadge url={url} />
+      </div>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <div className="flex items-center gap-1.5">
@@ -157,6 +142,7 @@ export function VmCard({
   allDeleted,
   h,
   canWrite,
+  selected = false,
 }: {
   vm: Vm;
   allVms: Vm[];
@@ -165,6 +151,9 @@ export function VmCard({
   // Editor+ — false for a viewer. Expand/collapse stays available either way: it
   // is local view state, not data.
   canWrite: boolean;
+  // Ticked for grouping — the same flag the grid row takes, so a VM selected in
+  // one view is selected in the other.
+  selected?: boolean;
 }) {
   const readOnly = !canWrite;
   const sources = migratedSources(vm, allVms, allDeleted);
@@ -174,6 +163,15 @@ export function VmCard({
     <Card className="min-w-0 rounded-lg shadow-none transition-colors hover:border-input">
       <CardHeader className="gap-2 p-4 pb-3">
         <div className="flex items-start justify-between gap-2">
+          {/* Ahead of the name, where the grid's tick also sits. */}
+          {canWrite ? (
+            <VmSelectCheckbox
+              checked={selected}
+              onCheckedChange={() => h.onToggleSelect(vm.id)}
+              label={`Select ${vm.name || 'this VM'}`}
+              className="mt-2 shrink-0"
+            />
+          ) : null}
           <CellInput
             value={vm.name}
             placeholder="vm-name"
@@ -184,6 +182,7 @@ export function VmCard({
           />
           {canWrite ? (
             <div className="flex shrink-0 items-center gap-1">
+              <VmJenkinsDialog vm={vm} canWrite={canWrite} />
               <button
                 type="button"
                 onClick={() => h.onToggleClient(vm)}

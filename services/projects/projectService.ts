@@ -12,7 +12,12 @@ import { upsertTags, replaceProjectTags } from '@/repositories/tags/tagRepositor
 import { getCurrentRole } from '@/services/auth/authService';
 import { isAdmin } from '@/lib/rbac';
 import type { Project, ProjectDetail, ProjectInput } from '@/types/common/project';
-import { rowToProject, rowToEnvironment, slugify } from '@/services/projects/mappers';
+import {
+  collectProjectEnvironments,
+  rowToProject,
+  rowToEnvironment,
+  slugify,
+} from '@/services/projects/mappers';
 import { annotateJenkinsInheritance } from '@/services/jenkins/inheritance';
 
 // Service layer: business logic for projects. Maps rows to domain types and
@@ -71,7 +76,16 @@ export const getProject = async (id: string): Promise<ProjectDetail | null> => {
   // `services/jenkins/inheritance` rather than `jenkinsService`, which imports
   // *this* module and would close a cycle.
   const environments = await annotateJenkinsInheritance(envRows.map(rowToEnvironment));
-  return { ...rowToProject(row), environments };
+  // The by-id select doesn't embed environments, so the row mapper's count and
+  // summary list come back empty — fill both from the environments just read
+  // rather than leaving a detail payload that contradicts its own `environments`
+  // array.
+  return {
+    ...rowToProject(row),
+    environmentCount: environments.length,
+    environmentSummaries: collectProjectEnvironments(envRows),
+    environments,
+  };
 };
 
 export const createProject = async (input: ProjectInput): Promise<Project> => {

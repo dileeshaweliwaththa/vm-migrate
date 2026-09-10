@@ -16,11 +16,12 @@ credentials that can *trigger deployments*. So the assets, in order of value:
 
 | Asset | Where | Who may reach it |
 | ----- | ----- | ---------------- |
-| Jenkins API tokens | `environment_secrets` | **nobody** via any client; server code only |
+| Jenkins API tokens | `environment_secrets`, `vm_jenkins_secrets` | **nobody** via any client; server code only |
+| Backup DB passwords + Azure connection strings | `backup_target_secrets` | **nobody** via any client; server code only |
 | Gemini API key | `app_settings.gemini_api_key` | admins (write-only), server code (read) |
 | Supabase service-role key | server env var | server process only |
 | Ability to trigger a deploy | Jenkins, via the app | every signed-in role |
-| Infrastructure inventory | `vms`, `vm_urls`, `projects`, `environments`, `environment_ports` | every signed-in user (read) |
+| Infrastructure inventory | `vms`, `vm_groups`, `vm_jenkins`, `backup_targets`, `projects`, `environments`, `endpoints` | every signed-in user (read) |
 
 The adversaries worth designing against, in order:
 
@@ -59,7 +60,8 @@ Verified in this review:
   `public.current_user_role()`. `profiles` has **no self-update policy**, so a
   viewer cannot promote themselves — role changes are admin-only, in Postgres, not
   just in the app.
-- `environment_secrets` has RLS on with **no policies at all**: unreachable by any
+- `environment_secrets`, `vm_jenkins_secrets` and `backup_target_secrets` have RLS
+  on with **no policies at all**: unreachable by any
   authenticated client, by construction rather than by policy logic.
 
 ### Service-role paths are the load-bearing ones
@@ -135,9 +137,15 @@ three files today — that grep is the audit.
 
 ## SSRF
 
-The Jenkins integration is the only place the server makes outbound requests to a
-URL that came from a user, so it is the whole SSRF surface. Two distinct problems
-live here, and only one of them is closed.
+Two integrations make outbound requests to a URL that came from a user, and
+together they are the whole SSRF surface: **Jenkins** (an environment's server,
+now the VM's — see [jenkins-sync.md](./jenkins-sync.md)) and the **backup
+services** (a registry row's `base_url` — see [backups.md](./backups.md)). They
+share one host denylist, `isDeniedOutboundTarget` in
+[lib/outbound-url.ts](../lib/outbound-url.ts): a denylist that exists twice is one
+that gets updated once.
+
+The Jenkins side has two distinct problems, and only one of them is closed.
 
 **Closed: the token cannot leave the configured server.** Every URL reaching
 `jenkinsRepository` is first re-mounted on the environment's own server root by
@@ -164,8 +172,17 @@ back to them is not the response body, but it is not nothing: distinct messages 
 and `extractPorts` returns port-like numbers found in whatever document was
 fetched. See [A1](#a1) for why this is accepted rather than fixed.
 
+The **backup services** carry the same accepted half and none of the token
+problem: there is no credential to leak, because the service's API takes none
+(see [A8](#a8)). `backupService.resolveTarget` refuses a denied address on
+**every** call rather than only when the row was written — a row saved before a
+rule tightened is not a reason to fetch it — and no response body is reflected:
+the page renders a status, a database list and a history, all mapped through our
+own types and enums.
+
 One target class *is* refused outright, at save time and on every use
-(`isDeniedJenkinsTarget` in [lib/jenkins-url.ts](../lib/jenkins-url.ts)):
+(`isDeniedOutboundTarget`, wrapped as `isDeniedJenkinsTarget` in
+[lib/jenkins-url.ts](../lib/jenkins-url.ts)):
 link-local addresses (`169.254.0.0/16`, `fe80::/10`), `metadata.google.internal`,
 and the unspecified address. Those carry the cloud instance-metadata endpoints and
 never answer a Jenkins server, so refusing them costs nothing. Private ranges are
@@ -291,12 +308,28 @@ something deliberate in the Supabase dashboard rather than left at defaults, sin
 a 6-digit code is the entire authentication factor. Sign-in *is* enumeration-safe:
 the response is identical for registered and unregistered addresses.
 
-**A5 — Everyone reads everything.** See [Threat model](#threat-model).
+**A5 — Everyone reads everything.** See [Threat model](#threat-model). One
+deliberate exception: downloading a database dump
+([backups.md](./backups.md#downloading-goes-through-the-portal)) is editor+,
+because it hands over the contents of every table rather than metadata about
+them.
 
 **A6 — Unexpected failures return their message verbatim.** A 500 from a route can
 carry Postgres or provider text, which leaks schema and internal detail to an
 authenticated user. Bounded by the fact that all readers are already trusted with
 the data; worth normalizing if the audience widens.
+
+<a id="a8"></a>
+**A8 — A backup worker's own API is unauthenticated.** `upview-db-backup-tracker`
+gates its web UI with a login but not its API: every `/api/*` route is open and
+`cors()` is on. So anyone who can reach a backup host can already list, trigger
+and **delete** dumps without this app. What the portal adds is a button in front of it,
+behind our own RBAC (run = editor; schedule, dump deletion and target removal =
+admin, see [backups.md](./backups.md#permissions)). Fixing it belongs in the
+worker: a token on the mutating routes, stored in `backup_target_secrets`
+alongside the credentials that are already there
+([#90](https://github.com/kodplex/upview-vm-tracker/issues/90)). Until then, the
+control that matters is network reach to port 2999.
 
 **A7 — Deployment authority is effectively "editor".** An editor can change any
 environment's Jenkins credentials and job, and any signed-in user can trigger a

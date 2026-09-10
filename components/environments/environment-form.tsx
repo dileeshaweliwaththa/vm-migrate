@@ -38,10 +38,15 @@ export function EnvironmentForm({
   projectId,
   environment,
   trigger,
+  // Fired after a successful save. The environments section uses it to clear its
+  // environment filter, so a newly added environment can't land behind a filter
+  // that hides it — the save would otherwise look like it did nothing.
+  onSaved,
 }: {
   projectId: string;
   environment?: Environment;
   trigger: React.ReactNode;
+  onSaved?: () => void;
 }) {
   const { addEnvironment, updateEnvironment } = useEnvironmentMutations(projectId);
   const [open, setOpen] = useState(false);
@@ -65,6 +70,7 @@ export function EnvironmentForm({
     const done = (message: string) => {
       toast.success(message);
       setOpen(false);
+      onSaved?.();
     };
     const fail = (e: unknown) => toast.error(e instanceof Error ? e.message : 'Something went wrong.');
 
@@ -131,10 +137,18 @@ export function EnvironmentForm({
               environment card{environment ? '' : ', once this environment exists'}.
             </p>
           ) : null}
-          <div className="space-y-2">
-            <Label htmlFor="e-deploy">Deployed URL</Label>
-            <Input id="e-deploy" value={deployUrl} onChange={(e) => setDeployUrl(e.target.value)} placeholder="https://api.example.com" />
-          </div>
+          {/* Jenkins environments don't carry a hand-typed deployed URL: their
+              address comes from the Jenkins configuration (the server is the
+              VM's, the job is the environment's) and each record has its own
+              domain. A second box for it was one more field to keep in sync with
+              nothing reading it. Every other provider still needs it — that is
+              the only place its live address is recorded. */}
+          {cicdProvider === 'jenkins' ? null : (
+            <div className="space-y-2">
+              <Label htmlFor="e-deploy">Deployed URL</Label>
+              <Input id="e-deploy" value={deployUrl} onChange={(e) => setDeployUrl(e.target.value)} placeholder="https://api.example.com" />
+            </div>
+          )}
           <VmField value={vm} onChange={setVm} />
           <div className="space-y-2">
             <Label htmlFor="e-notes">Notes</Label>

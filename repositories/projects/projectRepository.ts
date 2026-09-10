@@ -18,7 +18,13 @@ export const findAllProjects = async (): Promise<ProjectRow[]> => {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from('projects')
-    .select('*, environments(count), project_tags(tags(name))')
+    // The environments come back as rows, not as a `count` aggregate: the list
+    // card's hover breakdown names each environment and the VM behind it, and one
+    // row per environment carries both that and the tally
+    // (`environments.length`).
+    .select(
+      '*, environments(id, name, vm_id, vms(name, old_ip, new_ip, migrated)), project_tags(tags(name))'
+    )
     .order('created_at', { ascending: true });
   if (error) throw new Error(error.message);
   return (data ?? []) as ProjectRow[];
@@ -39,7 +45,7 @@ export const findProjectEnvironments = async (projectId: string): Promise<Enviro
   const supabase = await createClient();
   const { data, error } = await supabase
     .from('environments')
-    .select('*, environment_ports(*), vms(name, old_ip, new_ip, migrated)')
+    .select('*, endpoints(*), vms(name, old_ip, new_ip, migrated)')
     .eq('project_id', projectId)
     .order('position', { ascending: true });
   if (error) throw new Error(error.message);

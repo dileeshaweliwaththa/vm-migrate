@@ -17,8 +17,13 @@ import {
   Settings2,
   Trash2,
 } from 'lucide-react';
-import type { Environment, EnvironmentPort, ProjectDetail } from '@/types/common/project';
-import { providerHasBranch, providerHasPorts } from '@/types/common/project';
+import type {
+  Environment,
+  EnvironmentName,
+  EnvironmentPort,
+  ProjectDetail,
+} from '@/types/common/project';
+import { ENVIRONMENT_NAMES, providerHasBranch, providerHasPorts } from '@/types/common/project';
 import type { Protocol } from '@/types/common/vm';
 import { recordLiveUrl } from '@/lib/endpoints';
 
@@ -41,6 +46,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import {
   Table,
   TableBody,
@@ -67,6 +73,10 @@ import { JenkinsJobsDialog } from '@/components/environments/jenkins-jobs-dialog
 import { JenkinsHistoryDialog } from '@/components/environments/jenkins-history-dialog';
 import { DockerImportDialog } from '@/components/environments/docker-import-dialog';
 
+// The switcher's "show everything" value. Not an environment name, so it can
+// never collide with one.
+const ALL_ENVIRONMENTS = 'all';
+
 // `canEdit` gates configuration (records, ports, credentials, deletes).
 // `canBuild` gates running a job and seeing its history — true for every
 // signed-in role, viewers included, because each run is recorded against the user
@@ -80,6 +90,35 @@ export function EnvironmentsSection({
   canEdit: boolean;
   canBuild: boolean;
 }) {
+  // Which *stage* the page is showing, or every one of them. Each card is a full
+  // table of records, so four stacked is four screens of scrolling to find one —
+  // the switcher narrows the page to the stage you're working in.
+  //
+  // Grouped by name, not one button per environment: a project can run four
+  // PRODUCTIONs on four hosts, and four PRODUCTION buttons is the pile the
+  // switcher was supposed to clear up. So PRODUCTION means every production
+  // deployment, and the bar is never longer than All + DEV/STAGE/PRODUCTION.
+  const [shown, setShown] = useState<string>(ALL_ENVIRONMENTS);
+
+  // Only the stages this project actually has, in lifecycle order — the order
+  // `ENVIRONMENT_NAMES` declares — rather than whatever order the rows came in.
+  const stages = useMemo(
+    () =>
+      ENVIRONMENT_NAMES.filter((name) =>
+        project.environments.some((env) => env.name === name)
+      ),
+    [project.environments]
+  );
+
+  // Falls back to showing everything if the selected stage is gone (its last
+  // environment was just deleted) rather than leaving the page empty with a
+  // switcher pointing at nothing.
+  const selected = stages.includes(shown as EnvironmentName) ? shown : ALL_ENVIRONMENTS;
+  const visible =
+    selected === ALL_ENVIRONMENTS
+      ? project.environments
+      : project.environments.filter((env) => env.name === selected);
+
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between">
@@ -87,6 +126,10 @@ export function EnvironmentsSection({
         {canEdit ? (
           <EnvironmentForm
             projectId={project.id}
+            // A new environment is the one you want to look at, and it can't be
+            // the one the filter is pinned to — so drop back to All and let it
+            // show up.
+            onSaved={() => setShown(ALL_ENVIRONMENTS)}
             trigger={
               <Button size="sm" variant="outline">
                 <Plus className="mr-2 h-4 w-4" /> Add Environment
@@ -96,6 +139,50 @@ export function EnvironmentsSection({
         ) : null}
       </div>
 
+      {/* One stage needs no switcher — "All" and the single button would filter to
+          the same thing, four PRODUCTIONs included. `ToggleGroup`, not `ui/tabs`:
+          the generated tabs primitive styles on Radix 2.x boolean data attributes
+          that 1.4.3 never emits and renders as an empty block
+          (docs/ui-guidelines.md). Same treatment as the tag filter on the
+          projects list, so the two read as one control. */}
+      {stages.length > 1 ? (
+        <ToggleGroup
+          type="single"
+          value={selected}
+          // Radix clears the value when you press the active item; keep a
+          // selection either way, and let that press mean "back to all".
+          onValueChange={(v) => setShown(v || ALL_ENVIRONMENTS)}
+          className="flex-wrap justify-start gap-1 rounded-sm border border-border bg-muted p-1"
+        >
+          <ToggleGroupItem
+            value={ALL_ENVIRONMENTS}
+            className="rounded-sm px-3 text-body-sm data-[state=on]:bg-card data-[state=on]:font-medium data-[state=on]:text-foreground"
+          >
+            All
+            <span className="font-mono text-label-mono text-muted-foreground">
+              {project.environments.length}
+            </span>
+          </ToggleGroupItem>
+          {stages.map((stage) => {
+            const count = project.environments.filter((env) => env.name === stage).length;
+            return (
+              <ToggleGroupItem
+                key={stage}
+                value={stage}
+                className="rounded-sm px-3 text-body-sm data-[state=on]:bg-card data-[state=on]:font-medium data-[state=on]:text-foreground"
+              >
+                <span className="text-label-caps uppercase">{stage}</span>
+                {/* Only where it tells you something: a stage with one
+                    deployment doesn't need to say "1". */}
+                {count > 1 ? (
+                  <span className="font-mono text-label-mono text-muted-foreground">{count}</span>
+                ) : null}
+              </ToggleGroupItem>
+            );
+          })}
+        </ToggleGroup>
+      ) : null}
+
       {project.environments.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border py-10 text-center text-body-sm text-muted-foreground">
           No environments yet.
@@ -104,7 +191,7 @@ export function EnvironmentsSection({
         // 24px between cards — `lg` on the design's spacing scale, which is what
         // it uses "between distinct sections or cards".
         <div className="space-y-6">
-          {project.environments.map((env) => (
+          {visible.map((env) => (
             <EnvironmentCard
               key={env.id}
               projectId={project.id}
@@ -626,7 +713,12 @@ function EnvironmentCard({
               Jenkins <ExternalLink className="h-3 w-3" />
             </a>
           ) : null}
-          {env.deployUrl ? (
+          {/* Not on a Jenkins environment: its address is the Jenkins wiring and its
+              records' own domains, so the Add/Edit form doesn't ask for a
+              deployed URL. Gating on the provider rather than on the value hides
+              it for environments configured before that too, without touching
+              their stored value. */}
+          {env.deployUrl && !isJenkins ? (
             <a
               href={env.deployUrl}
               target="_blank"
