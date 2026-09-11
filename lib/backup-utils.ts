@@ -115,7 +115,7 @@ export interface BackupDay {
   localOnly: number;
 }
 
-// A nightly run over eighteen databases is eighteen rows, so 200 records is a
+// A nightly run over eighteen databases is eighteen rows, so 200 records is a 
 // fortnight of near-identical lines. Grouped by day they become "the 13th ran,
 // all uploaded" — one line to check, openable when it isn't.
 //
