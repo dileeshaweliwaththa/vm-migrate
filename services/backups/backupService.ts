@@ -13,22 +13,30 @@ import {
   findBackupTargetSecretFlags,
   setBackupTargetSecrets,
 } from '@/repositories/backupTargets/backupTargetSecretRepository';
-import * as api from '@/repositories/backups/backupApiRepository';
+import {
+  countRunningBackups,
+  findBackupRunById,
+  findBackupRuns,
+  findLatestBatchEvents,
+  type BackupRunRow,
+} from '@/repositories/backupRuns/backupRunRepository';
+import {
+  deleteBlob,
+  downloadBlob,
+  listBlobs,
+  type BlobSummary,
+} from '@/repositories/azure/azureBlobRepository';
 import { getAuthenticatedUser } from '@/repositories/auth/authRepository';
 import { getCurrentRole } from '@/services/auth/authService';
+import { listTargetDatabases, startBackup } from '@/services/backups/backupRunner';
+import { getStorageForWrite } from '@/services/backups/backupStorageService';
 import { canEdit, isAdmin } from '@/lib/rbac';
 import { ForbiddenError } from '@/lib/errors';
-import { isDeniedOutboundTarget, normalizeServiceUrl } from '@/lib/outbound-url';
-import type {
-  BackupDispatchRow,
-  BackupTargetRow,
-} from '@/types/supabase/response/backupTargets';
+import type { BackupDispatchRow, BackupTargetRow } from '@/types/supabase/response/backupTargets';
 import {
   BACKUP_DISPATCH_SOURCES,
   BACKUP_DISPATCH_STATUSES,
   BACKUP_STATUSES,
-  BACKUP_TRIGGERS,
-  BACKUP_WORKER_PORT,
   type BackupDispatch,
   type BackupDispatchSource,
   type BackupDispatchStatus,
@@ -38,33 +46,26 @@ import {
   type BackupTarget,
   type BackupTargetInput,
   type BackupTargetOverview,
-  type BackupTrigger,
-  type BackupWorkerStatus,
+  type BackupTargetStatus,
 } from '@/types/common/backup';
 
 // Service layer: database backups.
 //
-// Supabase owns the **configuration**, the **credentials** and the **schedule**:
-// a target row says what to connect to, where the dumps go and when, its
-// password and Azure connection string live in a service-role-only table, and
-// pg_cron fires the `backup-dispatch` Edge Function on the target's own cron
-// expression.
+// Everything about a backup now lives in this app and in Supabase:
 //
-// The worker container owns the **dumping**. That split is not a preference:
-// Edge Functions cap CPU time at 2s with 256MB of memory and no mysqldump, and
-// one of these databases is 64MB and takes 245s of real work. See
-// docs/backups.md.
+//   * configuration + credentials → `backup_targets` / `backup_target_secrets`
+//   * the schedule                → pg_cron, calling this app's own route
+//   * the dump                    → `backupRunner`, streaming into Azure Blob
+//   * the history and the log     → `backup_runs` / `backup_run_events`
 //
-// So this module does three things: enforce who may press what, turn another
-// app's JSON into types the UI can trust, and never let a credential out.
+// There is no worker container in the path any more, so there is nothing to be
+// unreachable, out of step with this configuration, or holding a copy of a dump
+// on a local disk.
+//
+// This module owns the rules — who may press what — and the mapping. The runner
+// owns the work; the repositories own the I/O.
 
 // ---- authorization ---------------------------------------------------------
-//
-// Reading is open to every signed-in role. Registering a target and running a
-// backup are editor work — a run is additive, it only ever creates a dump.
-// Deleting a dump, deleting a target and changing the schedule are the
-// irreversible ones, so they are admin-only: the same line the tracker draws at
-// purge and clear-trash.
 
 const requireEditor = async (action: string): Promise<void> => {
   if (!canEdit(await getCurrentRole())) {
@@ -78,6 +79,11 @@ const requireAdmin = async (action: string): Promise<void> => {
   }
 };
 
+// A `running` row older than this is a run whose container died, not a run in
+// progress — the same window the runner uses to decide whether it may start.
+const STALE_RUN_MS = 3 * 60 * 60 * 1000;
+const staleCutoff = () => new Date(Date.now() - STALE_RUN_MS).toISOString();
+
 // ---- mapping ---------------------------------------------------------------
 
 const rowToTarget = (
@@ -90,17 +96,16 @@ const rowToTarget = (
   dbHost: row.db_host,
   dbPort: row.db_port,
   dbUser: row.db_user,
-  azureAccount: row.azure_account,
-  azureContainer: row.azure_container,
+  storageId: row.storage_id,
+  storageName: row.backup_storage_accounts?.name ?? '',
+  storageContainer: row.backup_storage_accounts?.container ?? '',
+  blobPrefix: row.blob_prefix,
   retentionDays: row.retention_days,
   cronSchedule: row.cron_schedule,
   scheduleEnabled: row.schedule_enabled,
   notes: row.notes,
   position: row.position,
-  // Absent flags mean "not looked up", which reads as not stored. Every path
-  // that shows them looks them up.
   hasDbPassword: flags?.hasDbPassword ?? false,
-  hasAzureConnection: flags?.hasAzureConnection ?? false,
 });
 
 const rowToDispatch = (row: BackupDispatchRow): BackupDispatch => {
@@ -117,84 +122,144 @@ const rowToDispatch = (row: BackupDispatchRow): BackupDispatch => {
   };
 };
 
-// The worker reports one database per record, in an array of one. Flattened here
-// so the UI never reasons about a list that is always length 1.
-const rawToRecord = (raw: api.RawBackup): BackupRecord => {
-  const status = (raw.status ?? '') as BackupStatus;
-  const trigger = (raw.triggerType ?? '') as BackupTrigger;
+const rowToRecord = (row: BackupRunRow): BackupRecord => {
+  const status = row.status as BackupStatus;
   return {
-    id: String(raw.id ?? ''),
-    database: raw.databases?.[0] ?? '',
-    filename: raw.filename ?? '',
-    size: typeof raw.size === 'number' ? raw.size : 0,
-    duration: typeof raw.duration === 'number' ? raw.duration : 0,
-    timestamp: raw.timestamp ?? '',
-    // Validated against our own enums rather than trusted: an unrecognised value
-    // renders as a failure, which is the safe way to be wrong about a backup.
+    id: row.id,
+    database: row.database_name,
+    blobName: row.blob_name,
+    size: Number(row.size_bytes ?? 0),
+    duration: row.duration_ms,
+    timestamp: row.started_at,
     status: BACKUP_STATUSES.includes(status) ? status : 'failed',
-    error: raw.error ?? '',
-    trigger: BACKUP_TRIGGERS.includes(trigger) ? trigger : 'auto',
-    azureUploaded: Boolean(raw.azureUploaded),
-    azureUrl: raw.azureBlobUrl ?? '',
-    azureError: raw.azureError ?? '',
+    error: row.error,
+    // The dispatch vocabulary is `schedule`/`manual`; the history column has
+    // always said `auto`/`manual`.
+    trigger: row.source === 'schedule' ? 'auto' : 'manual',
+    batchId: row.batch_id,
   };
 };
 
-const unreachable = (error: string): BackupWorkerStatus => ({
-  reachable: false,
-  error,
-  host: '',
-  port: 0,
-  cronSchedule: '',
-  cronEnabled: false,
-  isBackupRunning: false,
-  azureEnabled: false,
-  azureContainer: '',
-});
+// ---- the dumps Azure has that we have no row for ---------------------------
 
-const rawToStatus = (raw: api.RawStatus): BackupWorkerStatus => ({
-  reachable: true,
-  error: '',
-  host: raw.host ?? '',
-  port: typeof raw.port === 'number' ? raw.port : 0,
-  cronSchedule: raw.cronSchedule ?? '',
-  cronEnabled: Boolean(raw.cronEnabled),
-  isBackupRunning: Boolean(raw.isBackupRunning),
-  azureEnabled: Boolean(raw.azureEnabled),
-  azureContainer: raw.azureContainerName ?? '',
-});
+// **The container is the truth about which backups exist.** A `backup_runs` row
+// records how a run went — who asked, how long it took, why it failed — but it
+// only exists for runs *this app* performed. Every dump taken before that (by
+// the worker this feature replaced) is still in Azure, and a history that
+// ignored them would report zero backups for a database with months of them.
+//
+// So history is the union: the run rows, plus every blob no row accounts for.
+const BLOB_RECORD_PREFIX = 'blob_';
 
-// What to say when a worker didn't answer. The status code matters: a refused
-// connection and a 502 from a proxy in front of a stopped container send you to
-// different places.
-const statusError = (result: api.ApiResult<unknown>): string => {
-  if (result.status === 0) return result.error ?? 'The worker could not be reached.';
-  return `The worker answered HTTP ${result.status}.`;
+// A run's id is a UUID; a blob's is its path, which contains slashes. Record ids
+// are interpolated into a route path (`/records/:recordId/download`), so a raw
+// path would split into several segments and match nothing — hence base64url,
+// which keeps the id one opaque segment needing no escaping.
+const encodeBlobId = (name: string): string =>
+  `${BLOB_RECORD_PREFIX}${Buffer.from(name, 'utf8').toString('base64url')}`;
+
+const decodeBlobId = (id: string): string =>
+  Buffer.from(id.slice(BLOB_RECORD_PREFIX.length), 'base64url').toString('utf8');
+
+// What a blob can tell us is its path, its size and when it was written. The
+// rest is honestly absent rather than invented — `duration: 0` renders as "—".
+const blobToRecord = (blob: BlobSummary): BackupRecord => {
+  const segments = blob.name.split('/');
+  return {
+    // Prefixed so the download and delete paths can tell the two kinds of record
+    // apart: one id is a row, this one is an encoded blob path.
+    id: encodeBlobId(blob.name),
+    // `<prefix>/<database>/<file>`, or the older `<database>/<file>` — either
+    // way the database is the second-to-last segment.
+    database: segments.length >= 2 ? segments[segments.length - 2] : '',
+    blobName: blob.name,
+    size: blob.size,
+    duration: 0,
+    timestamp: blob.createdAt,
+    // The blob exists, so the dump was written. A failed dump leaves none.
+    status: 'success',
+    error: '',
+    // Unknowable from a blob, and these are overwhelmingly scheduled runs.
+    trigger: 'auto',
+    batchId: '',
+  };
 };
 
-// ---- reaching a worker -----------------------------------------------------
-
-// Resolves a registered target to the worker address we may actually fetch, or
-// an error saying why not.
+// Which blobs in a shared container belong to this target.
 //
-// The denylist check happens **here**, on every call, rather than only when the
-// URL is saved: the row could have been written before a rule tightened, and a
-// URL that "is already in the table" is not a reason to fetch it. See
-// docs/security.md § SSRF.
-const resolveWorker = async (
-  id: string
-): Promise<{ ok: true; target: BackupTarget } | { ok: false; message: string }> => {
-  const row = await findBackupTargetById(id);
-  if (!row) return { ok: false, message: 'Backup target not found.' };
+// Two layouts coexist. This app writes `<target prefix>/<database>/<file>`, so
+// those attribute exactly. The older flat `<database>/<file>` has nothing to
+// attribute by, so it is claimed only when exactly one target still carries the
+// legacy `azure_container` for that container — with two candidates, showing
+// them under neither is better than showing them under the wrong server.
+const blobBelongsToTarget = (
+  blobName: string,
+  target: BackupTargetRow,
+  siblings: BackupTargetRow[],
+  container: string
+): boolean => {
+  const segments = blobName.split('/');
+  if (segments.length >= 3) {
+    return Boolean(target.blob_prefix) && segments[0] === target.blob_prefix;
+  }
+  if (segments.length === 2) {
+    const legacy = siblings.filter(
+      (row) => row.azure_container === container && row.storage_id === target.storage_id
+    );
+    return legacy.length === 1 && legacy[0].id === target.id;
+  }
+  // A blob at the container root belongs to no database folder.
+  return false;
+};
 
-  const target = rowToTarget(row);
-  if (!target.workerUrl.trim()) {
-    return { ok: false, message: 'This target has no backup worker address set.' };
-  }
-  if (isDeniedOutboundTarget(target.workerUrl)) {
-    return { ok: false, message: 'That worker address is not allowed.' };
-  }
-  return { ok: true, target };
+// Lists each distinct destination **once**, however many targets share it: the
+// index page renders every target, and they all point at the same container.
+const listBlobsPerStorage = async (
+  rows: BackupTargetRow[]
+): Promise<Map<string, { container: string; blobs: BlobSummary[] }>> => {
+  const ids = [...new Set(rows.map((row) => row.storage_id).filter((id): id is string => !!id))];
+
+  const entries = await Promise.all(
+    ids.map(async (id) => {
+      const storage = await getStorageForWrite(id);
+      if (!storage.ok) return null;
+      try {
+        const blobs = await listBlobs(storage.connectionString, storage.container);
+        return [id, { container: storage.container, blobs }] as const;
+      } catch {
+        // Azure being unreachable costs us the older dumps, not the page — the
+        // run rows are still a complete record of what this app did.
+        return null;
+      }
+    })
+  );
+
+  return new Map(entries.filter((entry): entry is NonNullable<typeof entry> => entry !== null));
+};
+
+// A target's history: its run rows, plus the blobs those rows don't cover.
+const collectRecords = (
+  target: BackupTargetRow,
+  siblings: BackupTargetRow[],
+  runs: BackupRunRow[],
+  listed: Map<string, { container: string; blobs: BlobSummary[] }>
+): BackupRecord[] => {
+  const records = runs.map(rowToRecord);
+
+  const found = target.storage_id ? listed.get(target.storage_id) : undefined;
+  if (!found) return records;
+
+  const accountedFor = new Set(runs.map((run) => run.blob_name).filter(Boolean));
+  const fromBlobs = found.blobs
+    .filter(
+      (blob) =>
+        !accountedFor.has(blob.name) &&
+        blobBelongsToTarget(blob.name, target, siblings, found.container)
+    )
+    .map(blobToRecord);
+
+  // Newest first, which is the order every consumer of this list wants.
+  return [...records, ...fromBlobs].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 };
 
 // ---- the registry ----------------------------------------------------------
@@ -202,16 +267,11 @@ const resolveWorker = async (
 const inputToColumns = (input: BackupTargetInput): BackupTargetWriteColumns => {
   const cols: BackupTargetWriteColumns = {};
   if (input.name !== undefined) cols.name = input.name.trim();
-  // `20.197.41.68` in, `http://20.197.41.68:2999` out — 2999 is the worker's own
-  // default port, so the address is normally just the machine's.
-  if (input.workerUrl !== undefined) {
-    cols.worker_url = normalizeServiceUrl(input.workerUrl, BACKUP_WORKER_PORT);
-  }
   if (input.dbHost !== undefined) cols.db_host = input.dbHost.trim();
   if (input.dbPort !== undefined) cols.db_port = input.dbPort;
   if (input.dbUser !== undefined) cols.db_user = input.dbUser.trim();
-  if (input.azureAccount !== undefined) cols.azure_account = input.azureAccount.trim();
-  if (input.azureContainer !== undefined) cols.azure_container = input.azureContainer.trim();
+  // Null is meaningful (no destination), so this tests for `undefined`.
+  if (input.storageId !== undefined) cols.storage_id = input.storageId;
   if (input.retentionDays !== undefined) cols.retention_days = input.retentionDays;
   if (input.cronSchedule !== undefined) cols.cron_schedule = input.cronSchedule.trim();
   if (input.scheduleEnabled !== undefined) cols.schedule_enabled = input.scheduleEnabled;
@@ -221,19 +281,29 @@ const inputToColumns = (input: BackupTargetInput): BackupTargetWriteColumns => {
 };
 
 // A five-field cron expression, which is what pg_cron takes. Checked here
-// because the alternative is a `cron.schedule` that throws inside a trigger and
-// fails the whole write with a Postgres message.
-const isCronExpression = (value: string): boolean =>
-  value.trim().split(/\s+/).length === 5;
+// because the alternative is `cron.schedule` throwing inside the trigger and
+// failing the whole write with a Postgres message.
+const isCronExpression = (value: string): boolean => value.trim().split(/\s+/).length === 5;
+
+// A target's folder inside the shared container. Kept to characters that are
+// unambiguous in a blob path.
+const slugify = (value: string): string =>
+  value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60) || 'target';
 
 const assertWritable = (cols: BackupTargetWriteColumns): void => {
-  if (cols.worker_url !== undefined) {
-    if (!cols.worker_url) throw new Error('The backup worker address is required.');
-    if (isDeniedOutboundTarget(cols.worker_url)) {
-      throw new Error('That worker address is not allowed.');
-    }
+  if (cols.db_host !== undefined && !cols.db_host) {
+    throw new Error('The database host is required.');
   }
-  if (cols.cron_schedule !== undefined && cols.cron_schedule && !isCronExpression(cols.cron_schedule)) {
+  if (
+    cols.cron_schedule !== undefined &&
+    cols.cron_schedule &&
+    !isCronExpression(cols.cron_schedule)
+  ) {
     throw new Error('The schedule must be a five-field cron expression, e.g. 0 2 * * *.');
   }
   if (cols.db_port !== undefined && (cols.db_port < 1 || cols.db_port > 65535)) {
@@ -254,18 +324,16 @@ export const createBackupTarget = async (input: BackupTargetInput): Promise<Back
   await requireEditor('add a backup target');
 
   const cols = inputToColumns(input);
-  if (cols.worker_url === undefined) throw new Error('The backup worker address is required.');
+  if (!cols.db_host) throw new Error('The database host is required.');
   assertWritable(cols);
-  // Named after the database server when no name is given, so the card is never
-  // blank.
-  if (!cols.name) cols.name = cols.db_host || cols.worker_url.replace(/^https?:\/\//, '');
+  if (!cols.name) cols.name = cols.db_host;
+  // Derived once, here, and never rewritten: retention deletes by age within
+  // this prefix, so changing it later would orphan everything under the old one.
+  cols.blob_prefix = slugify(cols.name);
   if (cols.position === undefined) cols.position = await countBackupTargets();
 
   const row = await insertBackupTarget(cols);
-  await setBackupTargetSecrets(row.id, {
-    dbPassword: input.dbPassword,
-    azureConnectionString: input.azureConnectionString,
-  });
+  await setBackupTargetSecrets(row.id, { dbPassword: input.dbPassword });
 
   const flags = await findBackupTargetSecretFlags([row.id]);
   return rowToTarget(row, flags.get(row.id));
@@ -275,9 +343,9 @@ export const updateBackupTarget = async (
   id: string,
   input: BackupTargetInput
 ): Promise<BackupTarget> => {
-  // The schedule is admin-only, and it travels in the same payload as the rest
-  // of the configuration — so the *presence* of a schedule field is what raises
-  // the bar, rather than a second route nobody would notice was unguarded.
+  // The schedule is admin-only and travels in the same payload as the rest of
+  // the configuration, so the *presence* of a schedule field is what raises the
+  // bar — rather than a second route nobody would notice was unguarded.
   if (input.cronSchedule !== undefined || input.scheduleEnabled !== undefined) {
     await requireAdmin("change a backup target's schedule");
   } else {
@@ -292,69 +360,94 @@ export const updateBackupTarget = async (
   // an empty field cannot mean "clear it".
   await setBackupTargetSecrets(id, {
     dbPassword: input.dbPassword?.trim() ? input.dbPassword : undefined,
-    azureConnectionString: input.azureConnectionString?.trim()
-      ? input.azureConnectionString
-      : undefined,
   });
 
   const flags = await findBackupTargetSecretFlags([id]);
   return rowToTarget(row, flags.get(id));
 };
 
-// Removes the target, its credentials (cascade) and its pg_cron job (the
-// trigger). The dumps themselves are untouched: they live on the worker's host
-// and in Azure, and this app never had them.
+// Removes the target, its credentials (cascade), its history rows (cascade) and
+// its pg_cron job (the trigger). **The dumps in Azure are not touched** — they
+// are the backups, and losing the record of them must not lose them.
 export const deleteBackupTarget = async (id: string): Promise<void> => {
   await requireAdmin('remove a backup target');
   await deleteBackupTargetRow(id);
 };
 
-// ---- reading through to a worker -------------------------------------------
+// ---- reading ---------------------------------------------------------------
 
-// Everything the page needs for one target in a single call: its state, the
-// databases it can dump, what it has dumped, and when a run was last asked for.
+// Can this target be backed up right now?
 //
-// A worker that cannot be reached returns an **overview**, not an error: which
-// backups exist is exactly what you want when a host is down, and it is the
-// history that is unavailable, not the page.
+// Answered by asking the server for its databases — the same call the runner
+// makes — so "reachable" means reachable *for a backup*: the host resolves, the
+// password works, and `mysqldump` exists in this image. A cheaper ping would
+// report a health this feature cannot act on.
+const resolveStatus = async (
+  target: BackupTarget,
+  isRunning: boolean
+): Promise<{ status: BackupTargetStatus; databases: string[] }> => {
+  // "Configured" means a destination is selected *and* its connection string is
+  // stored — a target pointing at an account nobody gave a key to has nowhere to
+  // write, which is the same problem as having no destination at all.
+  const storage = await getStorageForWrite(target.storageId);
+  const base = {
+    host: target.dbHost,
+    port: target.dbPort,
+    isBackupRunning: isRunning,
+    azureConfigured: storage.ok,
+    azureContainer: storage.ok ? storage.container : target.storageContainer,
+  };
+
+  if (!target.dbHost.trim() || !target.hasDbPassword) {
+    return {
+      status: {
+        ...base,
+        reachable: false,
+        error: !target.dbHost.trim()
+          ? 'No database host is set for this target.'
+          : 'No database password is stored for this target.',
+      },
+      databases: [],
+    };
+  }
+
+  const result = await listTargetDatabases(target.id);
+  return {
+    status: {
+      ...base,
+      reachable: result.ok,
+      error: result.ok ? '' : (result.error ?? 'The database could not be reached.'),
+    },
+    databases: result.databases,
+  };
+};
+
 export const getBackupTargetOverview = async (id: string): Promise<BackupTargetOverview> => {
   const row = await findBackupTargetById(id);
   if (!row) throw new Error('Backup target not found.');
 
   const flags = await findBackupTargetSecretFlags([id]);
   const target = rowToTarget(row, flags.get(id));
-  const lastDispatch =
-    (await findRecentBackupDispatches(50))
-      .map(rowToDispatch)
-      .find((dispatch) => dispatch.targetId === id) ?? null;
 
-  if (!target.workerUrl.trim() || isDeniedOutboundTarget(target.workerUrl)) {
-    return {
-      target,
-      status: unreachable(
-        target.workerUrl.trim()
-          ? 'That worker address is not allowed.'
-          : 'This target has no backup worker address set.'
-      ),
-      databases: [],
-      records: [],
-      lastDispatch,
-    };
-  }
-
-  // Three independent reads — run them together rather than in sequence.
-  const [status, databases, backups] = await Promise.all([
-    api.fetchStatus(target.workerUrl),
-    api.fetchDatabases(target.workerUrl),
-    api.fetchBackups(target.workerUrl),
+  const [runs, dispatches, running, siblings, listed] = await Promise.all([
+    findBackupRuns(id),
+    findRecentBackupDispatches(50),
+    countRunningBackups(id, staleCutoff()),
+    // Both are needed to attribute the pre-unification blobs, which carry no
+    // target prefix in their path.
+    findAllBackupTargets(),
+    listBlobsPerStorage([row]),
   ]);
+
+  const { status, databases } = await resolveStatus(target, running > 0);
 
   return {
     target,
-    status: status.ok && status.data ? rawToStatus(status.data) : unreachable(statusError(status)),
-    databases: databases.data?.databases ?? [],
-    records: (backups.data?.backups ?? []).map(rawToRecord),
-    lastDispatch,
+    status,
+    databases,
+    records: collectRecords(row, siblings, runs, listed),
+    lastDispatch:
+      dispatches.map(rowToDispatch).find((dispatch) => dispatch.targetId === id) ?? null,
   };
 };
 
@@ -362,11 +455,10 @@ export const listBackupTargetOverviews = async (): Promise<BackupTargetOverview[
   const rows = await findAllBackupTargets();
   if (rows.length === 0) return [];
 
-  // Read the shared tables once for the whole page, then fan out to the workers
-  // in parallel: one slow or dead host must not delay every other card.
-  const [flags, dispatches] = await Promise.all([
+  const [flags, dispatches, listed] = await Promise.all([
     findBackupTargetSecretFlags(rows.map((row) => row.id)),
     findRecentBackupDispatches(200),
+    listBlobsPerStorage(rows),
   ]);
 
   const latestByTarget = new Map<string, BackupDispatch>();
@@ -376,253 +468,173 @@ export const listBackupTargetOverviews = async (): Promise<BackupTargetOverview[
     if (!latestByTarget.has(dispatch.targetId)) latestByTarget.set(dispatch.targetId, dispatch);
   }
 
+  // In parallel: each target's status opens a connection to its database
+  // server, and one slow host must not delay every other card.
   return Promise.all(
     rows.map(async (row) => {
       const target = rowToTarget(row, flags.get(row.id));
-      const lastDispatch = latestByTarget.get(row.id) ?? null;
-
-      if (!target.workerUrl.trim() || isDeniedOutboundTarget(target.workerUrl)) {
-        return {
-          target,
-          status: unreachable(
-            target.workerUrl.trim()
-              ? 'That worker address is not allowed.'
-              : 'This target has no backup worker address set.'
-          ),
-          databases: [],
-          records: [],
-          lastDispatch,
-        };
-      }
-
-      const [status, databases, backups] = await Promise.all([
-        api.fetchStatus(target.workerUrl),
-        api.fetchDatabases(target.workerUrl),
-        api.fetchBackups(target.workerUrl),
+      const [runs, running] = await Promise.all([
+        findBackupRuns(row.id, 200),
+        countRunningBackups(row.id, staleCutoff()),
       ]);
+      const { status, databases } = await resolveStatus(target, running > 0);
 
       return {
         target,
-        status:
-          status.ok && status.data ? rawToStatus(status.data) : unreachable(statusError(status)),
-        databases: databases.data?.databases ?? [],
-        records: (backups.data?.backups ?? []).map(rawToRecord),
-        lastDispatch,
+        status,
+        databases,
+        records: collectRecords(row, rows, runs, listed),
+        lastDispatch: latestByTarget.get(row.id) ?? null,
       };
     })
   );
 };
 
-// Opens the worker's live progress stream for a route to pipe to the browser.
-// Any signed-in role: watching a backup run is reading.
-export const streamBackupEvents = async (
-  id: string
-): Promise<{ ok: true; response: Response } | { ok: false; message: string }> => {
-  const worker = await resolveWorker(id);
-  if (!worker.ok) return { ok: false, message: worker.message };
-
-  const response = await api.streamBackupEvents(worker.target.workerUrl);
-  if (!response || !response.ok || !response.body) {
-    return { ok: false, message: 'The worker did not open a progress stream.' };
-  }
-  return { ok: true, response };
-};
-
-// A run's progress, from the worker's persisted events — the replay path, for a
-// page opened after a run started.
-//
-// Best-effort by nature: those events are written fire-and-forget into the
-// worker's own MySQL, so a deployment whose `events` table is missing answers
-// with an empty list rather than an error. The live lines come from
-// `streamBackupEvents`.
-//
-// `since` is the last index the client has, so the page asks for the tail.
+// The current (or most recent) run's progress lines. `since` is the last event
+// id the client has, so the page asks for the tail.
 export const getBackupLogs = async (id: string, since: number): Promise<BackupLogPage> => {
-  const worker = await resolveWorker(id);
-  if (!worker.ok) return { sessionId: '', isRunning: false, total: 0, events: [] };
+  const [events, running] = await Promise.all([
+    findLatestBatchEvents(id, Math.max(0, since)),
+    countRunningBackups(id, staleCutoff()),
+  ]);
 
-  const result = await api.fetchLogs(worker.target.workerUrl, Math.max(0, since));
-  const page = result.data;
   return {
-    sessionId: page?.sessionId ?? '',
-    isRunning: Boolean(page?.isRunning),
-    total: typeof page?.total === 'number' ? page.total : 0,
-    // The stored payload is the same structured event the stream sends — a type
-    // and some numbers, no message and no timestamp. `receivedAt` is left empty
-    // here because these lines are a replay: we do not know when they happened,
-    // and inventing a time would be worse than showing none.
-    events: (page?.events ?? []).map((event, i) => ({
-      seq: since + i + 1,
-      type: event.type ?? 'unknown',
-      database: event.database ?? '',
-      index: typeof event.index === 'number' ? event.index : 0,
-      total: typeof event.total === 'number' ? event.total : 0,
-      size: typeof event.size === 'number' ? event.size : 0,
-      azureUploaded: Boolean(event.azureUploaded),
-      azureError: event.azureError ?? '',
-      error: event.error ?? '',
-      receivedAt: '',
+    batchId: events[0]?.batch_id ?? '',
+    isRunning: running > 0,
+    events: events.map((event) => ({
+      seq: event.id,
+      type: event.type,
+      database: event.database_name,
+      message: event.message,
+      timestamp: event.created_at,
     })),
   };
 };
 
-// ---- acting on a target ----------------------------------------------------
+// ---- acting ----------------------------------------------------------------
 
-// Starts a dump now. Additive — it only ever creates a backup — so editor is the
-// bar, and the dispatch row records who asked, which is what keeps a manual run
-// from being anonymous.
+// Starts a run and returns as soon as it has begun — the dump itself takes
+// minutes and is followed through the log, not through this response.
+//
+// Additive (it only ever creates a dump), so editor is the bar, and the dispatch
+// row records who asked. `source: 'schedule'` skips the role check because
+// pg_cron has no session; that path is reachable only from the cron route, which
+// authenticates with its own token.
 export const runBackup = async (
   id: string,
-  databases: string[]
+  databases: string[],
+  source: 'manual' | 'schedule' = 'manual'
 ): Promise<{ ok: boolean; message: string }> => {
-  await requireEditor('run a backup');
+  if (source === 'manual') await requireEditor('run a backup');
 
-  const worker = await resolveWorker(id);
-  if (!worker.ok) return { ok: false, message: worker.message };
-
-  const user = await getAuthenticatedUser();
-  const result = await api.runBackup(
-    worker.target.workerUrl,
-    databases.filter((name) => typeof name === 'string' && name.trim())
-  );
-
-  // 409 is the worker's "already running", which is information rather than a
-  // failure — the page should show the run in progress, not an error.
-  const alreadyRunning = result.status === 409;
-  const failed = !alreadyRunning && (!result.ok || !result.data?.success);
+  const user = source === 'manual' ? await getAuthenticatedUser() : null;
+  const result = await startBackup(id, databases, source, user?.id ?? null);
 
   await insertBackupDispatch({
     target_id: id,
-    source: 'manual',
-    status: failed ? 'failed' : 'dispatched',
-    http_status: result.status,
-    error: failed ? (result.data?.error ?? statusError(result)) : '',
+    source,
+    status: result.ok ? 'dispatched' : 'failed',
+    http_status: 0,
+    error: result.ok ? '' : result.message,
     requested_by: user?.id ?? null,
   });
 
-  if (alreadyRunning) {
-    return { ok: false, message: 'A backup is already running on this worker.' };
-  }
-  if (failed) {
-    return { ok: false, message: result.data?.error ?? statusError(result) };
-  }
-
-  const records = (result.data?.records ?? []).map(rawToRecord);
-  const unsuccessful = records.filter((record) => record.status !== 'success');
-  return {
-    ok: unsuccessful.length === 0,
-    message: unsuccessful.length
-      ? `${records.length - unsuccessful.length}/${records.length} database(s) backed up — ${unsuccessful
-          .map((record) => record.database || 'unknown')
-          .join(', ')} failed.`
-      : `Backed up ${records.length} database(s).`,
-  };
+  return { ok: result.ok, message: result.message };
 };
 
-// Hands back the worker's response for a dump so a route can stream it to the
-// browser. Editor+, unlike the rest of reading: everything else on this page is
-// *metadata* about the backups, while this is the database contents — every row
-// of every table, in one click. Viewers can see that a backup exists and
-// succeeded without being handed the data itself.
+// Turns a history row's id into the blob it names, whichever kind it is: a
+// `backup_runs` row this app wrote, or a blob that was in the container before
+// it.
+//
+// Ownership is re-checked either way. A record id comes from the client, and
+// without this check a crafted `blob:` id could name any blob in a shared
+// container — including another target's dumps, which admins may delete.
+const resolveRecordBlob = async (
+  targetId: string,
+  recordId: string
+): Promise<
+  | { ok: true; storage: { connectionString: string; container: string }; blobName: string }
+  | { ok: false; message: string }
+> => {
+  const row = await findBackupTargetById(targetId);
+  if (!row) return { ok: false, message: 'Backup target not found.' };
+
+  const storage = await getStorageForWrite(row.storage_id);
+  if (!storage.ok) return { ok: false, message: storage.message };
+
+  if (recordId.startsWith(BLOB_RECORD_PREFIX)) {
+    const blobName = decodeBlobId(recordId);
+    const siblings = await findAllBackupTargets();
+    if (!blobBelongsToTarget(blobName, row, siblings, storage.container)) {
+      return { ok: false, message: 'That dump does not belong to this target.' };
+    }
+    return { ok: true, storage, blobName };
+  }
+
+  const run = await findBackupRunById(recordId);
+  if (!run || run.target_id !== targetId) return { ok: false, message: 'Backup not found.' };
+  if (run.status !== 'success' || !run.blob_name) {
+    return { ok: false, message: 'That run produced no dump to download.' };
+  }
+  return { ok: true, storage, blobName: run.blob_name };
+};
+
+// Opens a dump for download, straight from Azure.
+//
+// Editor+, one step above the rest of reading: everything else here is metadata
+// *about* a backup, while this is the database contents — every row of every
+// table, in one file.
 export const downloadBackup = async (
   id: string,
   recordId: string
-): Promise<{ ok: true; response: Response } | { ok: false; message: string }> => {
+): Promise<
+  | {
+      ok: true;
+      stream: NodeJS.ReadableStream;
+      size: number;
+      contentType: string;
+      filename: string;
+    }
+  | { ok: false; message: string }
+> => {
   await requireEditor('download a backup');
 
-  const worker = await resolveWorker(id);
-  if (!worker.ok) return { ok: false, message: worker.message };
+  const resolved = await resolveRecordBlob(id, recordId);
+  if (!resolved.ok) return { ok: false, message: resolved.message };
+  const { storage, blobName } = resolved;
 
-  const response = await api.downloadBackup(worker.target.workerUrl, recordId);
-  if (!response) return { ok: false, message: 'The worker could not be reached.' };
-  if (!response.ok) {
+  const blob = await downloadBlob(storage.connectionString, storage.container, blobName);
+  if (!blob) {
     return {
       ok: false,
-      message:
-        response.status === 404
-          ? 'That dump is no longer on the worker (it may have aged out of retention).'
-          : `The worker answered HTTP ${response.status}.`,
+      message: 'That dump is no longer in Azure — it may have aged out of retention.',
     };
   }
-  return { ok: true, response };
+
+  return {
+    ok: true,
+    stream: blob.stream,
+    size: blob.size,
+    contentType: blob.contentType,
+    // The blob lives in a folder per database; the download is just the file.
+    filename: blobName.split('/').pop() ?? 'backup.sql.gz',
+  };
 };
 
-export const reuploadBackup = async (
-  id: string,
-  recordId: string
-): Promise<{ ok: boolean; message: string }> => {
-  await requireEditor('re-upload a backup');
-
-  const worker = await resolveWorker(id);
-  if (!worker.ok) return { ok: false, message: worker.message };
-
-  const result = await api.reuploadBackup(worker.target.workerUrl, recordId);
-  if (!result.ok || !result.data?.success) {
-    return { ok: false, message: result.data?.error ?? statusError(result) };
-  }
-  return { ok: true, message: 'Uploaded to Azure.' };
-};
-
-// Deletes the dump itself, on the worker's host. Irreversible and admin-only.
+// Deletes the dump from Azure. Irreversible and admin-only — the one action here
+// that can lose something you would want during an incident.
+//
+// The `backup_runs` row is kept: that a backup was taken, and then deleted, is
+// history worth having.
 export const deleteBackupRecord = async (
   id: string,
   recordId: string
 ): Promise<{ ok: boolean; message: string }> => {
   await requireAdmin('delete a backup');
 
-  const worker = await resolveWorker(id);
-  if (!worker.ok) return { ok: false, message: worker.message };
+  const resolved = await resolveRecordBlob(id, recordId);
+  if (!resolved.ok) return { ok: false, message: resolved.message };
 
-  const result = await api.deleteBackup(worker.target.workerUrl, recordId);
-  if (!result.ok || !result.data?.success) {
-    return { ok: false, message: result.data?.error ?? statusError(result) };
-  }
-  return { ok: true, message: 'Backup deleted.' };
-};
-
-// Turns the **worker's own** node-cron on or off.
-//
-// This is not the schedule any more — pg_cron is (see the target's
-// `cronSchedule`). It is here because the worker ships with its own scheduler,
-// and one left running means two nightly runs of the same dumps. Admin-only,
-// like anything that changes when backups happen.
-//
-// The worker's endpoint is a *toggle* with no argument, so `enabled` is what the
-// caller wants and this checks what it got: if the worker was already in that
-// state, the toggle would have moved it the wrong way.
-export const setWorkerCronEnabled = async (
-  id: string,
-  enabled: boolean
-): Promise<{ ok: boolean; message: string; cronEnabled: boolean }> => {
-  await requireAdmin("change a backup worker's own schedule");
-
-  const worker = await resolveWorker(id);
-  if (!worker.ok) return { ok: false, message: worker.message, cronEnabled: false };
-
-  const status = await api.fetchStatus(worker.target.workerUrl);
-  if (!status.ok || !status.data) {
-    return { ok: false, message: statusError(status), cronEnabled: false };
-  }
-  if (Boolean(status.data.cronEnabled) === enabled) {
-    return {
-      ok: true,
-      message: `The worker's own schedule is already ${enabled ? 'on' : 'off'}.`,
-      cronEnabled: enabled,
-    };
-  }
-
-  const result = await api.toggleCron(worker.target.workerUrl);
-  if (!result.ok || !result.data?.success) {
-    return { ok: false, message: statusError(result), cronEnabled: !enabled };
-  }
-
-  const now = Boolean(result.data.cronEnabled);
-  return {
-    ok: now === enabled,
-    message:
-      now === enabled
-        ? `The worker's own schedule is now ${enabled ? 'on' : 'off'}.`
-        : 'The worker reported a different schedule state than requested.',
-    cronEnabled: now,
-  };
+  await deleteBlob(resolved.storage.connectionString, resolved.storage.container, resolved.blobName);
+  return { ok: true, message: 'Backup deleted from Azure.' };
 };

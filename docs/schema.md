@@ -138,9 +138,10 @@ an environment with no VM to inherit from. See
 
 The **Backups** tab. A *target* is a MySQL server we back up: what to connect to,
 where the dumps go, when it runs, and which worker container does the dumping.
-Supabase owns the configuration, the credentials and the schedule; the worker owns
-the dump itself (Edge Functions cap CPU at 2s — see
-[backups.md](./backups.md#why-the-dump-is-not-an-edge-function)).
+The app owns all of it: the configuration, the credentials, the schedule **and**
+the dump — `mysqldump` → gzip → Azure Blob, streamed, nothing on disk. (A
+Supabase Edge Function could not, at 2s of CPU with no binaries; the app's own
+runtime has no such limit. See [backups.md](./backups.md).)
 
 There is no `vm_id`: a backup target is a *database server* (mencartdb is Azure
 Database for MySQL), and tying it to a machine in the tracker said something
@@ -163,7 +164,7 @@ only, like `vm_jenkins_secrets`.
 | ----------------- | ------------- | ------------------------------------------- |
 | `id`              | `uuid`        | primary key                                 |
 | `name`            | `text`        | e.g. `mencartdb (Azure MySQL)`; defaults to the host |
-| `worker_url`      | `text`        | the backup container, e.g. `http://20.197.41.68:2999` |
+| `worker_url`      | `text`        | **legacy** — the external worker this feature used before the app performed its own dumps. Nothing writes it |
 | `db_host` / `db_port` / `db_user` | `text` / `integer` / `text` | what the worker connects to |
 | `azure_account` / `azure_container` | `text` | where the dumps go            |
 | `retention_days`  | `integer`     | how long dumps are kept                     |
@@ -177,9 +178,56 @@ only, like `vm_jenkins_secrets`.
 | `backup_target_secrets` | `target_id uuid pk → backup_targets`, `db_password text`, `azure_connection_string text`, timestamps |
 | `backup_dispatches`     | `id`, `target_id → backup_targets`, `source backup_dispatch_source`, `status backup_dispatch_status`, `http_status int`, `error text`, `requested_by → auth.users`, `created_at` |
 
-`backup_dispatches` records that a run was *asked for*: the worker can report the
-outcome of a run but not whether it was ever triggered, and a schedule that
-stopped firing looks exactly like a schedule with nothing to do.
+`backup_dispatches` records that a run was *asked for*, which is the one thing a
+run's own rows cannot say: a schedule that stopped firing looks exactly like a
+schedule with nothing to do.
+
+## `backup_storage_accounts` / `backup_storage_secrets`
+
+The Azure destination dumps are written to — **one record shared by every
+target** that points at it, so the account key is entered once and rotated once.
+`backup_targets.storage_id` is the reference, `on delete set null`: removing a
+destination must not delete the record of the databases that were being backed up
+to it.
+
+`backup_storage_accounts` RLS: read = any authenticated user (an account and
+container name are not secret), writes = `editor`/`admin`.
+`backup_storage_secrets` has **RLS on with no policies** — service-role only,
+like every other secrets table here.
+
+| table | columns |
+| --- | --- |
+| `backup_storage_accounts` | `id`, `name`, `account_name`, `container`, `notes`, timestamps |
+| `backup_storage_secrets` | `storage_id uuid pk → backup_storage_accounts`, `connection_string`, timestamps |
+
+Because the container is shared, `backup_targets.blob_prefix` gives each target
+its own folder inside it; retention deletes by age within that prefix. It is
+derived from the target's name at creation and then fixed — renaming a target
+would otherwise orphan everything under the old prefix.
+
+## `backup_runs` / `backup_run_events`
+
+What the app's backup runner did. One `backup_runs` row per dump attempt, grouped
+into a batch per triggering (18 databases at 02:00 is one `batch_id`), and one
+`backup_run_events` row per step — which is what the log panel renders, so the
+lines survive a reload and a run nobody watched.
+
+The **blobs in Azure are the backups**; these tables are the record about them.
+Deleting a dump removes the blob and keeps the row: that a backup was taken, and
+then deleted, is history worth having.
+
+RLS: read = any authenticated user. **No write policies at all** — every write
+comes from the runner via the service-role client, because a scheduled run has no
+session to write as.
+
+| table | columns |
+| --- | --- |
+| `backup_runs` | `id`, `target_id → backup_targets`, `batch_id uuid`, `database_name`, `blob_name`, `size_bytes bigint`, `duration_ms int`, `status backup_run_status`, `error`, `source backup_dispatch_source`, `requested_by → auth.users`, `started_at`, `finished_at` |
+| `backup_run_events` | `id bigserial`, `batch_id uuid`, `target_id → backup_targets`, `type text`, `database_name`, `message`, `created_at` |
+
+`backup_run_status` is `running` \| `success` \| `failed`. A `running` row older
+than three hours is treated as a dead container rather than a live run, or a
+target whose container was killed mid-dump could never be backed up again.
 
 ## `projects`
 
@@ -436,6 +484,17 @@ In `supabase/migrations/`, applied in timestamp order:
 - `…_backup_schedule_cron.sql` — enables `pg_cron` + `pg_net` and adds
   `sync_backup_target_schedule()` with the triggers that keep one cron job per
   target in step with its row.
+- `…_backup_runs_in_app.sql` — `backup_runs` + `backup_run_events`: the app now
+  performs the dumps itself (streamed into Azure, nothing on disk) and owns the
+  history and the progress log. See
+  [`backup_runs`](#backup_runs--backup_run_events).
+- `…_backup_storage_accounts.sql` — `backup_storage_accounts` +
+  `backup_storage_secrets`, `backup_targets.storage_id` and `blob_prefix`, with
+  the existing per-target Azure configuration migrated into one shared account.
+  See [`backup_storage_accounts`](#backup_storage_accounts--backup_storage_secrets).
+- `…_backup_cron_calls_app.sql` — re-points every cron job from the
+  `backup-dispatch` Edge Function to the app's own `/api/backups/cron`, and drops
+  the `worker_url` condition from the schedule sync.
 - `…_vm_jenkins_credentials.sql` — `vm_jenkins` + `vm_jenkins_secrets`: the
   Jenkins server, user and token move from each environment onto the **VM** that
   runs them, seeded from the most recently updated configured environment per VM

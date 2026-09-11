@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/services/auth/authService';
 import { isForbidden } from '@/lib/errors';
@@ -7,10 +8,10 @@ type Context = { params: Promise<{ id: string; recordId: string }> };
 
 // GET /api/backups/:id/records/:recordId/download — the dump file (editor+).
 //
-// Proxied rather than linked directly at the worker: the worker sits on an
-// internal address the browser may not reach, its API is unauthenticated, and a
-// direct link would hand the file to anyone who guessed the URL. Going through
-// here means the download inherits this app's session and role check.
+// Streamed straight out of Azure Blob Storage through this route rather than
+// handed over as a blob URL or a SAS link: the connection string never leaves
+// the server, the download inherits this app's session and role check, and a
+// link cannot outlive either.
 //
 // The body is **streamed**, never buffered: these are 64MB gzipped dumps.
 export async function GET(_request: Request, context: Context) {
@@ -26,22 +27,20 @@ export async function GET(_request: Request, context: Context) {
       return NextResponse.json({ error: result.message }, { status: 502 });
     }
 
-    const upstream = result.response;
     const headers = new Headers();
-    headers.set('Content-Type', upstream.headers.get('content-type') ?? 'application/gzip');
-    // Keep the worker's filename (it carries the database and the timestamp);
-    // fall back to something honest rather than letting the browser name it
-    // after the route.
-    headers.set(
-      'Content-Disposition',
-      upstream.headers.get('content-disposition') ?? `attachment; filename="backup-${recordId}.sql.gz"`
-    );
-    const length = upstream.headers.get('content-length');
-    if (length) headers.set('Content-Length', length);
+    headers.set('Content-Type', result.contentType);
+    // The blob's own name carries the database and the timestamp, which is what
+    // the file should be called once it is on someone's disk.
+    headers.set('Content-Disposition', `attachment; filename="${result.filename}"`);
+    if (result.size) headers.set('Content-Length', String(result.size));
     // A dump is not something a proxy or the browser should keep a copy of.
     headers.set('Cache-Control', 'no-store');
 
-    return new NextResponse(upstream.body, { status: 200, headers });
+    // Node stream → web stream. Never buffered: these are 64MB files.
+    return new NextResponse(Readable.toWeb(result.stream as Readable) as ReadableStream, {
+      status: 200,
+      headers,
+    });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to download the backup.' },

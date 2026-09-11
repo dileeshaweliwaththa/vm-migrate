@@ -47,15 +47,18 @@ export const useBackupTarget = (id: string) =>
     refetchInterval: 30_000,
   });
 
-// A running backup's log tail. Polled quickly while something is running and not
-// at all otherwise — `enabled` is what the card flips when it starts a run or
-// sees `isBackupRunning` from the service.
-export const useBackupLogs = (id: string, enabled: boolean) =>
+// A run's progress. The runner writes each step to `backup_run_events`, so this
+// is a plain poll of our own database — no stream to proxy, and the lines are
+// there for a page opened afterwards or by someone else.
+//
+// Always enabled: the most recent batch's lines are worth showing when nothing
+// is running too ("last night's run did this"). It polls fast only while a run
+// is in flight.
+export const useBackupLogs = (id: string, running: boolean) =>
   useQuery({
     queryKey: backupLogsQueryKey(id),
     queryFn: () => apiFetch<BackupLogPage>(`/api/backups/${id}/logs?since=0`),
-    enabled,
-    refetchInterval: enabled ? 2_000 : false,
+    refetchInterval: running ? 3_000 : false,
     refetchOnWindowFocus: false,
   });
 
@@ -99,21 +102,6 @@ export const useRunBackup = () =>
     apiFetch<{ ok: boolean; message: string }>(`/api/backups/${id}/run`, {
       method: 'POST',
       body: JSON.stringify({ databases }),
-    })
-  );
-
-export const useSetWorkerCron = () =>
-  useInvalidating(({ id, enabled }: { id: string; enabled: boolean }) =>
-    apiFetch<{ ok: boolean; message: string; cronEnabled: boolean }>(
-      `/api/backups/${id}/cron`,
-      { method: 'POST', body: JSON.stringify({ enabled }) }
-    )
-  );
-
-export const useReuploadBackup = () =>
-  useInvalidating(({ id, recordId }: { id: string; recordId: string }) =>
-    apiFetch<{ ok: boolean; message: string }>(`/api/backups/${id}/records/${recordId}`, {
-      method: 'POST',
     })
   );
 

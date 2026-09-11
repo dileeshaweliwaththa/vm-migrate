@@ -38,6 +38,13 @@ services:
       # service-role client, which bypasses RLS. Never a build arg.
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:?set it in .env — required for admin user management}
 
+      # The bearer token pg_cron sends to POST /api/backups/cron, which is the
+      # only route authenticated by a shared secret rather than a session — a
+      # scheduled job has no user to be. Unset means scheduled backups are
+      # refused rather than open to anyone who finds the URL. The same value goes
+      # into Supabase Vault as `backup_cron_secret` (see docs/backups.md).
+      BACKUP_CRON_SECRET: ${BACKUP_CRON_SECRET:-}
+
       # Optional: fallback Gemini key when none is stored in app_settings.
       # Leave empty to rely solely on the key an admin sets in the UI.
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}

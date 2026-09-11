@@ -3,14 +3,7 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import {
-  ChevronDown,
-  ChevronRight,
-  CloudUpload,
-  Download,
-  RefreshCw,
-  Trash2,
-} from 'lucide-react';
+import { ChevronDown, ChevronRight, Download, RefreshCw, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -45,7 +38,6 @@ import {
   BACKUPS_QUERY_KEY,
   backupTargetQueryKey,
   useDeleteBackupRecord,
-  useReuploadBackup,
 } from '@/hooks/backups/useBackups';
 import type { BackupDay } from '@/lib/backup-utils';
 import type { BackupRecord } from '@/types/common/backup';
@@ -68,7 +60,7 @@ function StatusPill({ record }: { record: BackupRecord }) {
     <span
       className={cn(STATUS_PILL_CLASS, STATUS_TONE_CLASS[recordTone(record)])}
       // The failure reason, where there is one — the pill stays scannable.
-      title={record.error || record.azureError || undefined}
+      title={record.error || undefined}
     >
       {recordLabel(record)}
     </span>
@@ -86,7 +78,6 @@ function DayRows({
   canEdit: boolean;
   canPurge: boolean;
 }) {
-  const reupload = useReuploadBackup();
   const remove = useDeleteBackupRecord();
 
   const report = (result: { ok: boolean; message: string }) =>
@@ -108,7 +99,6 @@ function DayRows({
             <TableHead>Duration</TableHead>
             <TableHead>Trigger</TableHead>
             <TableHead>Status</TableHead>
-            <TableHead>Azure</TableHead>
             {showActions ? <TableHead className="text-right">Actions</TableHead> : null}
           </TableRow>
         </TableHeader>
@@ -116,13 +106,13 @@ function DayRows({
           {day.records.map((record) => (
             <TableRow key={record.id}>
               <TableCell className="font-medium">{record.database || '—'}</TableCell>
-              {/* The worker's own filename — it carries the database and the
+              {/* The blob's filename — it carries the database and the
                   timestamp, and it is what you look for in Azure. */}
               <TableCell
                 className="max-w-[16rem] truncate font-mono text-label-mono text-muted-foreground"
-                title={record.filename || undefined}
+                title={record.blobName || undefined}
               >
-                {record.filename || '—'}
+                {record.blobName.split('/').pop() || '—'}
               </TableCell>
               <TableCell className="font-mono text-label-mono text-muted-foreground">
                 {formatTimestamp(record.timestamp)}
@@ -139,54 +129,19 @@ function DayRows({
               <TableCell>
                 <StatusPill record={record} />
               </TableCell>
-              <TableCell>
-                {record.azureUploaded ? (
-                  <span className={cn(STATUS_PILL_CLASS, STATUS_TONE_CLASS.success)}>
-                    Uploaded
-                  </span>
-                ) : (
-                  // Two different absences: never tried (the dump failed) and
-                  // tried but didn't land. The second is the one to act on.
-                  <span
-                    className="text-body-sm text-muted-foreground"
-                    title={record.azureError || undefined}
-                  >
-                    {record.status === 'success' ? 'not uploaded' : '—'}
-                  </span>
-                )}
-              </TableCell>
               {showActions ? (
                 <TableCell>
                   <div className="flex items-center justify-end gap-1">
-                    {/* Proxied through our API, not linked at the worker: it sits
-                        on an internal address and its own API has no auth. */}
+                    {/* Streamed out of Azure through our own route, so the
+                        connection string stays on the server. */}
                     {canEdit ? (
                       <Button asChild size="icon-sm" variant="ghost" title="Download this dump">
                         <a
                           href={`/api/backups/${targetId}/records/${record.id}/download`}
-                          aria-label={`Download ${record.filename}`}
+                          aria-label={`Download ${record.blobName}`}
                         >
                           <Download className="size-4" />
                         </a>
-                      </Button>
-                    ) : null}
-                    {/* Only offered where it can do something: a dump that
-                        succeeded locally but never reached Azure. */}
-                    {canEdit && record.status === 'success' && !record.azureUploaded ? (
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        title="Upload this backup to Azure"
-                        aria-label={`Upload ${record.filename} to Azure`}
-                        disabled={reupload.isPending}
-                        onClick={() =>
-                          reupload.mutate(
-                            { id: targetId, recordId: record.id },
-                            { onSuccess: report, onError: fail }
-                          )
-                        }
-                      >
-                        <CloudUpload className="size-4" />
                       </Button>
                     ) : null}
                     {canPurge ? (
@@ -197,7 +152,7 @@ function DayRows({
                             variant="ghost"
                             className="text-destructive hover:text-destructive"
                             title="Delete this backup"
-                            aria-label={`Delete ${record.filename}`}
+                            aria-label={`Delete ${record.blobName}`}
                           >
                             <Trash2 className="size-4" />
                           </Button>
@@ -206,11 +161,14 @@ function DayRows({
                           <AlertDialogHeader>
                             <AlertDialogTitle>Delete this backup?</AlertDialogTitle>
                             <AlertDialogDescription>
-                              {record.filename || 'This dump'} is deleted on the backup host and
-                              cannot be recovered from here.
-                              {record.azureUploaded
-                                ? ' The copy already in Azure Blob Storage is left alone.'
-                                : ' There is no Azure copy of it.'}
+                              {record.blobName || 'This dump'} is deleted from Azure Blob
+                              Storage and cannot be recovered.{' '}
+                              {/* Only a run this app performed has a row to keep;
+                                  a dump we know of only from the container
+                                  disappears from the history with the blob. */}
+                              {record.batchId
+                                ? 'The history keeps the record that it was taken.'
+                                : 'It leaves the history too — this dump predates the run log.'}
                             </AlertDialogDescription>
                           </AlertDialogHeader>
                           <AlertDialogFooter>
@@ -342,25 +300,16 @@ export function BackupHistory({
                   <span className="font-mono text-label-mono tabular-nums text-muted-foreground">
                     {formatBytes(day.totalSize)}
                   </span>
-                  {/* The day's verdict, as a word. Green only when every dump
-                      succeeded *and* every one reached Azure. */}
+                  {/* The day's verdict, as a word. A dump that succeeded is in
+                      Azure by definition — the app streams it there — so there
+                      are only two outcomes to report. */}
                   <span className="justify-self-start">
                     {day.failed ? (
-                      <span
-                        className={cn(STATUS_PILL_CLASS, STATUS_TONE_CLASS.danger)}
-                      >
+                      <span className={cn(STATUS_PILL_CLASS, STATUS_TONE_CLASS.danger)}>
                         {day.failed} failed
                       </span>
-                    ) : day.localOnly ? (
-                      <span
-                        className={cn(STATUS_PILL_CLASS, STATUS_TONE_CLASS.warning)}
-                      >
-                        {day.localOnly} local only
-                      </span>
                     ) : (
-                      <span
-                        className={cn(STATUS_PILL_CLASS, STATUS_TONE_CLASS.success)}
-                      >
+                      <span className={cn(STATUS_PILL_CLASS, STATUS_TONE_CLASS.success)}>
                         All uploaded
                       </span>
                     )}

@@ -12,9 +12,14 @@ export interface BackupTargetRow {
   db_host: string;
   db_port: number;
   db_user: string;
+  // Legacy, superseded by `storage_id` → `backup_storage_accounts`.
   azure_account: string;
   azure_container: string;
+  storage_id: string | null;
+  blob_prefix: string;
   retention_days: number;
+  // Present when selected with the `backup_storage_accounts(...)` embed.
+  backup_storage_accounts?: { name: string; account_name: string; container: string } | null;
   // Standard five-field cron, handed to pg_cron as-is.
   cron_schedule: string;
   schedule_enabled: boolean;

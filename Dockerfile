@@ -76,6 +76,17 @@ RUN npm run build
 FROM node:22-alpine AS runner
 WORKDIR /app
 
+# `mysqldump` and `mysql`, for the backup runner
+# (services/backups/backupRunner.ts). The app dumps the databases itself and
+# streams the output into Azure Blob Storage, so this binary is a runtime
+# dependency of the Backups feature — without it a run fails with "Is
+# mysql-client in the image?".
+#
+# Alpine's `mysql-client` is MariaDB's build, which is what the previous external
+# worker used against the same Azure MySQL server; `mysqlDumpRepository` sticks
+# to flags it accepts.
+RUN apk add --no-cache mysql-client
+
 # HOSTNAME is what the standalone server binds to. It defaults to localhost,
 # which inside a container means "unreachable from outside" — a published port
 # would connect and hang. 0.0.0.0 is required.

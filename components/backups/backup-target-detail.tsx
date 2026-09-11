@@ -3,10 +3,9 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { AlertTriangle, CalendarClock, Database, Pencil, Trash2 } from 'lucide-react';
+import { CalendarClock, Database, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Toggle } from '@/components/ui/toggle';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import {
   AlertDialog,
@@ -22,15 +21,13 @@ import {
 import { PageHeader } from '@/components/layout/page-header';
 import { cn } from '@/lib/utils';
 import { STATUS_PILL_CLASS, STATUS_TONE_CLASS } from '@/lib/vm-utils';
-import { formatTimestamp, hasDuplicateSchedule, hasHostMismatch } from '@/lib/backup-utils';
+import { formatTimestamp } from '@/lib/backup-utils';
 import {
   useBackupLogs,
   useBackupTarget,
   useDeleteBackupTarget,
   useRunBackup,
-  useSetWorkerCron,
 } from '@/hooks/backups/useBackups';
-import { useBackupStream } from '@/hooks/backups/useBackupStream';
 import { BackupDatabasePicker } from '@/components/backups/backup-database-picker';
 import { BackupHistory } from '@/components/backups/backup-history';
 import { BackupLogPanel } from '@/components/backups/backup-log-panel';
@@ -67,7 +64,6 @@ export function BackupTargetDetail({
 }) {
   const { data: overview, isLoading, error } = useBackupTarget(targetId);
   const run = useRunBackup();
-  const setWorkerCron = useSetWorkerCron();
   const removeTarget = useDeleteBackupTarget();
   const router = useRouter();
 
@@ -77,32 +73,11 @@ export function BackupTargetDetail({
   // usual thing.
   const [selected, setSelected] = useState<string[]>([]);
 
-  // Follow the log while a run is in flight — one started here, or one the worker
-  // reports (the Supabase schedule, or somebody else's manual run).
+  // A run in flight, either started here or by the schedule. The runner records
+  // its own progress, so this is just our database — nothing to stream and
+  // nothing to reconnect.
   const following = run.isPending || Boolean(overview?.status.isBackupRunning);
-
-  // Two sources, because the worker has two and only one of them is reliable:
-  //
-  //   * the **stream** pushes each step as it happens — this is what a running
-  //     backup actually shows;
-  //   * the **persisted log** is a replay for a page opened mid-run, written
-  //     fire-and-forget into the worker's own MySQL, so it is often empty.
-  //
-  // The replay seeds the panel and the stream appends to it. The stream stays
-  // attached while the worker is reachable rather than only while a run is in
-  // flight, so a nightly run that starts with this page open fills in by itself.
   const { data: logs } = useBackupLogs(targetId, following);
-  const { events: streamed, connected } = useBackupStream(
-    targetId,
-    Boolean(overview?.status.reachable)
-  );
-
-  // Replay first, live lines after. Their sequence numbers are independent, so
-  // the key is namespaced per source.
-  const lines = [
-    ...(logs?.events ?? []).map((event) => ({ ...event, seq: -event.seq - 1 })),
-    ...streamed,
-  ];
 
   const report = (result: { ok: boolean; message: string }) =>
     result.ok ? toast.success(result.message) : toast.error(result.message);
@@ -129,7 +104,6 @@ export function BackupTargetDetail({
   }
 
   const { target, status, databases, records, lastDispatch } = overview;
-  const warnings = [hasDuplicateSchedule(overview), hasHostMismatch(overview)];
 
   return (
     <>
@@ -162,8 +136,8 @@ export function BackupTargetDetail({
               {status.reachable
                 ? status.isBackupRunning
                   ? 'Backing up'
-                  : 'Worker online'
-                : 'Worker unreachable'}
+                  : 'Ready'
+                : 'Unreachable'}
             </span>
             {canEdit ? (
               <BackupTargetDialog
@@ -247,26 +221,17 @@ export function BackupTargetDetail({
           </ToggleGroup>
         </div>
 
-        {/* Warnings show on both views: they are the reason you came, whichever
-            tab you land on. */}
+        {/* Shown on both views: it is the reason you came, whichever tab you
+            land on. */}
         {!status.reachable ? (
           <p className="rounded-md bg-tone-danger px-3 py-2 text-body-sm text-tone-danger-fg">
-            {status.error || 'The worker could not be reached.'}
+            {status.error || 'The database could not be reached.'}
           </p>
         ) : null}
-        {warnings[0] ? (
-          <p className="flex items-start gap-1.5 rounded-md bg-tone-warning px-3 py-2 text-body-sm text-tone-warning-fg">
-            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-            The worker&apos;s own cron is also on ({status.cronSchedule || 'unknown schedule'}) —
-            these dumps will run twice. Turn it off under Configuration.
-          </p>
-        ) : null}
-        {warnings[1] ? (
-          <p className="flex items-start gap-1.5 rounded-md bg-tone-warning px-3 py-2 text-body-sm text-tone-warning-fg">
-            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-            The worker is backing up <span className="font-mono">{status.host}</span>, not{' '}
-            <span className="font-mono">{target.dbHost}</span> — its own environment still wins
-            until it reads this configuration.
+        {status.reachable && !status.azureConfigured ? (
+          <p className="rounded-md bg-tone-warning px-3 py-2 text-body-sm text-tone-warning-fg">
+            No Azure destination is configured — a run has nowhere to put its dumps. Add the
+            connection string and container under Edit.
           </p>
         ) : null}
 
@@ -298,7 +263,7 @@ export function BackupTargetDetail({
               />
             ) : null}
 
-            <BackupLogPanel events={lines} running={following} connected={connected} />
+            <BackupLogPanel events={logs?.events ?? []} running={following} />
 
             {/* Configuration, quietly, at the end — the facts you set once and
                 then only check. Everything here is editable in the dialog above;
@@ -314,17 +279,18 @@ export function BackupTargetDetail({
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-muted-foreground">Worker</dt>
-                  <dd className="truncate font-mono text-label-mono">
-                    {target.workerUrl.replace(/^https?:\/\//, '')}
-                  </dd>
+                  <dt className="text-muted-foreground">Dumped by</dt>
+                  {/* This app, in-process — there is no worker to name any more.
+                      Worth stating, because "where does the dump happen" is the
+                      first question when one fails. */}
+                  <dd className="font-mono text-label-mono">this app → Azure</dd>
                 </div>
                 <div>
-                  <dt className="text-muted-foreground">Azure</dt>
+                  <dt className="text-muted-foreground">Destination</dt>
                   <dd className="truncate font-mono text-label-mono">
-                    {target.azureContainer
-                      ? `${target.azureAccount ? `${target.azureAccount}/` : ''}${target.azureContainer}`
-                      : 'not configured'}
+                    {target.storageContainer
+                      ? `${target.storageContainer}/${target.blobPrefix}`
+                      : 'not selected'}
                   </dd>
                 </div>
                 <div>
@@ -332,12 +298,11 @@ export function BackupTargetDetail({
                   <dd className="font-mono text-label-mono">{target.retentionDays} days</dd>
                 </div>
                 <div>
-                  {/* Which credentials are on file — never the values. */}
+                  {/* Which credentials are on file — never the values. The Azure
+                      key belongs to the destination, not to this target. */}
                   <dt className="text-muted-foreground">Credentials</dt>
                   <dd className="text-body-sm">
-                    {target.hasDbPassword ? 'DB password' : 'no DB password'}
-                    {' · '}
-                    {target.hasAzureConnection ? 'Azure key' : 'no Azure key'}
+                    {target.hasDbPassword ? 'DB password stored' : 'no DB password'}
                   </dd>
                 </div>
                 <div>
@@ -360,31 +325,6 @@ export function BackupTargetDetail({
                 </div>
               </dl>
 
-              {/* The worker's own scheduler, which is not the schedule any more —
-                  it is here so it can be switched off. */}
-              {canPurge && status.reachable ? (
-                <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
-                  <Toggle
-                    variant="outline"
-                    size="sm"
-                    pressed={status.cronEnabled}
-                    disabled={setWorkerCron.isPending}
-                    onPressedChange={(next) =>
-                      setWorkerCron.mutate(
-                        { id: target.id, enabled: next },
-                        { onSuccess: report, onError: fail }
-                      )
-                    }
-                    aria-label="The worker's own cron"
-                  >
-                    <CalendarClock className="mr-1.5 size-4" />
-                    {status.cronEnabled ? 'Worker cron on' : 'Worker cron off'}
-                  </Toggle>
-                  <span className="text-body-sm text-muted-foreground">
-                    Leave off — Supabase runs the schedule.
-                  </span>
-                </div>
-              ) : null}
             </div>
           </>
         ) : (

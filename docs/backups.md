@@ -1,384 +1,332 @@
 # Database Backups
 
-The **Backups** tab is where the team's MySQL backups are configured, scheduled
-and watched.
+The **Backups** tab is where the team's MySQL backups are configured, scheduled,
+run and inspected. All of it is this app:
 
-Supabase holds the configuration and the credentials, and pg_cron runs the
-schedule. The dumping itself belongs to `upview-db-backup-tracker` — a
-Node/Express worker that shells out to `mysqldump`, gzips the result, ships it to
-Azure Blob Storage and keeps a local history — which the portal reads through to
-for status and past runs.
+```
+pg_cron (per target, its own cron expression)
+  └─ POST /api/backups/cron          shared-token auth; pg_cron has no session
+       └─ backupRunner
+            mysqldump (stdout) → gzip → Azure Blob uploadStream
+            └─ backup_runs / backup_run_events      the history and the log
+```
 
-Two systems, one control plane. [Jenkins](./jenkins-sync.md) is the same idea
-from the other end: there, the other system owns the truth and we hold an address;
-here, we own the truth and the other system does the work.
+**Nothing touches disk**, and there is no worker container. The three stages are
+pipes, so a 64MB database costs a few megabytes of memory rather than 64 of them
+plus a file to clean up afterwards.
+
+## How it got here, and why the runner lives in the app
+
+The first version called out to `upview-db-backup-tracker`, a separate
+Node/Express container, because a Supabase **Edge Function** cannot dump a
+database: 2s of CPU, 256MB of memory, no `mysqldump`, no disk. That limit is
+real, and it is the whole reason the feature started with an external worker.
+
+It does not apply to **this app**. The portal is a long-lived Node process in a
+container we build, so it can carry `mysqldump` (Alpine's `mysql-client`, added
+to the runner stage of the [Dockerfile](../Dockerfile)) and run for as long as a
+dump takes. Once that was clear the worker was pure cost: a second deployment, a
+second copy of the credentials, an HTTP hop that could be unreachable, and a
+local file written before every upload.
+
+What the worker left behind:
+
+- `backup_targets.worker_url` is **legacy**. Nothing writes it, no form asks for
+  it, and it is read only so an older row is not silently lost. The same is true
+  of `azure_account` / `azure_container` and
+  `backup_target_secrets.azure_connection_string`, superseded by the shared
+  destination above.
+- The `backup-dispatch` Edge Function and its `backup_dispatch_*` Vault secrets
+  are gone; the schedule posts to this app directly.
+
+## Azure storage is configured once
+
+A **destination** is its own record — `backup_storage_accounts` (name, account,
+container) plus `backup_storage_secrets` (the connection string, service-role
+only) — managed from the **Azure Storage** button on the Backups page, with a
+**Test** that lists the container.
+
+It used to be three fields and a key on every target, which meant entering the
+same account twice for the second database and rotating the key in as many places
+as there were targets. A target now *picks* one.
+
+Because one container is shared, **each target writes under its own prefix**:
+`<container>/<target prefix>/<database>/<database>_<timestamp>.sql.gz`. Retention
+deletes by age *within* that prefix — without it, one target's seven-day policy
+would delete another's dumps. The prefix is derived from the target's name once,
+at creation, and then fixed: renaming a target must not orphan the blobs already
+written under the old one.
+
+Removing a destination leaves its targets without one (`on delete set null`) and
+**deletes no blobs**.
+
+## What a target is
+
+One MySQL **server** —
+[`backup_targets`](./schema.md#backup_targets--backup_target_secrets--backup_dispatches).
+Four things, and nothing else:
+
+| | |
+| --- | --- |
+| Connection | `db_host`, `db_port`, `db_user` + the password in `backup_target_secrets` |
+| Retention | `retention_days` — blobs older than this are deleted from its prefix after each run |
+| Destination | `storage_id` → a shared `backup_storage_accounts` row |
+| Schedule | `cron_schedule`, `schedule_enabled` → a pg_cron job |
+
+`db_name` is deliberately absent: the runner asks the server what databases it
+has and dumps each one, which is why "18 databases" is a property of the server
+rather than 18 rows here.
+
+**The database password lives in `backup_target_secrets`** — RLS on with **no
+policies**, so no authenticated client can read or write it; only server code,
+via the service-role client, behind an editor check. It is never sent to a
+browser: the UI is told `hasDbPassword` and nothing more, and a blank field on
+save means "keep the stored one", since the form was never given it to resend.
+The Azure key is the destination's, held the same way.
 
 ## Layers
 
 | Layer      | Files                                                                                     |
 | ---------- | ----------------------------------------------------------------------------------------- |
-| Routing    | `app/(protected)/(app)/backups/page.tsx` (the index), `backups/[id]/page.tsx` (one target) — both resolve the role; `app/api/backups/**/route.ts` |
+| Routing    | `app/(protected)/(app)/backups/page.tsx` (the index), `backups/[id]/page.tsx` (one target); `app/api/backups/**/route.ts` |
 | UI         | `components/backups/backups-index.tsx`, `backup-target-detail.tsx`, `backup-stat-cards.tsx`, `backup-database-picker.tsx`, `backup-log-panel.tsx`, `backup-history.tsx`, `backup-target-dialog.tsx` |
 | Hook       | `hooks/backups/useBackups.ts`                                                             |
-| Service    | `services/backups/backupService.ts`                                                        |
-| Repository | `repositories/backupTargets/backupTargetRepository.ts` (Supabase), `backupTargetSecretRepository.ts` (**service-role**), `repositories/backups/backupApiRepository.ts` (**external HTTP**) |
-| Scheduling | `supabase/functions/backup-dispatch/index.ts` (Edge Function), `…_backup_schedule_cron.sql` (pg_cron + the sync function) |
+| Service    | `services/backups/backupService.ts` (rules + mapping), `backupStorageService.ts` (the destinations), `backupRunner.ts` (**the work**) |
+| Repository | `backupTargets/*`, `backupStorage/*`, `backupRuns/*` (Supabase), `mysql/mysqlDumpRepository.ts` (**processes**), `azure/azureBlobRepository.ts` (**Azure SDK**) |
 
 Presentation helpers (`formatBytes`, `formatDuration`, `recordTone`,
-`computeBackupStats`, `groupRecordsByDay`, `hasDuplicateSchedule`,
-`hasHostMismatch`) live in
-`lib/backup-utils.ts`; domain types in `types/common/backup.ts`; row types in
-`types/supabase/response/backupTargets`.
+`computeBackupStats`, `groupRecordsByDay`) live in `lib/backup-utils.ts`; domain
+types in `types/common/backup.ts`.
 
-`backupApiRepository` is the app's **second** external-HTTP data source, after
-`jenkinsRepository` — the documented exception to "repositories only touch
-Supabase" (architecture.md / AGENTS.md). Like the first, it builds requests,
-reports what came back, and decides nothing: no call throws, because a backup
-host that is down, renamed or firewalled is an ordinary outcome the page has to
-render rather than an exception to bubble up as a 500.
+Two of those repositories are documented exceptions to "repositories only touch
+Supabase" — `mysqlDumpRepository` spawns `mysqldump`/`mysql`, and
+`azureBlobRepository` holds the Blob SDK. They join `jenkinsRepository` (HTTP).
+Each builds requests and reports results; the rules are the service's.
 
-## Why a target names a worker
+## The runner
 
-The portal cannot dump a database: there is no `mysqldump` in a Next.js route and
-no disk to write 64MB to. The worker container is what performs the dump, the
-gzip and the Azure upload, and it is what this app reads status, the database
-list, the history and the live log stream from, and posts a run to. So a target
-has to say where that container is.
+`services/backups/backupRunner.ts`, one database at a time:
 
-It cannot be derived, either: the worker runs wherever it was deployed
-(`20.197.41.68:2999`) and the database it backs up is somewhere else entirely
-(`mencartdb.mysql.database.azure.com`). What the form does instead is stop asking
-twice — a new target's worker address is **prefilled from an existing target**,
-since one container normally dumps every database.
+1. `mysqldump --single-transaction --routines --triggers --events <db>` — a
+   consistent InnoDB snapshot including routines, triggers and events, because a
+   schema without them is not a restore. These are the flags the old worker
+   proved against this same Azure MySQL server, and Alpine's client is MariaDB's
+   build, which rejects Oracle-only options like `--column-statistics`.
+2. `zlib.createGzip()`.
+3. `BlockBlobClient.uploadStream` into
+   `<container>/<target prefix>/<database>/<database>_<timestamp>.sql.gz`.
 
-## What lives where
+Details that matter:
 
-**Supabase owns the configuration, the credentials and the schedule. The worker
-container owns the dumping.** That split is not a preference:
+- **The password goes in `MYSQL_PWD`, never argv** — anything on a command line
+  is visible to every process in the container and lands in error messages.
+  Every message leaving that repository is scrubbed of `-p…` and `password=…`
+  regardless.
+- **Both halves must succeed.** A `mysqldump` that dies mid-stream still produces
+  a *valid gzip of a truncated dump*, which would upload happily and restore to
+  nothing — so the upload's result and the dump's exit code are both awaited, and
+  either failing fails that database.
+- **The byte count comes from a counter in the pipe**, because the upload returns
+  no size and asking Azure afterwards is a round trip for a number we already
+  streamed past.
+- **Sequential, not parallel.** `--single-transaction` is cheap on the server but
+  the uploads are not, and eighteen concurrent streams would compete for the same
+  bandwidth while multiplying the memory held in flight.
+- **A run is not awaited by the request that starts it.** Eighteen databases is
+  tens of minutes; `startBackup` records the batch, starts the work and returns.
+  Progress goes to `backup_run_events`, so a reload — or someone else's browser —
+  sees the same run.
+- **One run per target.** A second is refused while a `backup_runs` row is still
+  `running`, and a row older than three hours is treated as a dead container
+  rather than a live run, or a target could never be backed up again.
+- **Retention runs after the batch** and never fails it: the backups are made, and
+  an old blob surviving a day longer is not a reason to report a good run as
+  broken.
 
-| | Where | Why |
-| --- | --- | --- |
-| Config (host, port, user, Azure account/container, retention) | `backup_targets` | one place to add the next database |
-| Credentials (DB password, Azure connection string) | `backup_target_secrets` — RLS on, **no policies**, service-role only | never in a `.env` on a box, never sent to a browser |
-| Schedule | `backup_targets.cron_schedule` → **pg_cron** | the column *is* the schedule, not a description of one |
-| The dump itself | the worker container | see below |
+### If a dump ever needs to run elsewhere
 
-### Why the dump is not an Edge Function
-
-Edge Functions give **400s of wall clock but 2s of CPU time and 256MB of
-memory**, with no `mysqldump` binary and no persistent disk. `tourcan-prod` alone
-is 64.5 MB and takes 245s of real work, and a run covers 18 databases. Building
-dump SQL and gzipping it in Deno is pure CPU, so the cap is hit almost
-immediately — and re-implementing mysqldump (views, triggers, charsets, foreign
-key ordering) would trade a performance problem for a correctness one.
-
-So Supabase takes the parts it is good at, and the container keeps the part it is
-good at.
+Nothing in this design requires it to run in the web container. The runner is
+plain server code behind `POST /api/backups/:id/run`, so a separate worker is a
+second compose service running the same image with a different command, or a
+second instance of the app whose cron URL points at itself. Reasons it might be
+worth doing: keeping a long dump off the process that serves the UI, or reaching
+a database only another host can see. Until one of those bites, one container is
+one fewer thing to deploy.
 
 ## Scheduling
 
-```
-pg_cron  (one job per target, its own cron expression)
-  └─ net.http_post → supabase/functions/backup-dispatch
-       └─ POST worker /api/backup {databases: []}   ← fired, not awaited
-            └─ mysqldump → gzip → Azure Blob
-  └─ backup_dispatches row: we asked, at this time, and it was accepted
-```
+`cron_schedule` **is** the schedule. `public.sync_backup_target_schedule()` keeps
+one pg_cron job per target in step with the row, called by a trigger on insert,
+on update of the schedule columns, and on delete — so no code path can change a
+schedule without the schedule changing.
 
-- **One job per target**, created and replaced by
-  `public.sync_backup_target_schedule(uuid)`, which a trigger on
-  `backup_targets` calls whenever `cron_schedule`, `schedule_enabled` or
-  `worker_url` changes (and on delete). No code path can change a schedule
-  without the schedule changing.
-- The function's **URL and service-role key are read from Vault inside the job
-  command**, not baked into it, so rotating either is not a rewrite of every job.
-- The Edge Function **does not wait for the dump.** The worker answers
-  `POST /api/backup` only when every database is done — tens of minutes — so the
-  request is handed to `EdgeRuntime.waitUntil` and the function answers 202. A
-  dispatch timeout is therefore the *expected* outcome of a healthy run, and is
-  recorded as dispatched rather than as a failure.
-- **A target is dispatched as one "all databases" request**, not one per
-  database: the worker runs a single backup at a time by design and answers 409
-  to the rest.
-- `backup_dispatches` exists because the worker can tell us the *outcome* of a
-  run but not whether it was ever *asked for* — a schedule that stopped firing
-  looks exactly like a schedule with nothing to do. The card shows "last asked",
-  and says so explicitly when an enabled schedule has never fired.
+The job posts to `/api/backups/cron` with a bearer token. Both the URL and the
+token are read **from Vault inside the job command**, so rotating either is one
+statement and neither is copied into `cron.job`.
 
-### One-time setup per project
+### Setup, once per project
 
 ```bash
 supabase db push
-supabase functions deploy backup-dispatch
 ```
 
 ```sql
-select vault.create_secret(
-  'https://<project-ref>.supabase.co/functions/v1/backup-dispatch',
-  'backup_dispatch_url'
-);
-select vault.create_secret('<service-role-key>', 'backup_dispatch_key');
--- re-sync so the jobs pick the secrets up
+select vault.create_secret('https://<this app>/api/backups/cron', 'backup_cron_url');
+select vault.create_secret('<BACKUP_CRON_SECRET>', 'backup_cron_secret');
 select public.sync_backup_target_schedule(id) from public.backup_targets;
 ```
 
-The function needs no secrets of its own: `SUPABASE_URL` and
-`SUPABASE_SERVICE_ROLE_KEY` are injected by the platform, and `verify_jwt` (the
-default) is what stops anything but pg_cron's service-role call from invoking it.
+`BACKUP_CRON_SECRET` must also be in the app's environment (see
+[deployment.md](./deployment.md)) — the two values are compared, in constant
+time, and an unset secret means scheduled backups are **refused** rather than
+open to anyone who finds the URL.
 
-## The gap this leaves
+**Supabase must be able to reach the app.** pg_cron makes an outbound HTTP call
+from the database to wherever the portal is hosted; on a private network it never
+arrives, and the symptom is a target whose page says *Scheduled, but never
+dispatched yet*. `backup_dispatches` is the record of the asking — the thing the
+worker's own history could never tell us.
 
-The worker still reads its **own** `.env` for the MySQL host, password, Azure
-connection string and retention, so those facts exist twice and the worker's copy
-is the one that decides what gets dumped. Until
-[#90](https://github.com/kodplex/upview-vm-tracker/issues/90) rewires it, the
-portal's job is to make a disagreement visible rather than to pretend there
-isn't one — a card warns when:
-
-- the worker reports a different `db_host` than the target says (`hasHostMismatch`);
-- the worker's own `node-cron` is still enabled alongside the Supabase schedule
-  (`hasDuplicateSchedule`) — two schedulers, two nightly runs of the same dumps.
-  The **Worker cron** toggle on the card is how you turn that one off.
+**No cron job exists until a target's schedule is turned on.** A target showing
+`Schedule off` has none by design; that is what the toggle means.
 
 ## Two levels, like Projects
 
 `/backups` is a **grid of target cards**; `/backups/[id]` is where the work
-happens. The first cut stacked every target's stat cards, database picker, log
-panel and 200-row history on one page — which worked for exactly one target and
-ran out of screen at two.
+happens. A card answers "is this database being backed up, and is anything
+wrong": whether the server can be reached, the destination container, the
+schedule, the counts as chips (the same treatment the project card gives
+*3 environments*), the last backup, and a warning when a reachable target has no
+Azure destination — the one misconfiguration that stays silent until a run has
+nowhere to put a dump.
 
-A **card** answers only "is this database being backed up, and is anything
-wrong": the worker's state, the last dump, the schedule, the counts, and a
-warning badge for the two misconfigurations that hide themselves. The counts are
-chips — mono, `rounded-sm`, on the muted fill — the same treatment the project
-card gives *3 environments*, so the two grids read as one system. `3 failed` and
-`2 local only` appear only when they are not zero, in their own tone. The whole card
-is a link, the same as a project card, and hover shifts the border rather than the
-shadow.
+The target page has **two views**, switched with the same `ToggleGroup` the
+project page uses:
 
-The **breadcrumb** resolves the target's name through the same query key the
-detail page uses, so it shares that request instead of making a second one —
-exactly how the project crumb works.
+**Overview**
 
-## What a target's page shows
+1. Four stat cards: backups recorded, last backup, databases (carrying the
+   reachability and its reason, since the count comes *from* the connection), and
+   the destination container.
+2. **Select databases** — every database as a chip
+   (`ToggleGroup type="multiple"`), with **Select all** / **Clear**. Nothing
+   ticked means all, which is what a scheduled run always asks for, so the button
+   says which of the two it is about to do. The selection clears after a
+   successful run.
+3. **Backup logs** — the `backup_run_events` of the most recent batch, polled at
+   3s while a run is in flight. They are rows, not a stream, so they survive a
+   reload and are still there afterwards.
+4. **Configuration** — the read-back: connection, "dumped by: this app → Azure",
+   the container, retention, which credentials are stored, and the last dispatch.
 
-**Two views, switched in place** — the same `ToggleGroup` the project page uses
-for Environments / Documentation:
+**History** — every run, **grouped by day and collapsed**: 200 records over
+eighteen databases a night is a fortnight of near-identical rows, and a day
+collapses to one line (*Wed 13 May · 18 dumps · 214 MB · All uploaded*), which is
+the check you actually make. Every day starts open, with `Collapse all` /
+`Expand all`; the state tracks which days are *closed*, so a day from a later
+fetch arrives open and no state is seeded from data that hasn't loaded. The day
+line is a grid with `tabular-nums`, so the values line up down the stack.
 
-- **Overview** — the numbers, what to dump, the live log, and the configuration
-  read-back.
-- **History** — every recorded dump, grouped by day. Its nine columns under
-  everything else made the page a scroll rather than a screen.
+There are **two** outcomes per dump now, not three: a run that succeeded is in
+Azure by definition, because the upload *is* the dump. "Succeeded locally but
+never uploaded" was a state the worker's write-then-upload created.
 
-The header carries the two facts that tell you you are in the right place — the
-database and the schedule — and nothing else. The worker's address, retention,
-the Azure destination and which credentials are stored are *configuration*: they
-sit in a quiet strip at the end of Overview and in the Edit dialog, not in a
-sentence across the top of every visit. The body runs to `max-w-[100rem]`, not
-`max-w-7xl`: `PageHeader` extends to the page's own padding, so a narrower body
-left a gutter down both sides that read as a mistake.
+### History is the container, not just our rows
 
-Overview, in the order the questions come in:
+**The blobs in Azure are the backups.** `backup_runs` is the record *about* a
+run — who asked, how long it took, why it failed — and it exists only for runs
+this app performed. Every dump taken before that, by the worker this feature
+replaced, is still in the container with no row to its name.
 
-1. **Four stat cards** — backups recorded, last backup (with its status, trigger
-   and database), databases on the server, and the worker's state (`Online` /
-   `Backing up` / `Unreachable`). Composed from `Card` on the muted surface so a
-   row of them reads as a panel inside the target card rather than four more
-   cards.
-2. **Select databases** — every database as a chip (`ToggleGroup type="multiple"`,
-   which styles on `data-[state=on]` and so survives radix-ui 1.4.3), with
-   **Select all** / **Clear**. Nothing ticked means *all*, which is the worker's
-   own default for a missing list, so the button says which of the two it is
-   about to do. The selection clears after a successful run — it was for that
-   run, and leaving it ticked would silently narrow the next one.
-3. **Backup logs** — always present, with a `Ready` / `Running` badge and an
-   empty state, so there is somewhere for a run to appear and somewhere to read
-   it afterwards. It follows the tail and colours failures.
+So the history is the **union** of the two, assembled in `backupService`:
 
-   ### Where a run's progress actually comes from
+- each `backup_runs` row, with everything it knows;
+- plus every blob no row accounts for (matched on `blob_name`), read back from
+  its own metadata: path, size, `createdOn`. Duration shows as `—` rather than
+  as zero, and the trigger reads `auto`, which is what a nightly schedule was.
 
-   The worker has two log channels and only one of them can be relied on:
+Blobs are attributed to a target by path. This app writes
+`<blob_prefix>/<database>/<file>`, which identifies the target exactly. The
+older flat `<database>/<file>` layout has nothing to attribute by, so it is
+claimed only when exactly **one** target still carries that container in its
+legacy `azure_container` — with two candidates, showing those dumps under
+neither beats showing them under the wrong database server.
 
-   | | What it is | Reality |
-   | --- | --- | --- |
-   | `GET /api/backup/events` | Server-Sent Events, pushed per step | **the live channel** — proxied by `GET /api/backups/:id/stream` and consumed with `EventSource` (`useBackupStream`) |
-   | `GET /api/backup/logs?since=` | the same steps, replayed from the worker's MySQL | best-effort: `saveEvent` is fire-and-forget and a failed insert is a warning on the worker's console, so where those tables are missing it answers 200 with an empty list forever |
+Record ids therefore come in two shapes: a UUID for a run row, and
+`blob_<base64url path>` for a blob. They are interpolated into a route path, and
+a raw blob path would split across segments, so the encoded form keeps the id to
+one opaque segment. `resolveRecordBlob` re-checks ownership on the way back in —
+the id comes from the client, and a crafted one would otherwise reach any blob
+in a shared container, including dumps an admin may delete.
 
-   So the replay seeds the panel and the stream appends to it. The stream stays
-   attached whenever the worker is reachable — not only while a run is in flight
-   — so a nightly run that starts with the page open fills in by itself.
-
-   **The events carry no message and no timestamp.** A step is structured:
-   `{ type: 'db_dump', database: 'tourcan-prod', index: 3, total: 18 }`. The
-   sentences in the worker's console are formatted from the type at print time,
-   so this side does the same in `describeBackupEvent` — and the clock is ours,
-   stamped when the line arrives (`receivedAt`). A step type this app has never
-   heard of still prints, as the type plus its database.
-
-   The stream is proxied rather than subscribed to from the browser for the same
-   reasons the download is: the worker is on an address the browser may not
-   reach, and its API has no authentication of its own. `X-Accel-Buffering: no`
-   on the response is what stops a proxy holding the lines until the stream ends
-   — which, for a subscription that never ends, means showing nothing.
-The **History** view: **grouped by day and collapsed.** The worker keeps its 200
-The worker keeps its 200 most recent records and a nightly run covers eighteen
-databases, so a flat table is a fortnight of near-identical rows. A day collapses
-to one line — *Wed 13 May · 18 dumps · 214 MB · All uploaded* — which is the check
-you actually make. Open it when it isn't all fine.
-
-The day line is a **grid**, not a flex row — with flex, each day's date decided
-where its "18 dumps" began and no two lines agreed on a column — and the counts
-use `tabular-nums` so the digits line up too.
-
-The day's verdict is green only when every dump succeeded **and** every one
-reached Azure; otherwise it names what went wrong (`3 failed`, `2 local only`).
-
-**Every day starts open**, with `Collapse all` / `Expand all` beside `Refresh`.
-The state tracks which days are *closed* rather than which are open: seeding an
-open-set from the records was a bug as well as a default — it was computed on the
-first render, before the fetch resolved, so there were no days to seed from and
-nothing ever opened. Tracking the closed ones means a day from a later fetch
-arrives open, with no data to derive state from. Collapsing is local state on a
-plain chevron button, the same as the VM tracker's rows rather than another Radix
-primitive.
-
-Inside a day: database, filename, time, size, duration, trigger, status, Azure and
-the per-row actions. `Refresh` re-reads the history from the worker.
-
-Per-row actions, each offered only where it can do something:
-
-| Action | When | Role |
-| --- | --- | --- |
-| **Download** the dump | always | `editor` |
-| **Upload to Azure** | the dump succeeded but never reached Azure | `editor` |
-| **Delete** the dump | always | `admin` |
-
-`Azure` is its own column because "uploaded" is a different fact from
-"succeeded", and the gap between them is the one worth acting on — a dump that
-exists only on the worker's disk is one host failure from being gone.
-
-### Downloading goes through the portal
-
-`GET /api/backups/:id/records/:recordId/download` proxies the worker and
-**streams** the body (these are 64MB gzipped dumps — nothing is buffered). It is
-not a direct link to the worker, because the worker sits on an internal address
-the browser may not reach and its API has no authentication of its own: proxying
-means the download inherits this app's session and role check.
-
-It is **editor+**, one step above the rest of reading, which is a deliberate
-exception to "everyone reads everything" ([A5](./security.md#accepted-risks)):
-every other thing on this page is metadata *about* a backup, while this is the
-database contents — every row of every table, in one click. A viewer can still
-see that a backup exists and succeeded.
+If Azure cannot be reached the history falls back to the run rows alone, which
+is a smaller list, not an error page.
 
 ## Permissions
 
-Three roles, the same line the tracker draws (see
-[auth.md](./auth.md#where-access-is-enforced)):
+| Action | Minimum role |
+| --- | --- |
+| See the targets, status, databases, history and logs | `viewer` |
+| **Download** a dump — the database contents, not metadata about it | `editor` |
+| Register or edit a target (host, user, credentials, Azure, retention), **run a backup** | `editor` |
+| Change the **schedule**, delete a dump, remove a target | `admin` |
 
-| Action                                                        | Minimum role |
-| ------------------------------------------------------------- | ------------ |
-| See the targets, their status, databases, history and logs    | `viewer`     |
-| **Download** a dump — the database contents, not just metadata | `editor`    |
-| Register or edit a target (host, user, credentials, Azure, retention), **run a backup**, re-upload a dump to Azure | `editor` |
-| Change the **schedule**, delete a dump, remove a target, toggle the worker's own cron | `admin` |
-
-A run is additive — it only ever creates a dump — so it sits at editor. The
-admin-only set is what loses something or changes *when* backups happen: a
-deleted dump is gone from the host, a removed target means a database stops being
-backed up, and a schedule switched off is how backups quietly stop.
+A run is additive — it only ever creates a dump — so it sits at editor, and the
+dispatch row records who asked. The admin set is what loses something or changes
+*when* backups happen.
 
 The schedule travels in the same payload as the rest of the configuration, so
-`updateBackupTarget` raises the bar to admin **when a schedule field is present**
-rather than trusting a separate route nobody would notice was unguarded.
+`updateBackupTarget` raises the bar to admin **when a schedule field is
+present**, rather than trusting a separate route nobody would notice was
+unguarded.
 
-`backupService` re-checks the role on every one of those and throws
-`ForbiddenError`, which the routes turn into a 403. Hiding a control is an
-affordance, never the boundary.
+Deleting a dump from the history deletes the blob. For a run this app performed
+the row survives (that a backup was taken, and then deleted, is worth keeping);
+a dump known only from the container leaves the history with the blob, because
+there was never a row. The dialog says which of the two it is about to do.
+
+Removing a target deletes its credentials, its history rows and its cron job —
+**not the dumps in Azure.** Those are the backups; losing the record of them must
+not lose them.
 
 ## API
 
-All routes require an authenticated session and answer `{ data }` or
-`{ error }`.
-
-| Method + path                                     | Action                                        | Role     |
-| ------------------------------------------------- | --------------------------------------------- | -------- |
-| `GET  /api/backups`                               | every target with status, databases, history  | `viewer` |
-| `POST /api/backups`                               | register a target                             | `editor` |
-| `GET  /api/backups/:id`                           | one target's overview (refresh a single card) | `viewer` |
-| `PATCH  /api/backups/:id`                         | edit config/credentials (`editor`); schedule fields need `admin` | `editor` |
-| `DELETE /api/backups/:id`                         | remove the target + its credentials + its cron job | `admin` |
-| `GET  /api/backups/:id/logs?since=N`              | a run's progress, replayed from the worker's DB (best-effort) | `viewer` |
-| `GET  /api/backups/:id/stream`                    | live progress, proxied as Server-Sent Events  | `viewer` |
-| `POST /api/backups/:id/run`                       | dump now (`{ databases: [] }` = all)          | `editor` |
-| `POST /api/backups/:id/cron`                      | `{ enabled }` — the **worker's own** node-cron | `admin`  |
-| `POST /api/backups/:id/records/:recordId`         | re-upload that dump to Azure                  | `editor` |
-| `GET  /api/backups/:id/records/:recordId/download`| stream that dump to the browser               | `editor` |
-| `DELETE /api/backups/:id/records/:recordId`       | delete that dump on the host                  | `admin`  |
-
-### The service's own API, for reference
-
-`GET /api/status`, `GET /api/databases`, `GET /api/backups`, `POST /api/backup`,
-`GET /api/backup/logs?since=`, `POST /api/backups/:id/upload`,
-`DELETE /api/backups/:id`, `POST /api/cron/toggle`, and an SSE stream at
-`GET /api/backup/events`.
-
-Two of those need care and get it in the service layer:
-
-- **`POST /api/cron/toggle` takes no argument** — it flips whatever the current
-  state is. Our route takes the state you *want*, so `setCronEnabled` reads the
-  status first and calls the toggle only when the two disagree. Two clicks racing
-  each other would otherwise leave the schedule wherever they landed.
-- **`POST /api/backup` answers only when the dump has finished**, which can take
-  minutes. It gets a longer timeout than every other call, and the page follows
-  progress through the log endpoint instead of waiting on it.
-
-## How a run is followed
-
-Polling, not the SSE stream: the portal follows Jenkins builds the same way, one
-mechanism is easier to reason about than two, and a poll survives the proxies
-between here and a backup host. `useBackupLogs` runs at 2s while a run is in
-flight and not at all otherwise — and "in flight" includes a run *this* browser
-didn't start, since `GET /api/status` reports `isBackupRunning`, so a cron run or
-a colleague's manual run streams into the card too.
-
-## What the page tells you
-
-- **Reachable, as text.** A service that cannot be reached returns an overview
-  with `status.reachable = false` and the reason, not an error — the histories of
-  the *other* services are still worth showing, and this one's history is what is
-  unavailable, not the page.
-- **"Local only".** A dump that succeeded but never reached Azure is its own
-  state, counted in the header and shown on the row: the file exists, the
-  off-site copy doesn't. That row is the only one offered the re-upload button.
-- Sizes, durations and timestamps are mono, because they are scanned down a
-  column. Every status pill renders its state as text — no meaning rests on
-  colour alone (see [ui-guidelines.md](./ui-guidelines.md#status-tones)).
-- History is capped by the service at its 200 most recent records, so the counts
-  in the header are "recent", not "ever".
+| Method + path | Action | Role |
+| --- | --- | --- |
+| `GET  /api/backups` | every target with status, databases, history (rows + blobs) | `viewer` |
+| `POST /api/backups` | register a target | `editor` |
+| `GET  /api/backups/:id` | one target's overview | `viewer` |
+| `PATCH  /api/backups/:id` | edit config/credentials (`editor`); schedule fields need `admin` | `editor` |
+| `DELETE /api/backups/:id` | remove the target + credentials + history + cron job | `admin` |
+| `GET  /api/backups/:id/logs?since=N` | the current batch's progress lines after N | `viewer` |
+| `POST /api/backups/:id/run` | start a run (answers as soon as it has begun) | `editor` |
+| `GET  /api/backups/:id/records/:recordId/download` | stream that dump out of Azure | `editor` |
+| `DELETE /api/backups/:id/records/:recordId` | delete that dump from Azure | `admin` |
+| `POST /api/backups/cron` | the scheduled entry point | **shared token** |
+| `GET  /api/backups/storage` | the Azure destinations (secret-free) | `viewer` |
+| `POST /api/backups/storage` | add a destination | `editor` |
+| `PATCH  /api/backups/storage/:id` | edit one (blank connection string keeps it) | `editor` |
+| `POST /api/backups/storage/:id` | test it — lists the container | `editor` |
+| `DELETE /api/backups/storage/:id` | remove it; targets keep their history, blobs untouched | `admin` |
 
 ## Security
 
-**The credentials.** The MySQL password and the Azure connection string live in
-`backup_target_secrets`: RLS on with **no policies**, so no authenticated client
-can read or write it — only server code, via the service-role client, behind an
-editor check. Neither value is ever sent to a browser; the UI is told
-`hasDbPassword` / `hasAzureConnection` and nothing more, and a blank field on
-save means "keep the stored one" (the form was never given it to resend). Same
-construction as `vm_jenkins_secrets` and `environment_secrets`.
-
-**The worker's API is unauthenticated**: its `/api/auth/login` gates its own web
-UI only, every `/api/*` route is open, and `cors()` is on. So:
-
-- anyone who can reach the worker's host can already trigger or delete backups
-  without the portal;
-- the portal does not widen that, but it does put a button in front of it, gated
-  by the RBAC above;
-- fixing it belongs in the worker — a token on the mutating routes, stored here
-  the way the other credentials are ([#90](https://github.com/kodplex/upview-vm-tracker/issues/90)).
-
-That is recorded as an accepted risk in
-[security.md](./security.md#accepted-risks). Every outbound call passes
-`isDeniedOutboundTarget` (`lib/outbound-url.ts`) — the same host denylist the
-Jenkins integration uses — and it is checked **on every call**, not only when the
-URL is saved: a row written before a rule tightened is not a reason to fetch it.
+- **Credentials**: `backup_target_secrets` (database passwords) and
+  `backup_storage_secrets` (Azure connection strings), both RLS on with no
+  policies — service-role only, never sent to a browser. Same construction as
+  `vm_jenkins_secrets` and `environment_secrets`.
+- **Outbound**: the app connects to a MySQL host and an Azure storage account an
+  editor typed in. Unlike the Jenkins integration there is no URL being *fetched*,
+  so the SSRF guard does not apply; what an editor can do is dump a database they
+  can already reach into a container they control. See
+  [security.md](./security.md#ssrf).
+- **`POST /api/backups/cron`** is the app's only token-authenticated route. The
+  comparison is constant-time, an unset `BACKUP_CRON_SECRET` refuses every call,
+  and the token grants exactly one capability: start a backup.
+- **Downloading** a dump is `editor`, one step above the rest of reading — a
+  deliberate exception to "everyone reads everything"
+  ([A5](./security.md#accepted-risks)), because a dump is every row of every
+  table. It streams through this route, so the Azure connection string never
+  leaves the server and no shareable blob URL exists.
+- The accepted risk about the worker's unauthenticated API (A8) is **resolved by
+  deletion**: there is no worker.

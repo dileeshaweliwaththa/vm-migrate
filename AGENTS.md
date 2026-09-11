@@ -19,10 +19,15 @@ migrated-URL archiving, and JSON import/export. Data lives in the `vms` and
 is the one URL table, shared with the projects pages). Access is
 gated by the passwordless email sign-in flow shipped in the auth slice.
 
-`repositories/jenkins/jenkinsRepository.ts` and
-`repositories/backups/backupApiRepository.ts` are the **only** repositories that
-talk to something other than Supabase — the documented external-HTTP exception.
-Both share the outbound URL rules in [lib/outbound-url.ts](lib/outbound-url.ts).
+Three repositories talk to something other than Supabase — the documented
+exceptions to the repository rule:
+
+- `repositories/jenkins/jenkinsRepository.ts` — HTTP to a Jenkins server
+- `repositories/azure/azureBlobRepository.ts` — the Azure Blob SDK
+- `repositories/mysql/mysqlDumpRepository.ts` — spawns `mysqldump` / `mysql`
+
+Anything that fetches a **URL** shares the outbound rules in
+[lib/outbound-url.ts](lib/outbound-url.ts).
 
 The tracker feature is the reference example of a full vertical slice through
 all five layers: `app/api/vms/*` (routing) → `components/vms/*` (UI) →
@@ -56,9 +61,9 @@ Before implementing any feature, request, or fix, read and follow:
   port sync, and how a triggered build is followed to completion.
 - [docs/docker-import.md](docs/docker-import.md) — importing environment records
   from pasted `docker ps` output.
-- [docs/backups.md](docs/backups.md) — the **Backups** tab: the registry of MySQL
-  backup services, what is read through to them rather than stored, and the role
-  split on running vs deleting a backup.
+- [docs/backups.md](docs/backups.md) — the **Backups** tab: MySQL dumps performed
+  by this app and streamed into Azure Blob (nothing on disk), scheduled by
+  pg_cron, with the credentials in a service-role-only table.
 
 ## Database / migration workflow
 

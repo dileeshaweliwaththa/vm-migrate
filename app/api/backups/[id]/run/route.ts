@@ -6,11 +6,13 @@ import { runBackup } from '@/services/backups/backupService';
 type Context = { params: Promise<{ id: string }> };
 
 // POST /api/backups/:id/run — dump now (editor+). `{ databases: [] }` (or an
-// absent list) means every database the service can see.
+// absent list) means every database on the server.
 //
-// The service answers only when the dump has finished, which can take minutes;
-// the page follows progress through `/logs` in the meantime and this response is
-// the summary.
+// Answers as soon as the run has **started**: the dump is performed by this app
+// (`backupRunner`) and takes minutes, so holding the request open would only
+// invite a proxy to time it out. Progress and the outcome go to
+// `backup_run_events` / `backup_runs`, which is what `/logs` and the history
+// read.
 export async function POST(request: Request, context: Context) {
   const user = await getCurrentUser();
   if (!user) {

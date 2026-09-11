@@ -19,10 +19,22 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { useCreateBackupTarget, useUpdateBackupTarget } from '@/hooks/backups/useBackups';
+import { useBackupStorageAccounts } from '@/hooks/backups/useBackupStorage';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { DEFAULT_MYSQL_PORT, type BackupTarget, type BackupTargetInput } from '@/types/common/backup';
 
-// A backup target: the MySQL server, where its dumps go, when, and which worker
-// does the dumping.
+// A backup target: the MySQL server, its destination, and when to run.
+//
+// Four things and no more: the database credentials, how long to keep dumps,
+// which Azure destination to write to, and the schedule. There is no worker
+// address (this app performs the dump) and no Azure key (that belongs to the
+// destination, configured once for everyone).
 //
 // The two credentials are **write-only**. They are stored in a table no client
 // can read, the payload behind this form says only whether one is stored, and a
@@ -34,31 +46,24 @@ import { DEFAULT_MYSQL_PORT, type BackupTarget, type BackupTargetInput } from '@
 export function BackupTargetDialog({
   target,
   canAdmin,
-  // An existing target's worker address, used as the default for a new one. One
-  // container normally dumps every database, so the second target should not
-  // have to be told where it lives again.
-  defaultWorkerUrl = '',
   trigger,
 }: {
   target?: BackupTarget;
   // Whether to offer the schedule at all. An editor sees the rest.
   canAdmin: boolean;
-  defaultWorkerUrl?: string;
   trigger: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const create = useCreateBackupTarget();
   const update = useUpdateBackupTarget();
+  const { data: accounts } = useBackupStorageAccounts();
 
   const [name, setName] = useState('');
-  const [workerUrl, setWorkerUrl] = useState('');
   const [dbHost, setDbHost] = useState('');
   const [dbPort, setDbPort] = useState(String(DEFAULT_MYSQL_PORT));
   const [dbUser, setDbUser] = useState('');
   const [dbPassword, setDbPassword] = useState('');
-  const [azureAccount, setAzureAccount] = useState('');
-  const [azureContainer, setAzureContainer] = useState('');
-  const [azureConnectionString, setAzureConnectionString] = useState('');
+  const [storageId, setStorageId] = useState('');
   const [retentionDays, setRetentionDays] = useState('7');
   const [cronSchedule, setCronSchedule] = useState('0 2 * * *');
   const [scheduleEnabled, setScheduleEnabled] = useState(false);
@@ -71,29 +76,26 @@ export function BackupTargetDialog({
   // the browser was never sent them.
   const reset = () => {
     setName(target?.name ?? '');
-    setWorkerUrl(target?.workerUrl ?? defaultWorkerUrl);
     setDbHost(target?.dbHost ?? '');
     setDbPort(String(target?.dbPort ?? DEFAULT_MYSQL_PORT));
     setDbUser(target?.dbUser ?? '');
-    setAzureAccount(target?.azureAccount ?? '');
-    setAzureContainer(target?.azureContainer ?? '');
+    setStorageId(target?.storageId ?? '');
     setRetentionDays(String(target?.retentionDays ?? 7));
     setCronSchedule(target?.cronSchedule ?? '0 2 * * *');
     setScheduleEnabled(target?.scheduleEnabled ?? false);
     setNotes(target?.notes ?? '');
     setDbPassword('');
-    setAzureConnectionString('');
   };
 
   const handleSave = () => {
     const input: BackupTargetInput = {
       name,
-      workerUrl,
       dbHost,
       dbPort: Number(dbPort) || DEFAULT_MYSQL_PORT,
       dbUser,
-      azureAccount,
-      azureContainer,
+      // Null clears the destination, which the service distinguishes from
+      // "unchanged" — so an unselected picker has to send null, not ''.
+      storageId: storageId || null,
       retentionDays: Number(retentionDays) || 7,
       notes,
     };
@@ -101,7 +103,6 @@ export function BackupTargetDialog({
     // stored credential", and the schedule is left out entirely for a
     // non-admin so the service doesn't refuse an edit they were allowed to make.
     if (dbPassword.trim()) input.dbPassword = dbPassword;
-    if (azureConnectionString.trim()) input.azureConnectionString = azureConnectionString;
     if (canAdmin) {
       input.cronSchedule = cronSchedule;
       input.scheduleEnabled = scheduleEnabled;
@@ -227,82 +228,34 @@ export function BackupTargetDialog({
             </div>
           </div>
 
-          {/* ---- Azure -------------------------------------------------- */}
-          <div className="space-y-3 rounded-md border border-border p-3">
-            <p className="text-label-caps uppercase text-muted-foreground">Azure Blob Storage</p>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label htmlFor="bt-azure-account">Account</Label>
-                <Input
-                  id="bt-azure-account"
-                  value={azureAccount}
-                  onChange={(e) => setAzureAccount(e.target.value)}
-                  placeholder="upviewtechnologies"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="bt-azure-container">Container</Label>
-                <Input
-                  id="bt-azure-container"
-                  value={azureContainer}
-                  onChange={(e) => setAzureContainer(e.target.value)}
-                  placeholder="mysql-backups"
-                />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <Label htmlFor="bt-azure-conn">Connection string</Label>
-                {target?.hasAzureConnection ? (
-                  <Badge variant="outline" className="rounded-sm text-label-caps uppercase">
-                    <KeyRound className="size-3" /> Stored
-                  </Badge>
-                ) : null}
-              </div>
-              <Textarea
-                id="bt-azure-conn"
-                value={azureConnectionString}
-                onChange={(e) => setAzureConnectionString(e.target.value)}
-                placeholder={
-                  target?.hasAzureConnection
-                    ? 'Leave blank to keep the stored connection string'
-                    : 'DefaultEndpointsProtocol=https;AccountName=…'
-                }
-                rows={2}
-                // Content-sized by default (`field-sizing-content`), which a long
-                // connection string would use to stretch the dialog.
-                className="field-sizing-fixed w-full min-w-0"
-              />
-              <p className="text-body-sm text-muted-foreground">
-                Contains the account key — stored server-side only.
-              </p>
-            </div>
+          {/* ---- destination -------------------------------------------- */}
+          {/* Picked, not typed: the account and its key are configured once for
+              everyone, under "Azure storage" on the Backups page. */}
+          <div className="space-y-2">
+            <Label>Azure destination</Label>
+            <Select value={storageId} onValueChange={setStorageId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a destination" />
+              </SelectTrigger>
+              <SelectContent>
+                {(accounts ?? []).map((account) => (
+                  <SelectItem key={account.id} value={account.id}>
+                    {account.name || account.container}
+                    {account.hasConnectionString ? '' : ' — no key stored'}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-body-sm text-muted-foreground">
+              {(accounts ?? []).length === 0
+                ? 'None configured yet — add one with the Azure storage button on the Backups page.'
+                : 'Dumps are written under this target’s own folder in that container.'}
+            </p>
           </div>
 
           {/* ---- worker + schedule -------------------------------------- */}
           <div className="space-y-3 rounded-md border border-border p-3">
-            <p className="text-label-caps uppercase text-muted-foreground">Worker &amp; schedule</p>
-            <div className="space-y-2">
-              <Label htmlFor="bt-worker">Backup worker</Label>
-              <Input
-                id="bt-worker"
-                value={workerUrl}
-                onChange={(e) => setWorkerUrl(e.target.value)}
-                placeholder={defaultWorkerUrl || '20.197.41.68'}
-              />
-              {/* This field asks for something people reasonably query, so it
-                  says what it is for rather than just what to type: the portal
-                  cannot dump a database itself, and this is the machine that
-                  can. It is not the database's address — that is above. */}
-              <p className="text-body-sm text-muted-foreground">
-                Where the MySQL Backup Manager container runs — it is what performs the dump and
-                the upload, and what this page reads status, history and live logs from. Host only
-                is enough: <code className="font-mono">http://</code> and{' '}
-                <code className="font-mono">:2999</code> are filled in.
-                {defaultWorkerUrl && !target ? ' Prefilled from your existing target.' : ''}
-              </p>
-            </div>
-
+            <p className="text-label-caps uppercase text-muted-foreground">Schedule</p>
             {canAdmin ? (
               <>
                 <div className="space-y-2">
@@ -315,7 +268,7 @@ export function BackupTargetDialog({
                     className="font-mono"
                   />
                   <p className="text-body-sm text-muted-foreground">
-                    Five fields, run by Postgres (pg_cron) — not by the worker.{' '}
+                    Five fields, run by Postgres (pg_cron).{' '}
                     <code className="font-mono">0 2 * * *</code> is daily at 02:00.
                   </p>
                 </div>
@@ -350,7 +303,7 @@ export function BackupTargetDialog({
           <Button variant="outline" onClick={() => setOpen(false)}>
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={pending || !workerUrl.trim()}>
+          <Button onClick={handleSave} disabled={pending || !dbHost.trim()}>
             {pending ? 'Saving…' : target ? 'Save changes' : 'Add target'}
           </Button>
         </DialogFooter>

@@ -18,6 +18,7 @@ credentials that can *trigger deployments*. So the assets, in order of value:
 | ----- | ----- | ---------------- |
 | Jenkins API tokens | `environment_secrets`, `vm_jenkins_secrets` | **nobody** via any client; server code only |
 | Backup DB passwords + Azure connection strings | `backup_target_secrets` | **nobody** via any client; server code only |
+| Scheduled-backup bearer token | `BACKUP_CRON_SECRET` (env) + Supabase Vault | server code only; pg_cron reads its copy from Vault |
 | Gemini API key | `app_settings.gemini_api_key` | admins (write-only), server code (read) |
 | Supabase service-role key | server env var | server process only |
 | Ability to trigger a deploy | Jenkins, via the app | every signed-in role |
@@ -137,8 +138,13 @@ three files today — that grep is the audit.
 
 ## SSRF
 
-Two integrations make outbound requests to a URL that came from a user, and
-together they are the whole SSRF surface: **Jenkins** (an environment's server,
+Two integrations *fetch* a URL that came from a user, and together they are the
+whole SSRF surface. (The backup runner also reaches outward — a MySQL host and an
+Azure storage account an editor typed in — but it opens a database connection and
+an SDK client rather than fetching a URL, so there is no redirect to follow and no
+response body to reflect. What an editor can do there is dump a database they can
+already reach into a container they control; see
+[backups.md](./backups.md#security).) **Jenkins** (an environment's server,
 now the VM's — see [jenkins-sync.md](./jenkins-sync.md)) and the **backup
 services** (a registry row's `base_url` — see [backups.md](./backups.md)). They
 share one host denylist, `isDeniedOutboundTarget` in
@@ -171,14 +177,6 @@ back to them is not the response body, but it is not nothing: distinct messages 
 401 / 403 / 404 / other HTTP / network error make host-and-port probing possible,
 and `extractPorts` returns port-like numbers found in whatever document was
 fetched. See [A1](#a1) for why this is accepted rather than fixed.
-
-The **backup services** carry the same accepted half and none of the token
-problem: there is no credential to leak, because the service's API takes none
-(see [A8](#a8)). `backupService.resolveTarget` refuses a denied address on
-**every** call rather than only when the row was written — a row saved before a
-rule tightened is not a reason to fetch it — and no response body is reflected:
-the page renders a status, a database list and a history, all mapped through our
-own types and enums.
 
 One target class *is* refused outright, at save time and on every use
 (`isDeniedOutboundTarget`, wrapped as `isDeniedJenkinsTarget` in
@@ -320,7 +318,15 @@ authenticated user. Bounded by the fact that all readers are already trusted wit
 the data; worth normalizing if the audience widens.
 
 <a id="a8"></a>
-**A8 — A backup worker's own API is unauthenticated.** `upview-db-backup-tracker`
+**A8 — ~~A backup worker's own API is unauthenticated~~ — resolved.** The
+external worker is gone: the app performs its own dumps
+([backups.md](./backups.md)), so there is no second service with an open API in
+the path. Its replacement, `POST /api/backups/cron`, is the app's only
+token-authenticated route — constant-time comparison, refused entirely when
+`BACKUP_CRON_SECRET` is unset, and able to do exactly one thing: start a backup.
+The original finding, for the record:
+
+**A backup worker's own API is unauthenticated.** `upview-db-backup-tracker`
 gates its web UI with a login but not its API: every `/api/*` route is open and
 `cors()` is on. So anyone who can reach a backup host can already list, trigger
 and **delete** dumps without this app. What the portal adds is a button in front of it,

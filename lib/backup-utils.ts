@@ -33,18 +33,19 @@ export function formatDuration(ms: number): string {
 
 // The tone for a dump's outcome. Every pill that uses it also renders its status
 // as text — see docs/ui-guidelines.md § Status tones.
+//
+// Three states, not four: the dump streams straight into Azure, so there is no
+// "succeeded locally but never uploaded" any more. Success means the blob is
+// there.
 export function recordTone(record: BackupRecord): StatusTone {
-  if (record.status === 'success') return record.azureUploaded ? 'success' : 'warning';
+  if (record.status === 'success') return 'success';
   if (record.status === 'running') return 'info';
   return 'danger';
 }
 
-// What a record's state is *called*. A successful dump that never reached Azure
-// is the case worth naming: the file exists, the off-site copy doesn't.
 export function recordLabel(record: BackupRecord): string {
   if (record.status === 'running') return 'Running';
-  if (record.status !== 'success') return 'Failed';
-  return record.azureUploaded ? 'Success' : 'Local only';
+  return record.status === 'success' ? 'Success' : 'Failed';
 }
 
 export interface BackupStats {
@@ -54,8 +55,6 @@ export interface BackupStats {
   // the worker at 200 each, so this is "recent", not "ever".
   records: number;
   failed: number;
-  // Successful dumps that never made it to Azure.
-  localOnly: number;
   // The most recent dump anywhere, or null when there is nothing yet.
   latest: BackupRecord | null;
 }
@@ -73,8 +72,6 @@ export function computeBackupStats(overviews: BackupTargetOverview[]): BackupSta
     unreachable: overviews.filter((overview) => !overview.status.reachable).length,
     records: records.length,
     failed: records.filter((record) => record.status === 'failed').length,
-    localOnly: records.filter((record) => record.status === 'success' && !record.azureUploaded)
-      .length,
     latest,
   };
 }
@@ -87,23 +84,6 @@ export function formatTimestamp(value: string): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
-// Is the worker's own node-cron still running alongside the Supabase schedule?
-// Two schedulers means the same dumps twice a night, and the second one is
-// invisible from here — so this is worth surfacing on the card rather than
-// leaving to be noticed in the history.
-export function hasDuplicateSchedule(overview: BackupTargetOverview): boolean {
-  return overview.target.scheduleEnabled && overview.status.reachable && overview.status.cronEnabled;
-}
-
-// Does the worker's configured MySQL host match what this target says it is?
-// The worker still reads its own `.env`, so a target edited here and a container
-// never redeployed will disagree — and the backups would be of the wrong server.
-export function hasHostMismatch(overview: BackupTargetOverview): boolean {
-  const configured = overview.target.dbHost.trim().toLowerCase();
-  const actual = overview.status.host.trim().toLowerCase();
-  return Boolean(configured) && Boolean(actual) && configured !== actual;
-}
-
 // One day's dumps, as the history renders them.
 export interface BackupDay {
   // `YYYY-MM-DD` in the reader's own timezone — the key, and what sorts.
@@ -112,7 +92,6 @@ export interface BackupDay {
   records: BackupRecord[];
   totalSize: number;
   failed: number;
-  localOnly: number;
 }
 
 // A nightly run over eighteen databases is eighteen rows, so 200 records is a 
@@ -160,52 +139,19 @@ export function groupRecordsByDay(records: BackupRecord[]): BackupDay[] {
       records: dayRecords,
       totalSize: dayRecords.reduce((total, record) => total + record.size, 0),
       failed: dayRecords.filter((record) => record.status === 'failed').length,
-      localOnly: dayRecords.filter((record) => record.status === 'success' && !record.azureUploaded)
-        .length,
-    }));
+        }));
 }
 
-// The sentence for one step of a run.
-//
-// The worker sends a type and some numbers, never a message — its console builds
-// the wording from the same switch and we have to do the same. Kept here rather
-// than in the panel so the phrasing is one thing, and so an event type this app
-// has never heard of still prints as something readable.
+// The sentence for one step of a run. The runner writes the message, so this is
+// only the fallback for a row that somehow has none — kept so the panel has one
+// place to render from either way.
 export function describeBackupEvent(event: BackupLogEvent): string {
-  const db = event.database || 'database';
-  const position = event.total ? ` (${event.index || 0}/${event.total})` : '';
-
-  switch (event.type) {
-    case 'start':
-      return `Starting backup of ${event.total || 0} database(s)`;
-    case 'db_start':
-      return `Started ${db}${position}`;
-    case 'db_dump':
-      return `Dumping ${db}${position}`;
-    case 'db_compress':
-      return `Compressing ${db}`;
-    case 'db_upload':
-      return `Uploading ${db} to Azure`;
-    case 'db_retention':
-      return `Cleaning up old backups of ${db}`;
-    case 'db_done': {
-      const size = event.size ? ` (${formatBytes(event.size)})` : '';
-      if (event.azureUploaded) return `Completed ${db}${size} — uploaded to Azure`;
-      if (event.azureError) return `Completed ${db}${size} — Azure upload failed: ${event.azureError}`;
-      return `Completed ${db}${size} — kept locally`;
-    }
-    case 'db_error':
-      return `Failed ${db}: ${event.error || 'unknown error'}`;
-    case 'complete':
-      return 'Backup finished';
-    // Not a failure of the run — a step this app doesn't know the name of.
-    default:
-      return `${event.type}${event.database ? ` · ${event.database}` : ''}`;
-  }
+  if (event.message) return event.message;
+  return `${event.type}${event.database ? ` · ${event.database}` : ''}`;
 }
 
 // Whether a step is bad news, so the panel can colour it without deciding what
 // "bad" means twice.
 export function isBackupEventError(event: BackupLogEvent): boolean {
-  return event.type === 'db_error' || Boolean(event.error) || Boolean(event.azureError);
+  return event.type === 'db_error';
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { Archive, CalendarClock, Database, ServerCog } from 'lucide-react';
+import { Archive, CalendarClock, Cloud, Database } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { STATUS_PILL_CLASS, STATUS_TONE_CLASS } from '@/lib/vm-utils';
@@ -55,7 +55,7 @@ export function BackupStatCards({ overview }: { overview: BackupTargetOverview }
         label="Backups"
         icon={<Archive className="size-3.5" />}
         value={<span className="font-mono">{records.length}</span>}
-        sub={records.length >= 200 ? 'most recent 200' : 'recorded'}
+        sub="recorded"
       />
       <Stat
         label="Last backup"
@@ -83,33 +83,34 @@ export function BackupStatCards({ overview }: { overview: BackupTargetOverview }
         label="Databases"
         icon={<Database className="size-3.5" />}
         value={<span className="font-mono">{status.reachable ? databases.length : '—'}</span>}
-        sub={status.reachable ? 'on the server' : 'worker unreachable'}
+        // Reachability belongs here: the count comes *from* the connection, so
+        // its absence and the reason are the same fact.
+        tone={status.reachable ? undefined : 'text-destructive'}
+        sub={
+          status.reachable
+            ? `on ${status.host || target.dbHost}`
+            : status.error || 'database unreachable'
+        }
       />
       <Stat
-        label="Worker"
-        icon={<ServerCog className="size-3.5" />}
-        // Three states, and the middle one is the one people look for: a run in
-        // progress. Always a word, never a colour alone.
+        label="Destination"
+        icon={<Cloud className="size-3.5" />}
+        // Where the dumps go. The app streams them straight into this container,
+        // so it is the whole answer to "where are my backups".
         value={
           <span className="text-body-md font-medium">
-            {status.reachable ? (status.isBackupRunning ? 'Backing up' : 'Online') : 'Unreachable'}
+            {status.azureConfigured ? 'Azure Blob' : 'Not configured'}
           </span>
         }
-        tone={
-          status.reachable
-            ? status.isBackupRunning
-              ? 'text-ink-accent'
-              : 'text-positive'
-            : 'text-destructive'
-        }
+        tone={status.azureConfigured ? undefined : 'text-destructive'}
         sub={
-          status.reachable ? (
+          status.azureConfigured ? (
             <span className="font-mono text-label-mono">
-              {status.host || target.dbHost}
-              {status.port ? `:${status.port}` : ''}
+              {status.azureContainer}
+              {target.blobPrefix ? `/${target.blobPrefix}` : ''}
             </span>
           ) : (
-            status.error || 'no response'
+            'select a destination under Azure Storage'
           )
         }
       />

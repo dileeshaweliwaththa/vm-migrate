@@ -9,10 +9,9 @@ import type { BackupLogEvent } from '@/types/common/backup';
 
 // A run's progress, in a panel that is always there.
 //
-// The lines arrive over the worker's SSE stream as structured steps — a type, a
-// database, sometimes a size — with no message and no timestamp of their own, so
-// the wording comes from `describeBackupEvent` and the clock is the moment the
-// line reached us.
+// The lines are `backup_run_events` rows written by the runner as it works, so
+// they survive a reload, show up for anyone watching, and are still here after
+// the run finishes — unlike the in-memory stream the external worker offered.
 //
 // It keeps its place whether or not anything is running: an empty box says "this
 // is where the run will appear", where a panel that only exists mid-run makes the
@@ -20,15 +19,10 @@ import type { BackupLogEvent } from '@/types/common/backup';
 export function BackupLogPanel({
   events,
   running,
-  connected,
 }: {
   events: BackupLogEvent[];
-  // Whether a backup is in progress, per the worker's status.
+  // Whether a backup is in progress for this target.
   running: boolean;
-  // Whether the progress stream is attached. Different from `running`: a run can
-  // be in progress while the stream is down, and that is worth saying rather
-  // than showing an empty box.
-  connected: boolean;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
 
@@ -58,13 +52,6 @@ export function BackupLogPanel({
             'Ready'
           )}
         </Badge>
-        {/* Only worth mentioning when a run is under way and the lines are not
-            coming — otherwise it is noise about a connection nobody needs. */}
-        {running && !connected ? (
-          <Badge variant="outline" className="rounded-sm text-label-caps uppercase text-tone-warning-fg">
-            Stream disconnected
-          </Badge>
-        ) : null}
         {events.length ? (
           <span className="font-mono text-label-mono text-muted-foreground">
             {events.length} line{events.length === 1 ? '' : 's'}
@@ -94,10 +81,9 @@ export function BackupLogPanel({
                   isBackupEventError(event) ? 'text-destructive' : 'text-steel-100'
                 )}
               >
-                {/* Our clock, not the worker's — it doesn't send one. */}
-                {event.receivedAt ? (
+                {event.timestamp ? (
                   <span className="text-steel-400">
-                    {new Date(event.receivedAt).toLocaleTimeString()}{' '}
+                    {new Date(event.timestamp).toLocaleTimeString()}{' '}
                   </span>
                 ) : null}
                 {describeBackupEvent(event)}

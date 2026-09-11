@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { AlertTriangle, Archive, CalendarClock, Database, Plus, Server } from 'lucide-react';
+import { AlertTriangle, Archive, CalendarClock, Cloud, Database, Plus } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,15 +10,11 @@ import { PageHeader } from '@/components/layout/page-header';
 import { cn } from '@/lib/utils';
 import { canEdit as canEditRole, isAdmin } from '@/lib/rbac';
 import { STATUS_PILL_CLASS, STATUS_TONE_CLASS } from '@/lib/vm-utils';
-import {
-  computeBackupStats,
-  formatTimestamp,
-  hasDuplicateSchedule,
-  hasHostMismatch,
-} from '@/lib/backup-utils';
+import { computeBackupStats, formatTimestamp } from '@/lib/backup-utils';
 import { useBackupTargets } from '@/hooks/backups/useBackups';
 import type { UserRole } from '@/types/common';
 import type { BackupTargetOverview } from '@/types/common/backup';
+import { BackupStorageDialog } from '@/components/backups/backup-storage-dialog';
 import { BackupTargetDialog } from '@/components/backups/backup-target-dialog';
 
 // The Backups index: one card per target, each opening its own page.
@@ -36,12 +32,9 @@ function TargetCard({ overview }: { overview: BackupTargetOverview }) {
   const { target, status, databases, records } = overview;
   const latest = records[0] ?? null;
   const failed = records.filter((record) => record.status === 'failed').length;
-  const localOnly = records.filter(
-    (record) => record.status === 'success' && !record.azureUploaded
-  ).length;
-  const warnings = [hasDuplicateSchedule(overview), hasHostMismatch(overview)].filter(
-    Boolean
-  ).length;
+  // The one misconfiguration that hides itself: a target that can be read but
+  // has nowhere to put a dump.
+  const missingDestination = status.reachable && !status.azureConfigured;
 
   return (
     <Link href={`/backups/${target.id}`} className="block">
@@ -65,7 +58,7 @@ function TargetCard({ overview }: { overview: BackupTargetOverview }) {
               {status.reachable
                 ? status.isBackupRunning
                   ? 'Backing up'
-                  : 'Online'
+                  : 'Ready'
                 : 'Unreachable'}
             </span>
           </div>
@@ -83,9 +76,9 @@ function TargetCard({ overview }: { overview: BackupTargetOverview }) {
               {target.scheduleEnabled ? 'scheduled' : 'off'}
             </span>
             <span className="inline-flex items-center gap-1.5 truncate">
-              <Server className="size-3.5 shrink-0" />
+              <Cloud className="size-3.5 shrink-0" />
               <span className="truncate font-mono text-label-mono">
-                {target.workerUrl.replace(/^https?:\/\//, '')}
+                {target.storageContainer || 'no destination'}
               </span>
             </span>
           </div>
@@ -118,14 +111,7 @@ function TargetCard({ overview }: { overview: BackupTargetOverview }) {
                 {failed} failed
               </Badge>
             ) : null}
-            {localOnly ? (
-              <Badge
-                variant="outline"
-                className="rounded-sm bg-tone-warning px-1.5 font-mono text-label-mono font-medium text-tone-warning-fg"
-              >
-                {localOnly} local only
-              </Badge>
-            ) : null}
+
           </div>
 
           <p className="text-body-sm text-muted-foreground">
@@ -135,16 +121,15 @@ function TargetCard({ overview }: { overview: BackupTargetOverview }) {
             </span>
           </p>
 
-          {/* Surfaced on the card because both of these are silent: nothing
-              fails, you just get two runs a night or backups of the wrong
-              server. */}
-          {warnings ? (
+          {/* Surfaced because it is silent: nothing fails until a run tries to
+              upload and finds nowhere to put the dump. */}
+          {missingDestination ? (
             <Badge
               variant="outline"
               className="rounded-sm bg-tone-warning text-label-caps uppercase text-tone-warning-fg"
             >
               <AlertTriangle className="size-3" />
-              {warnings} warning{warnings === 1 ? '' : 's'}
+              No Azure destination
             </Badge>
           ) : null}
         </CardContent>
@@ -182,11 +167,7 @@ export function BackupsIndex({ role }: { role: UserRole }) {
                 Failed: <b className="text-destructive">{stats.failed}</b>
               </span>
             ) : null}
-            {stats.localOnly ? (
-              <span>
-                Local only: <b className="text-ink-accent">{stats.localOnly}</b>
-              </span>
-            ) : null}
+
             {stats.latest ? (
               <span>
                 Last: <b className="text-foreground">{formatTimestamp(stats.latest.timestamp)}</b>
@@ -196,15 +177,27 @@ export function BackupsIndex({ role }: { role: UserRole }) {
         }
         actions={
           canEdit ? (
-            <BackupTargetDialog
-              canAdmin={canPurge}
-              defaultWorkerUrl={(overviews ?? [])[0]?.target.workerUrl ?? ''}
-              trigger={
-                <Button size="sm">
-                  <Plus className="mr-2 h-4 w-4" /> Add Target
-                </Button>
-              }
-            />
+            <>
+              {/* Azure storage is configured once for every target, so it is a
+                  page-level action rather than a field in the target form. */}
+              <BackupStorageDialog
+                canEdit={canEdit}
+                canPurge={canPurge}
+                trigger={
+                  <Button size="sm" variant="outline">
+                    <Cloud className="mr-2 h-4 w-4" /> Azure Storage
+                  </Button>
+                }
+              />
+              <BackupTargetDialog
+                canAdmin={canPurge}
+                trigger={
+                  <Button size="sm">
+                    <Plus className="mr-2 h-4 w-4" /> Add Target
+                  </Button>
+                }
+              />
+            </>
           ) : (
             <span className="rounded-sm border border-border px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
               Read-only

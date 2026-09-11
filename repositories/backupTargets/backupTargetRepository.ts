@@ -8,12 +8,11 @@ import type { BackupDispatchRow, BackupTargetRow } from '@/types/supabase/respon
 
 export type BackupTargetWriteColumns = Partial<{
   name: string;
-  worker_url: string;
   db_host: string;
   db_port: number;
   db_user: string;
-  azure_account: string;
-  azure_container: string;
+  storage_id: string | null;
+  blob_prefix: string;
   retention_days: number;
   cron_schedule: string;
   schedule_enabled: boolean;
@@ -21,11 +20,14 @@ export type BackupTargetWriteColumns = Partial<{
   position: number;
 }>;
 
+// The destination comes along so a card can name it without a second query.
+const SELECT = '*, backup_storage_accounts(name, account_name, container)';
+
 export const findAllBackupTargets = async (): Promise<BackupTargetRow[]> => {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from('backup_targets')
-    .select('*')
+    .select(SELECT)
     .order('position', { ascending: true })
     .order('created_at', { ascending: true });
   if (error) throw new Error(error.message);
@@ -36,7 +38,7 @@ export const findBackupTargetById = async (id: string): Promise<BackupTargetRow 
   const supabase = await createClient();
   const { data, error } = await supabase
     .from('backup_targets')
-    .select('*')
+    .select(SELECT)
     .eq('id', id)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -59,7 +61,7 @@ export const insertBackupTarget = async (
   const { data, error } = await supabase
     .from('backup_targets')
     .insert(values)
-    .select('*')
+    .select(SELECT)
     .single();
   if (error) throw new Error(error.message);
   return data as BackupTargetRow;
@@ -74,7 +76,7 @@ export const updateBackupTarget = async (
     .from('backup_targets')
     .update(values)
     .eq('id', id)
-    .select('*')
+    .select(SELECT)
     .single();
   if (error) throw new Error(error.message);
   return data as BackupTargetRow;

@@ -44,6 +44,7 @@ names the actual problem.
 
 | Variable | When | Secret? |
 | -------- | ---- | ------- |
+| `BACKUP_CRON_SECRET` | runtime | **Yes** — the bearer token pg_cron sends to `/api/backups/cron`. Unset means scheduled backups are refused |
 | `NEXT_PUBLIC_SUPABASE_URL` | **build** arg + runtime | No — public by design |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_OR_ANON_KEY` | **build** arg + runtime | No — reaches the browser, constrained by RLS |
 | `SUPABASE_SERVICE_ROLE_KEY` | runtime only | **Yes** — bypasses RLS |
@@ -154,6 +155,27 @@ docker run -d --name upview-vm-tracker -p 5174:5174 \
   sign-in codes will point at the wrong host.
 - **Rotate the service-role key** if it has ever been committed or pasted into a
   build log.
+
+## The image carries `mysql-client`
+
+The runner stage installs it (`apk add --no-cache mysql-client`) because the
+**Backups** feature dumps databases in-process: `mysqldump` → gzip → Azure Blob,
+streamed, with nothing written to disk. Without the binary a run fails with *"Is
+mysql-client in the image?"* and nothing else breaks.
+
+Alpine's `mysql-client` is MariaDB's build, which is what the previous external
+worker used against the same Azure MySQL server — `mysqlDumpRepository` sticks to
+flags it accepts.
+
+Two things follow for deployment:
+
+- **The app container needs network access to the database servers it backs up**,
+  and their firewalls need to allow its address. This used to be the worker's
+  requirement.
+- **Supabase needs to reach the app** for scheduled backups — pg_cron makes an
+  outbound HTTP call to `/api/backups/cron`. On a private network it never
+  arrives, and the Backups page reports a schedule that never dispatched. See
+  [backups.md § Scheduling](./backups.md#scheduling).
 
 ## Updating
 
