@@ -40,6 +40,15 @@ const PING_POLL_MS = 700;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Postgres reports a failure inside a cron job as the error plus its DETAIL,
+// CONTEXT and HINT — six lines of `net.http_post` internals whose first clause
+// carries the whole finding ("null value in column url", when the URL secret is
+// missing). The rest is noise in a panel this size.
+const firstClause = (message: string): string => {
+  const clause = message.split(/\s(?:DETAIL|CONTEXT|HINT|QUERY|STATEMENT):/)[0].trim();
+  return clause.length > 200 ? `${clause.slice(0, 200)}…` : clause;
+};
+
 const pingUntilSettled = async (): Promise<BackupCronPingResult> => {
   const requestId = await sendBackupCronPing();
   const deadline = Date.now() + PING_TIMEOUT_MS;
@@ -157,7 +166,7 @@ export const testBackupSchedule = async (targetId: string): Promise<BackupSchedu
       label: 'Last firing',
       state: failed ? 'fail' : 'pass',
       detail: `${diagnostics.lastRunStatus}${diagnostics.lastRunAt ? ` at ${diagnostics.lastRunAt}` : ''}${
-        diagnostics.lastRunMessage ? ` — ${diagnostics.lastRunMessage}` : ''
+        diagnostics.lastRunMessage ? ` — ${firstClause(diagnostics.lastRunMessage)}` : ''
       }`,
     });
   }
