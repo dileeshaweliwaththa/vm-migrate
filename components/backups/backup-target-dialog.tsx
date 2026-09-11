@@ -51,12 +51,13 @@ import {
 // in the payload is what raises the bar there.
 export function BackupTargetDialog({
   target,
-  canAdmin,
+  canManage,
   trigger,
 }: {
   target?: BackupTarget;
-  // Whether to offer the schedule at all. An editor sees the rest.
-  canAdmin: boolean;
+  // Only an admin reaches this form at all; the prop stays so the component
+  // cannot be mounted for someone who shouldn't be editing.
+  canManage: boolean;
   trigger: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -111,11 +112,10 @@ export function BackupTargetDialog({
       retentionDays: Number(retentionDays) || 7,
       notes,
     };
-    // Only sent when there is something to send: an empty field means "keep the
-    // stored credential", and the schedule is left out entirely for a
-    // non-admin so the service doesn't refuse an edit they were allowed to make.
+    // An empty password field means "keep the stored one" — the browser was
+    // never sent it, so it has nothing to send back.
     if (dbPassword.trim()) input.dbPassword = dbPassword;
-    if (canAdmin) {
+    if (canManage) {
       input.cronSchedule = cronSchedule;
       input.scheduleEnabled = scheduleEnabled;
     }
@@ -265,10 +265,10 @@ export function BackupTargetDialog({
             </p>
           </div>
 
-          {/* ---- worker + schedule -------------------------------------- */}
+          {/* ---- the schedule ------------------------------------------- */}
           <div className="space-y-3 rounded-md border border-border p-3">
             <p className="text-label-caps uppercase text-muted-foreground">Schedule</p>
-            {canAdmin ? (
+            {canManage ? (
               <>
                 <div className="space-y-2">
                   <Label>When</Label>

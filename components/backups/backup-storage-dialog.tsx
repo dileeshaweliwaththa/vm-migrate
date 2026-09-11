@@ -183,13 +183,11 @@ function StorageForm({
 
 function StorageRow({
   account,
-  canEdit,
-  canPurge,
+  canManage,
   onEdit,
 }: {
   account: BackupStorageAccount;
-  canEdit: boolean;
-  canPurge: boolean;
+  canManage: boolean;
   onEdit: () => void;
 }) {
   const test = useTestBackupStorage();
@@ -221,7 +219,7 @@ function StorageRow({
               No key
             </Badge>
           )}
-          {canEdit ? (
+          {canManage ? (
             <>
               <Button
                 size="sm"
@@ -246,7 +244,7 @@ function StorageRow({
               </Button>
             </>
           ) : null}
-          {canPurge ? (
+          {canManage ? (
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button
@@ -311,12 +309,10 @@ function StorageRow({
 }
 
 export function BackupStorageDialog({
-  canEdit,
-  canPurge,
+  canManage,
   trigger,
 }: {
-  canEdit: boolean;
-  canPurge: boolean;
+  canManage: boolean;
   trigger: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -365,8 +361,7 @@ export function BackupStorageDialog({
                 <StorageRow
                   key={account.id}
                   account={account}
-                  canEdit={canEdit}
-                  canPurge={canPurge}
+                  canManage={canManage}
                   onEdit={() => {
                     setAdding(false);
                     setEditing(account);
@@ -380,7 +375,7 @@ export function BackupStorageDialog({
         </div>
 
         <DialogFooter className="sm:justify-between">
-          {canEdit && !adding && !editing ? (
+          {canManage && !adding && !editing ? (
             <Button
               variant="outline"
               onClick={() => {

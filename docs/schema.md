@@ -163,10 +163,13 @@ and `backup_cron_ping_result(bigint)`. They read `cron.job`,
 reach, so execute is granted to **`service_role` only**. See
 [backups.md § Scheduling](./backups.md#scheduling).
 
-RLS: `backup_targets` and `backup_dispatches` read = any authenticated user,
-writes = `editor`/`admin` (the schedule columns are gated to admin in the service
-layer). `backup_target_secrets` has **RLS on with no policies** — service-role
-only, like `vm_jenkins_secrets`.
+RLS: `backup_targets` and `backup_dispatches` read = any authenticated user;
+`backup_targets` writes = **`admin` only** (see
+[backups.md § Permissions](./backups.md#permissions) for why this tab does not
+use the usual editor split). `backup_dispatches` has **no insert policy** — a
+scheduled run has no session to satisfy one with, so `runBackup` writes those
+rows with the service-role client. `backup_target_secrets` has **RLS on with no
+policies** — service-role only, like `vm_jenkins_secrets`.
 
 | column            | type          | notes                                       |
 | ----------------- | ------------- | ------------------------------------------- |
@@ -509,6 +512,12 @@ In `supabase/migrations/`, applied in timestamp order:
   and `backup_cron_ping_result()`: `security definer`, `service_role`-only, so
   the app can read its own pg_cron job and send one test request down the path a
   firing job takes. See [backups.md § Test schedule](./backups.md#test-schedule).
+- `…_backups_admin_only_writes.sql` — makes the Backups tab admin-write and
+  everyone-read: replaces the editor/admin write policies on `backup_targets`
+  and `backup_storage_accounts` with admin-only ones, and drops the
+  `backup_dispatches` insert policy (those rows are written service-role, for
+  pg_cron's benefit). See
+  [backups.md § Permissions](./backups.md#permissions).
 - `…_backup_cron_job_function.sql` — moves the job's body into
   `run_backup_cron_job()`, which raises a readable error when a Vault secret is
   missing instead of letting pg_net fail on a null URL.

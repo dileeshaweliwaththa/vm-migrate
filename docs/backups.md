@@ -79,7 +79,7 @@ rather than 18 rows here.
 
 **The database password lives in `backup_target_secrets`** — RLS on with **no
 policies**, so no authenticated client can read or write it; only server code,
-via the service-role client, behind an editor check. It is never sent to a
+via the service-role client, behind an admin check. It is never sent to a
 browser: the UI is told `hasDbPassword` and nothing more, and a blank field on
 save means "keep the stored one", since the form was never given it to resend.
 The Azure key is the destination's, held the same way.
@@ -342,21 +342,35 @@ is a smaller list, not an error page.
 
 ## Permissions
 
+**Admin-write, everyone-read.** One gate for the whole tab, unlike the rest of
+this app:
+
 | Action | Minimum role |
 | --- | --- |
-| See the targets, status, databases, history and logs | `viewer` |
-| **Download** a dump — the database contents, not metadata about it | `editor` |
-| Register or edit a target (host, user, credentials, Azure, retention), **run a backup** | `editor` |
-| Change the **schedule**, **test** it, delete a dump, remove a target | `admin` |
+| See the targets, their status, **the databases**, the history and the logs | `viewer` |
+| Everything else — register or edit a target, run a backup, download or delete a dump, add or edit a destination, change the schedule and test it, remove a target | `admin` |
 
-A run is additive — it only ever creates a dump — so it sits at editor, and the
-dispatch row records who asked. The admin set is what loses something or changes
-*when* backups happen.
+The usual editor/viewer split is right for a tracker row. It is wrong here,
+because nothing on this tab is merely editing a record: a target holds a
+credential that can read every database on a server, a dump *is* those databases
+(every row of every table, in one file), and the schedule decides whether any of
+it happens. "Edit the target but don't run it" is not a distinction worth
+modelling when both hands are on the same lever.
 
-The schedule travels in the same payload as the rest of the configuration, so
-`updateBackupTarget` raises the bar to admin **when a schedule field is
-present**, rather than trusting a separate route nobody would notice was
-unguarded.
+**Reading stays open to every signed-in role, deliberately.** That last night's
+backup ran is not a privilege, and hiding it from the people who would notice it
+had stopped is the wrong way round. A viewer gets the whole page — the stat
+cards, the database list, the log, the schedule, the history — with no controls
+on it. The database list in particular is rendered for them as labels rather than
+withheld: *which* databases are on the server is what "this is backed up"
+actually means.
+
+Enforced in `backupService` and `backupStorageService` (`requireAdmin`
+throughout), with RLS as the floor under it — `backup_targets` and
+`backup_storage_accounts` gate writes on `current_user_role() = 'admin'`, so a
+route added without a check still cannot write. `backup_dispatches` has **no**
+insert policy: a scheduled run has no session to satisfy one with, so those rows
+are written service-role, and `runBackup` is the only way in.
 
 Deleting a dump from the history deletes the blob. For a run this app performed
 the row survives (that a backup was taken, and then deleted, is worth keeping);
@@ -372,19 +386,19 @@ not lose them.
 | Method + path | Action | Role |
 | --- | --- | --- |
 | `GET  /api/backups` | every target with status, databases, history (rows + blobs) | `viewer` |
-| `POST /api/backups` | register a target | `editor` |
+| `POST /api/backups` | register a target | `admin` |
 | `GET  /api/backups/:id` | one target's overview | `viewer` |
-| `PATCH  /api/backups/:id` | edit config/credentials (`editor`); schedule fields need `admin` | `editor` |
+| `PATCH  /api/backups/:id` | edit config, credentials and schedule | `admin` |
 | `DELETE /api/backups/:id` | remove the target + credentials + history + cron job | `admin` |
 | `GET  /api/backups/:id/logs?since=N` | the current batch's progress lines after N | `viewer` |
-| `POST /api/backups/:id/run` | start a run (answers as soon as it has begun) | `editor` |
-| `GET  /api/backups/:id/records/:recordId/download` | stream that dump out of Azure | `editor` |
+| `POST /api/backups/:id/run` | start a run (answers as soon as it has begun) | `admin` |
+| `GET  /api/backups/:id/records/:recordId/download` | stream that dump out of Azure | `admin` |
 | `DELETE /api/backups/:id/records/:recordId` | delete that dump from Azure | `admin` |
 | `POST /api/backups/cron` | the scheduled entry point | **shared token** |
 | `GET  /api/backups/storage` | the Azure destinations (secret-free) | `viewer` |
-| `POST /api/backups/storage` | add a destination | `editor` |
-| `PATCH  /api/backups/storage/:id` | edit one (blank connection string keeps it) | `editor` |
-| `POST /api/backups/storage/:id` | test it — lists the container | `editor` |
+| `POST /api/backups/storage` | add a destination | `admin` |
+| `PATCH  /api/backups/storage/:id` | edit one (blank connection string keeps it) | `admin` |
+| `POST /api/backups/storage/:id` | test it — lists the container | `admin` |
 | `DELETE /api/backups/storage/:id` | remove it; targets keep their history, blobs untouched | `admin` |
 | `POST /api/backups/:id/schedule/test` | check the cron job, the secrets and the path from Supabase | `admin` |
 
@@ -395,15 +409,15 @@ not lose them.
   policies — service-role only, never sent to a browser. Same construction as
   `vm_jenkins_secrets` and `environment_secrets`.
 - **Outbound**: the app connects to a MySQL host and an Azure storage account an
-  editor typed in. Unlike the Jenkins integration there is no URL being *fetched*,
-  so the SSRF guard does not apply; what an editor can do is dump a database they
+  admin typed in. Unlike the Jenkins integration there is no URL being *fetched*,
+  so the SSRF guard does not apply; what an admin can do is dump a database they
   can already reach into a container they control. See
   [security.md](./security.md#ssrf).
 - **`POST /api/backups/cron`** is the app's only token-authenticated route. The
   comparison is constant-time, an unset `BACKUP_CRON_SECRET` refuses every call,
   and the token grants exactly one capability: start a backup.
-- **Downloading** a dump is `editor`, one step above the rest of reading — a
-  deliberate exception to "everyone reads everything"
+- **Downloading** a dump is `admin`, with the actions rather than with the
+  reading — a deliberate exception to "everyone reads everything"
   ([A5](./security.md#accepted-risks)), because a dump is every row of every
   table. It streams through this route, so the Azure connection string never
   leaves the server and no shareable blob URL exists.

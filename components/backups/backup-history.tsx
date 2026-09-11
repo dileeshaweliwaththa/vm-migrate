@@ -70,13 +70,11 @@ function StatusPill({ record }: { record: BackupRecord }) {
 function DayRows({
   day,
   targetId,
-  canEdit,
-  canPurge,
+  canManage,
 }: {
   day: BackupDay;
   targetId: string;
-  canEdit: boolean;
-  canPurge: boolean;
+  canManage: boolean;
 }) {
   const remove = useDeleteBackupRecord();
 
@@ -85,7 +83,10 @@ function DayRows({
   const fail = (error: unknown) =>
     toast.error(error instanceof Error ? error.message : 'Something went wrong.');
 
-  const showActions = canEdit || canPurge;
+  // Downloading a dump is the database contents and deleting one is
+  // irreversible, so the column is admin's or it isn't there — a row of disabled
+  // icons would only invite the question of how to enable them.
+  const showActions = canManage;
 
   return (
     <div className="overflow-x-auto">
@@ -134,7 +135,7 @@ function DayRows({
                   <div className="flex items-center justify-end gap-1">
                     {/* Streamed out of Azure through our own route, so the
                         connection string stays on the server. */}
-                    {canEdit ? (
+                    {canManage ? (
                       <Button asChild size="icon-sm" variant="ghost" title="Download this dump">
                         <a
                           href={`/api/backups/${targetId}/records/${record.id}/download`}
@@ -144,7 +145,7 @@ function DayRows({
                         </a>
                       </Button>
                     ) : null}
-                    {canPurge ? (
+                    {canManage ? (
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
                           <Button
@@ -201,13 +202,11 @@ function DayRows({
 export function BackupHistory({
   targetId,
   records,
-  canEdit,
-  canPurge,
+  canManage,
 }: {
   targetId: string;
   records: BackupRecord[];
-  canEdit: boolean;
-  canPurge: boolean;
+  canManage: boolean;
 }) {
   const queryClient = useQueryClient();
   const days = groupRecordsByDay(records);
@@ -317,7 +316,7 @@ export function BackupHistory({
                 </button>
 
                 {isOpen ? (
-                  <DayRows day={day} targetId={targetId} canEdit={canEdit} canPurge={canPurge} />
+                  <DayRows day={day} targetId={targetId} canManage={canManage} />
                 ) : null}
               </div>
             );

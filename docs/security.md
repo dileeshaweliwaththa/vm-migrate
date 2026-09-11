@@ -67,7 +67,7 @@ Verified in this review:
 
 ### Service-role paths are the load-bearing ones
 
-Eight repositories use the service-role client and therefore **bypass RLS**. For
+Nine repositories use the service-role client and therefore **bypass RLS**. For
 these the service-layer check is the *only* enforcement:
 
 | Repository | Gate that must hold |
@@ -76,9 +76,10 @@ these the service-layer check is the *only* enforcement:
 | `appSettingsRepository.findAppSettingsServiceRole` | reached only from `getGeminiConfig`, whose callers are `canEdit`-gated |
 | `environmentSecretRepository` | `canEdit` to configure, `canRunBuild` to use, in `jenkinsService` |
 | `vmJenkinsSecretRepository` | `requireEditor` to write, in `vmJenkinsService`; the read is server-internal (`getVmJenkinsCredentials`, called only by `jenkinsService`) |
-| `backupTargetSecretRepository` | `requireEditor` / `requireAdmin` in `backupService` |
-| `backupStorageRepository` (the connection string) | `requireEditor` / `requireAdmin` in `backupStorageService`; `getStorageForWrite` is server-internal |
-| `backupRunRepository` (the writes) | called only by `backupRunner`, reachable via `runBackup` (`editor`, or the token-authenticated cron route). Reads use the request client, so the history is RLS-governed |
+| `backupTargetSecretRepository` | `requireAdmin` in `backupService` |
+| `backupTargetRepository.insertBackupDispatch` | `requireAdmin` in `runBackup`, or the cron route's bearer token for a scheduled run. Service-role because pg_cron has no session; the table has no insert policy |
+| `backupStorageRepository` (the connection string) | `requireAdmin` in `backupStorageService`; `getStorageForWrite` is server-internal |
+| `backupRunRepository` (the writes) | called only by `backupRunner`, reachable via `runBackup` (`admin`, or the token-authenticated cron route). Reads use the request client, so the history is RLS-governed |
 | `backupCronRepository` | `requireAdmin` in `backupCronService`. Its three RPCs are `security definer` with execute granted to `service_role` only, so they are unreachable even with a stolen session |
 
 Adding a function to any of those without a preceding role check silently
@@ -322,10 +323,12 @@ a 6-digit code is the entire authentication factor. Sign-in *is* enumeration-saf
 the response is identical for registered and unregistered addresses.
 
 **A5 — Everyone reads everything.** See [Threat model](#threat-model). One
-deliberate exception: downloading a database dump
-([backups.md](./backups.md#downloading-goes-through-the-portal)) is editor+,
-because it hands over the contents of every table rather than metadata about
-them.
+deliberate exception: the whole **Backups** tab is admin-write, and that includes
+*reading* a dump — downloading one hands over the contents of every table rather
+than metadata about them, so it sits with the actions rather than with the
+reading ([backups.md § Permissions](./backups.md#permissions)). Everything else
+about a backup — that it ran, when, how big, over which databases — is readable
+by every signed-in user on purpose.
 
 **A6 — Unexpected failures return their message verbatim.** A 500 from a route can
 carry Postgres or provider text, which leaks schema and internal detail to an

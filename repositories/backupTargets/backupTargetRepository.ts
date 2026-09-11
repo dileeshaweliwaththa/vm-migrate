@@ -1,10 +1,15 @@
 import { createClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/service';
 import type { BackupDispatchRow, BackupTargetRow } from '@/types/supabase/response/backupTargets';
 
 // Repository layer: pure Supabase data access for `backup_targets` and the
 // `backup_dispatches` audit. The credentials are in
-// `backupTargetSecretRepository` (service-role only); everything *about* the
-// backups is fetched from the worker (`backupApiRepository`).
+// `backupTargetSecretRepository` (service-role only); the runs and their events
+// are in `backupRuns/backupRunRepository`.
+//
+// Reads and writes of a target use the request-scoped client, so RLS applies and
+// the admin-only write policy holds. The one exception is the dispatch insert
+// below.
 
 export type BackupTargetWriteColumns = Partial<{
   name: string;
@@ -90,6 +95,16 @@ export const deleteBackupTarget = async (id: string): Promise<void> => {
 
 // ---- dispatch audit --------------------------------------------------------
 
+// Records that a run was asked for.
+//
+// **Service-role**, because a scheduled run has no session to satisfy a policy
+// with — pg_cron is not a person, and `backup_dispatches` has no insert policy
+// for exactly that reason. The gate is in `runBackup`: `requireAdmin` for a
+// manual run, and the cron route's own bearer token for a scheduled one.
+//
+// Writing it with the request client is what the first version did, which would
+// have failed every scheduled run the moment one actually arrived — the row a
+// silent schedule is diagnosed by is the row it could not write.
 export const insertBackupDispatch = async (values: {
   target_id: string;
   source: string;
@@ -98,7 +113,7 @@ export const insertBackupDispatch = async (values: {
   error: string;
   requested_by: string | null;
 }): Promise<void> => {
-  const supabase = await createClient();
+  const supabase = createServiceClient();
   const { error } = await supabase.from('backup_dispatches').insert(values);
   if (error) throw new Error(error.message);
 };

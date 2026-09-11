@@ -12,7 +12,7 @@ import {
 } from '@/repositories/backupStorage/backupStorageRepository';
 import { listBlobs } from '@/repositories/azure/azureBlobRepository';
 import { getCurrentRole } from '@/services/auth/authService';
-import { canEdit, isAdmin } from '@/lib/rbac';
+import { isAdmin } from '@/lib/rbac';
 import { ForbiddenError } from '@/lib/errors';
 import type { BackupStorageAccount, BackupStorageInput } from '@/types/common/backup';
 
@@ -22,12 +22,6 @@ import type { BackupStorageAccount, BackupStorageInput } from '@/types/common/ba
 // once. Its own service rather than part of `backupService` because it is its own
 // entity with its own routes and its own lifetime: a storage account outlives the
 // targets that point at it.
-
-const requireEditor = async (action: string): Promise<void> => {
-  if (!canEdit(await getCurrentRole())) {
-    throw new ForbiddenError(`Editor access required to ${action}.`);
-  }
-};
 
 const requireAdmin = async (action: string): Promise<void> => {
   if (!isAdmin(await getCurrentRole())) {
@@ -65,7 +59,7 @@ export const listStorageAccounts = async (): Promise<BackupStorageAccount[]> => 
 export const createStorageAccount = async (
   input: BackupStorageInput
 ): Promise<BackupStorageAccount> => {
-  await requireEditor('add an Azure storage account');
+  await requireAdmin('add an Azure storage account');
 
   const cols = inputToColumns(input);
   if (!cols.container) throw new Error('A container name is required.');
@@ -84,7 +78,7 @@ export const updateStorageAccount = async (
   id: string,
   input: BackupStorageInput
 ): Promise<BackupStorageAccount> => {
-  await requireEditor('edit an Azure storage account');
+  await requireAdmin('edit an Azure storage account');
 
   const cols = inputToColumns(input);
   if (cols.container !== undefined && !cols.container) {
@@ -141,7 +135,7 @@ export const getStorageForWrite = async (
 export const testStorageAccount = async (
   id: string
 ): Promise<{ ok: boolean; message: string }> => {
-  await requireEditor('test an Azure storage account');
+  await requireAdmin('test an Azure storage account');
 
   const storage = await getStorageForWrite(id);
   if (!storage.ok) return { ok: false, message: storage.message };

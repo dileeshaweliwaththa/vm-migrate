@@ -17,7 +17,9 @@ import type { BackupCheckState, BackupScheduleTest, BackupTarget } from '@/types
 // button asks Postgres directly and then sends one request down the same path a
 // firing job takes, which `/api/backups/cron` answers without dumping anything.
 //
-// Admin-only, like the schedule itself.
+// Admin-only, like everything else that acts on this tab. A viewer sees the
+// schedule as a label and no button, which is the honest rendering: there is
+// nothing for them to press.
 
 // The icon carries the verdict in colour; the pill shapes are reserved for the
 // schedule itself, so a row of five pills doesn't read as five statuses.
@@ -48,10 +50,10 @@ function CheckRow({ check }: { check: BackupScheduleTest['checks'][number] }) {
 
 export function BackupScheduleTestPanel({
   target,
-  canAdmin,
+  canManage,
 }: {
   target: BackupTarget;
-  canAdmin: boolean;
+  canManage: boolean;
 }) {
   const test = useTestBackupSchedule();
   const [result, setResult] = useState<BackupScheduleTest | null>(null);
@@ -77,7 +79,7 @@ export function BackupScheduleTestPanel({
           ) : null}
         </div>
 
-        {canAdmin ? (
+        {canManage ? (
           <Button
             size="sm"
             variant="outline"
@@ -129,7 +131,7 @@ export function BackupScheduleTestPanel({
             ))}
           </div>
         </div>
-      ) : canAdmin ? (
+      ) : canManage ? (
         <p className="text-body-sm text-muted-foreground">
           Checks the pg_cron job and its secrets, then has Supabase send one real request to this
           app. No dump is taken.

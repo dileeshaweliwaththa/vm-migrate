@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PageHeader } from '@/components/layout/page-header';
 import { cn } from '@/lib/utils';
-import { canEdit as canEditRole, isAdmin } from '@/lib/rbac';
+import { isAdmin } from '@/lib/rbac';
 import { STATUS_PILL_CLASS, STATUS_TONE_CLASS } from '@/lib/vm-utils';
 import { computeBackupStats, describeCron, formatTimestamp } from '@/lib/backup-utils';
 import { useBackupTargets } from '@/hooks/backups/useBackups';
@@ -141,8 +141,10 @@ function TargetCard({ overview }: { overview: BackupTargetOverview }) {
 }
 
 export function BackupsIndex({ role }: { role: UserRole }) {
-  const canEdit = canEditRole(role);
-  const canPurge = isAdmin(role);
+  // One gate for the whole tab: a target holds a database password and its
+  // dumps are the database contents, so there is no "edit it but don't run it"
+  // middle ground worth modelling. Everyone else reads.
+  const canManage = isAdmin(role);
 
   const { data: overviews, isLoading, error } = useBackupTargets();
   const stats = computeBackupStats(overviews ?? []);
@@ -178,13 +180,12 @@ export function BackupsIndex({ role }: { role: UserRole }) {
           </>
         }
         actions={
-          canEdit ? (
+          canManage ? (
             <>
               {/* Azure storage is configured once for every target, so it is a
                   page-level action rather than a field in the target form. */}
               <BackupStorageDialog
-                canEdit={canEdit}
-                canPurge={canPurge}
+                canManage={canManage}
                 trigger={
                   <Button size="sm" variant="outline">
                     <Cloud className="mr-2 h-4 w-4" /> Azure Storage
@@ -192,7 +193,7 @@ export function BackupsIndex({ role }: { role: UserRole }) {
                 }
               />
               <BackupTargetDialog
-                canAdmin={canPurge}
+                canManage={canManage}
                 trigger={
                   <Button size="sm">
                     <Plus className="mr-2 h-4 w-4" /> Add Target
@@ -222,9 +223,9 @@ export function BackupsIndex({ role }: { role: UserRole }) {
         ) : (overviews ?? []).length === 0 ? (
           <div className="rounded-lg border border-dashed border-border py-16 text-center text-body-sm text-muted-foreground">
             No backup targets yet.
-            {canEdit ? (
+            {canManage ? (
               <span className="mt-1 block">
-                Add a MySQL server, its Azure destination and the worker that dumps it.
+                Add a MySQL server, its Azure destination and a schedule.
               </span>
             ) : null}
           </div>

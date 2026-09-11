@@ -48,20 +48,24 @@ import { BackupTargetDialog } from '@/components/backups/backup-target-dialog';
 //
 // The header carries the two facts you need to know you are in the right place —
 // the database and the schedule — and nothing else. Retention, the Azure
-// destination, the worker's address and which credentials are stored are all
-// *configuration*: they live in the strip at the bottom of Overview and in the
-// Edit dialog, rather than in a sentence across the top of every visit.
+// destination and which credentials are stored are all *configuration*: they live
+// in the strip at the bottom of Overview and in the Edit dialog, rather than in a
+// sentence across the top of every visit.
+//
+// **Readable by everyone, actionable by admins.** A viewer gets the whole page —
+// the stat cards, the database list, the log, the schedule, the history — with no
+// buttons on it, because a backup that stopped running is something anyone here
+// should be able to notice.
 
 export function BackupTargetDetail({
   targetId,
-  canEdit,
-  canPurge,
+  canManage,
 }: {
   targetId: string;
-  canEdit: boolean;
-  // Admin. Gates the schedule and its test, deleting a dump, and removing the
-  // target.
-  canPurge: boolean;
+  // Admin. **Every** action on this page — running a dump, editing the target,
+  // the schedule and its test, downloading or deleting a dump, removing the
+  // target. A viewer reads the same page with no controls on it.
+  canManage: boolean;
 }) {
   const { data: overview, isLoading, error } = useBackupTarget(targetId);
   const run = useRunBackup();
@@ -142,10 +146,10 @@ export function BackupTargetDetail({
                   : 'Ready'
                 : 'Unreachable'}
             </span>
-            {canEdit ? (
+            {canManage ? (
               <BackupTargetDialog
                 target={target}
-                canAdmin={canPurge}
+                canManage={canManage}
                 trigger={
                   <Button size="sm" variant="outline">
                     <Pencil className="mr-2 size-4" /> Edit
@@ -153,7 +157,7 @@ export function BackupTargetDetail({
                 }
               />
             ) : null}
-            {canPurge ? (
+            {canManage ? (
               <AlertDialog>
                 <AlertDialogTrigger asChild>
                   <Button size="sm" variant="outline" aria-label="Remove target">
@@ -242,13 +246,18 @@ export function BackupTargetDetail({
           <>
             <BackupStatCards overview={overview} />
 
-            {canEdit && status.reachable ? (
+            {/* Shown to everyone when the server answered: the list of databases
+                is what "this is being backed up" actually means, and a viewer
+                who cannot run one still needs to see it. The component renders
+                them as labels without the controls. */}
+            {status.reachable ? (
               <BackupDatabasePicker
                 databases={databases}
                 selected={selected}
                 onSelectedChange={setSelected}
                 running={following}
                 disabled={following}
+                canManage={canManage}
                 onRun={() =>
                   run.mutate(
                     { id: target.id, databases: selected },
@@ -270,7 +279,7 @@ export function BackupTargetDetail({
 
             {/* Between the log and the read-back, because it is both: the
                 schedule as configured, and a button that checks it. */}
-            <BackupScheduleTestPanel target={target} canAdmin={canPurge} />
+            <BackupScheduleTestPanel target={target} canManage={canManage} />
 
             {/* Configuration, quietly, at the end — the facts you set once and
                 then only check. Everything here is editable in the dialog above;
@@ -335,12 +344,7 @@ export function BackupTargetDetail({
             </div>
           </>
         ) : (
-          <BackupHistory
-            targetId={target.id}
-            records={records}
-            canEdit={canEdit}
-            canPurge={canPurge}
-          />
+          <BackupHistory targetId={target.id} records={records} canManage={canManage} />
         )}
       </div>
     </>

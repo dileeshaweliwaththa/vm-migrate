@@ -30,7 +30,7 @@ import { getAuthenticatedUser } from '@/repositories/auth/authRepository';
 import { getCurrentRole } from '@/services/auth/authService';
 import { listTargetDatabases, startBackup } from '@/services/backups/backupRunner';
 import { getStorageForWrite } from '@/services/backups/backupStorageService';
-import { canEdit, isAdmin } from '@/lib/rbac';
+import { isAdmin } from '@/lib/rbac';
 import { ForbiddenError } from '@/lib/errors';
 import type { BackupDispatchRow, BackupTargetRow } from '@/types/supabase/response/backupTargets';
 import {
@@ -67,12 +67,16 @@ import {
 
 // ---- authorization ---------------------------------------------------------
 
-const requireEditor = async (action: string): Promise<void> => {
-  if (!canEdit(await getCurrentRole())) {
-    throw new ForbiddenError(`Editor access required to ${action}.`);
-  }
-};
-
+// **Backups are admin-write, everyone-read.** Every other feature here splits
+// at editor, but a backup target holds a database superuser's password, its
+// dumps are the whole contents of every database on the server, and its schedule
+// decides whether any of it happens. There is no action on this tab that is
+// merely "editing a record", so there is one gate rather than two.
+//
+// Reading is unrestricted: any signed-in user sees the targets, their databases,
+// the history and the logs. Knowing that last night's backup ran is not a
+// privilege, and hiding it from the people who would notice it stopped would be
+// the wrong way round.
 const requireAdmin = async (action: string): Promise<void> => {
   if (!isAdmin(await getCurrentRole())) {
     throw new ForbiddenError(`Admin access required to ${action}.`);
@@ -321,7 +325,7 @@ export const listBackupTargets = async (): Promise<BackupTarget[]> => {
 };
 
 export const createBackupTarget = async (input: BackupTargetInput): Promise<BackupTarget> => {
-  await requireEditor('add a backup target');
+  await requireAdmin('add a backup target');
 
   const cols = inputToColumns(input);
   if (!cols.db_host) throw new Error('The database host is required.');
@@ -343,14 +347,7 @@ export const updateBackupTarget = async (
   id: string,
   input: BackupTargetInput
 ): Promise<BackupTarget> => {
-  // The schedule is admin-only and travels in the same payload as the rest of
-  // the configuration, so the *presence* of a schedule field is what raises the
-  // bar — rather than a second route nobody would notice was unguarded.
-  if (input.cronSchedule !== undefined || input.scheduleEnabled !== undefined) {
-    await requireAdmin("change a backup target's schedule");
-  } else {
-    await requireEditor('edit a backup target');
-  }
+  await requireAdmin('edit a backup target');
 
   const cols = inputToColumns(input);
   assertWritable(cols);
@@ -516,16 +513,15 @@ export const getBackupLogs = async (id: string, since: number): Promise<BackupLo
 // Starts a run and returns as soon as it has begun — the dump itself takes
 // minutes and is followed through the log, not through this response.
 //
-// Additive (it only ever creates a dump), so editor is the bar, and the dispatch
-// row records who asked. `source: 'schedule'` skips the role check because
-// pg_cron has no session; that path is reachable only from the cron route, which
-// authenticates with its own token.
+// The dispatch row records who asked. `source: 'schedule'` skips the role check
+// because pg_cron has no session; that path is reachable only from the cron
+// route, which authenticates with its own token.
 export const runBackup = async (
   id: string,
   databases: string[],
   source: 'manual' | 'schedule' = 'manual'
 ): Promise<{ ok: boolean; message: string }> => {
-  if (source === 'manual') await requireEditor('run a backup');
+  if (source === 'manual') await requireAdmin('run a backup');
 
   const user = source === 'manual' ? await getAuthenticatedUser() : null;
   const result = await startBackup(id, databases, source, user?.id ?? null);
@@ -581,9 +577,9 @@ const resolveRecordBlob = async (
 
 // Opens a dump for download, straight from Azure.
 //
-// Editor+, one step above the rest of reading: everything else here is metadata
-// *about* a backup, while this is the database contents — every row of every
-// table, in one file.
+// The sharpest edge on the tab: everything else here is metadata *about* a
+// backup, while this is the database contents — every row of every table, in one
+// file, including whatever the application stores about people.
 export const downloadBackup = async (
   id: string,
   recordId: string
@@ -597,7 +593,7 @@ export const downloadBackup = async (
     }
   | { ok: false; message: string }
 > => {
-  await requireEditor('download a backup');
+  await requireAdmin('download a backup');
 
   const resolved = await resolveRecordBlob(id, recordId);
   if (!resolved.ok) return { ok: false, message: resolved.message };
