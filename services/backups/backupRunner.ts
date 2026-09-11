@@ -166,7 +166,7 @@ const backupOneDatabase = async (
     // dump, which would upload happily and restore to nothing. So the upload is
     // awaited for its result and the dump for its exit code, and either one
     // failing fails the database.
-    const [{ url }] = await Promise.all([
+    await Promise.all([
       uploadBlobStream(
         config.azureConnectionString,
         config.azureContainer,
@@ -186,7 +186,10 @@ const backupOneDatabase = async (
       target_id: config.target.id,
       type: 'db_done',
       database_name: database,
-      message: `Uploaded ${database} (${size} bytes) to ${url.split('/').slice(-2).join('/')}`,
+      // The full blob name, prefix included — it is what you paste into Azure
+      // to find this dump. The previous form showed the last two segments,
+      // which silently hid the target's own folder.
+      message: `Uploaded ${database} (${size} bytes) to ${blobName}`,
     });
     return { ok: true, size };
   } catch (error) {

@@ -42,12 +42,26 @@ export interface BackupCronPingResult {
   timedOut: boolean;
 }
 
+// PostgREST reports an absent function as a schema-cache miss (`PGRST202`),
+// which reads as a bug in the app rather than as the one thing it is: this
+// migration has not been applied to that project yet. There is nothing to
+// retry and nothing to fix in the code, so the message says what to run.
+const NOT_INSTALLED =
+  'The schedule diagnostics are not installed in this database yet — run `supabase db push` to apply supabase/migrations/20260911170000_backup_cron_test.sql.';
+
+const describeRpcError = (error: { code?: string; message: string }): Error =>
+  new Error(
+    error.code === 'PGRST202' || /could not find the function/i.test(error.message)
+      ? NOT_INSTALLED
+      : error.message
+  );
+
 export const findBackupCronDiagnostics = async (
   targetId: string
 ): Promise<BackupCronDiagnostics> => {
   const supabase = createServiceClient();
   const { data, error } = await supabase.rpc('backup_cron_diagnostics', { p_target: targetId });
-  if (error) throw new Error(error.message);
+  if (error) throw describeRpcError(error);
   return data as BackupCronDiagnostics;
 };
 
@@ -56,7 +70,7 @@ export const findBackupCronDiagnostics = async (
 export const sendBackupCronPing = async (): Promise<number> => {
   const supabase = createServiceClient();
   const { data, error } = await supabase.rpc('backup_cron_ping');
-  if (error) throw new Error(error.message);
+  if (error) throw describeRpcError(error);
   return Number(data);
 };
 
@@ -65,6 +79,6 @@ export const findBackupCronPingResult = async (
 ): Promise<BackupCronPingResult> => {
   const supabase = createServiceClient();
   const { data, error } = await supabase.rpc('backup_cron_ping_result', { p_request: requestId });
-  if (error) throw new Error(error.message);
+  if (error) throw describeRpcError(error);
   return data as BackupCronPingResult;
 };
