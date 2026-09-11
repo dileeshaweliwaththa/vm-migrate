@@ -137,7 +137,7 @@ an environment with no VM to inherit from. See
 ## `backup_targets` / `backup_target_secrets` / `backup_dispatches`
 
 The **Backups** tab. A *target* is a MySQL server we back up: what to connect to,
-where the dumps go, when it runs, and which worker container does the dumping.
+where the dumps go, and when it runs.
 The app owns all of it: the configuration, the credentials, the schedule **and**
 the dump — `mysqldump` → gzip → Azure Blob, streamed, nothing on disk. (A
 Supabase Edge Function could not, at 2s of CPU with no binaries; the app's own
@@ -145,14 +145,22 @@ runtime has no such limit. See [backups.md](./backups.md).)
 
 There is no `vm_id`: a backup target is a *database server* (mencartdb is Azure
 Database for MySQL), and tying it to a machine in the tracker said something
-untrue about most of them. `worker_url` is normalized on write, where a missing
-port becomes **2999** (the worker's default). `db_name` is deliberately absent —
-the worker enumerates the server's databases and dumps each one, which is what
-makes "18 databases" a property of the server rather than 18 rows.
+untrue about most of them. `db_name` is deliberately absent — a run enumerates
+the server's databases and dumps each one, which is what makes "19 databases" a
+property of the server rather than 19 rows.
 
 `cron_schedule` is handed to **pg_cron** by
 `public.sync_backup_target_schedule()`, which a trigger keeps in step with the
-row — so this column *is* the schedule. See
+row — so this column *is* the schedule. Its values come from
+`BACKUP_CRON_PRESETS` (every 5 minutes for testing, then 02:00/03:00/05:00
+daily), though the column accepts any valid five-field expression and older rows
+may hold one.
+
+Three `security definer` functions let the app check that schedule without
+waiting for it to fire — `backup_cron_diagnostics(uuid)`, `backup_cron_ping()`
+and `backup_cron_ping_result(bigint)`. They read `cron.job`,
+`vault.decrypted_secrets` and `net._http_response`, which no client role can
+reach, so execute is granted to **`service_role` only**. See
 [backups.md § Scheduling](./backups.md#scheduling).
 
 RLS: `backup_targets` and `backup_dispatches` read = any authenticated user,
@@ -165,8 +173,10 @@ only, like `vm_jenkins_secrets`.
 | `id`              | `uuid`        | primary key                                 |
 | `name`            | `text`        | e.g. `mencartdb (Azure MySQL)`; defaults to the host |
 | `worker_url`      | `text`        | **legacy** — the external worker this feature used before the app performed its own dumps. Nothing writes it |
-| `db_host` / `db_port` / `db_user` | `text` / `integer` / `text` | what the worker connects to |
-| `azure_account` / `azure_container` | `text` | where the dumps go            |
+| `db_host` / `db_port` / `db_user` | `text` / `integer` / `text` | what a run connects to |
+| `azure_account` / `azure_container` | `text` | **legacy** — superseded by `storage_id`; still read to attribute pre-unification blobs |
+| `storage_id`      | `uuid`        | → `backup_storage_accounts`, `on delete set null` |
+| `blob_prefix`     | `text`        | this target's folder in the shared container; fixed at creation |
 | `retention_days`  | `integer`     | how long dumps are kept                     |
 | `cron_schedule`   | `text`        | five-field cron, run by pg_cron             |
 | `schedule_enabled`| `boolean`     | whether the pg_cron job exists at all       |
@@ -175,7 +185,7 @@ only, like `vm_jenkins_secrets`.
 
 | table                   | columns                                                        |
 | ----------------------- | -------------------------------------------------------------- |
-| `backup_target_secrets` | `target_id uuid pk → backup_targets`, `db_password text`, `azure_connection_string text`, timestamps |
+| `backup_target_secrets` | `target_id uuid pk → backup_targets`, `db_password text`, `azure_connection_string text` (legacy — the key lives on the destination), timestamps |
 | `backup_dispatches`     | `id`, `target_id → backup_targets`, `source backup_dispatch_source`, `status backup_dispatch_status`, `http_status int`, `error text`, `requested_by → auth.users`, `created_at` |
 
 `backup_dispatches` records that a run was *asked for*, which is the one thing a
@@ -495,6 +505,10 @@ In `supabase/migrations/`, applied in timestamp order:
 - `…_backup_cron_calls_app.sql` — re-points every cron job from the
   `backup-dispatch` Edge Function to the app's own `/api/backups/cron`, and drops
   the `worker_url` condition from the schedule sync.
+- `…_backup_cron_test.sql` — `backup_cron_diagnostics()`, `backup_cron_ping()`
+  and `backup_cron_ping_result()`: `security definer`, `service_role`-only, so
+  the app can read its own pg_cron job and send one test request down the path a
+  firing job takes. See [backups.md § Test schedule](./backups.md#test-schedule).
 - `…_vm_jenkins_credentials.sql` — `vm_jenkins` + `vm_jenkins_secrets`: the
   Jenkins server, user and token move from each environment onto the **VM** that
   runs them, seeded from the most recently updated configured environment per VM

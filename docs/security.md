@@ -67,7 +67,7 @@ Verified in this review:
 
 ### Service-role paths are the load-bearing ones
 
-Three repositories use the service-role client and therefore **bypass RLS**. For
+Eight repositories use the service-role client and therefore **bypass RLS**. For
 these the service-layer check is the *only* enforcement:
 
 | Repository | Gate that must hold |
@@ -75,10 +75,15 @@ these the service-layer check is the *only* enforcement:
 | `userRepository` (all of it) | `requireAdmin()` in `userService` |
 | `appSettingsRepository.findAppSettingsServiceRole` | reached only from `getGeminiConfig`, whose callers are `canEdit`-gated |
 | `environmentSecretRepository` | `canEdit` to configure, `canRunBuild` to use, in `jenkinsService` |
+| `vmJenkinsSecretRepository` | `requireEditor` to write, in `vmJenkinsService`; the read is server-internal (`getVmJenkinsCredentials`, called only by `jenkinsService`) |
+| `backupTargetSecretRepository` | `requireEditor` / `requireAdmin` in `backupService` |
+| `backupStorageRepository` (the connection string) | `requireEditor` / `requireAdmin` in `backupStorageService`; `getStorageForWrite` is server-internal |
+| `backupRunRepository` (the writes) | called only by `backupRunner`, reachable via `runBackup` (`editor`, or the token-authenticated cron route). Reads use the request client, so the history is RLS-governed |
+| `backupCronRepository` | `requireAdmin` in `backupCronService`. Its three RPCs are `security definer` with execute granted to `service_role` only, so they are unreachable even with a stolen session |
 
-Adding a function to any of those three without a preceding role check silently
-removes RLS from that data. `createServiceClient` is imported by exactly those
-three files today — that grep is the audit.
+Adding a function to any of those without a preceding role check silently
+removes RLS from that data. `grep -rl createServiceClient repositories services`
+is the audit — it should return exactly the rows above.
 
 ## Secrets handling
 
@@ -138,20 +143,22 @@ three files today — that grep is the audit.
 
 ## SSRF
 
-Two integrations *fetch* a URL that came from a user, and together they are the
-whole SSRF surface. (The backup runner also reaches outward — a MySQL host and an
+**Jenkins** is the one integration that fetches a URL a user supplied, and it is
+therefore the whole SSRF surface. (The backup runner also reaches outward — a MySQL host and an
 Azure storage account an editor typed in — but it opens a database connection and
 an SDK client rather than fetching a URL, so there is no redirect to follow and no
 response body to reflect. What an editor can do there is dump a database they can
 already reach into a container they control; see
-[backups.md](./backups.md#security).) **Jenkins** (an environment's server,
-now the VM's — see [jenkins-sync.md](./jenkins-sync.md)) and the **backup
-services** (a registry row's `base_url` — see [backups.md](./backups.md)). They
-share one host denylist, `isDeniedOutboundTarget` in
-[lib/outbound-url.ts](../lib/outbound-url.ts): a denylist that exists twice is one
-that gets updated once.
+[backups.md](./backups.md#security).) The server it reaches is the **VM's**, not
+the environment's, since Jenkins credentials moved onto the machine — see
+[jenkins-sync.md](./jenkins-sync.md). The host denylist lives apart from it, as
+`isDeniedOutboundTarget` in
+[lib/outbound-url.ts](../lib/outbound-url.ts), wrapped as `isDeniedJenkinsTarget`:
+the second caller it was shared with (a backup worker's address) is gone, and it
+stays separate because the next outbound integration should reuse it rather than
+grow a second list.
 
-The Jenkins side has two distinct problems, and only one of them is closed.
+It has two distinct problems, and only one of them is closed.
 
 **Closed: the token cannot leave the configured server.** Every URL reaching
 `jenkinsRepository` is first re-mounted on the environment's own server root by
@@ -177,6 +184,14 @@ back to them is not the response body, but it is not nothing: distinct messages 
 401 / 403 / 404 / other HTTP / network error make host-and-port probing possible,
 and `extractPorts` returns port-like numbers found in whatever document was
 fetched. See [A1](#a1) for why this is accepted rather than fixed.
+
+One more request leaves the estate, and it is not part of that surface:
+`backup_cron_ping()` makes **Postgres** post to the app. The URL comes from the
+`backup_cron_url` Vault secret, which only an operator with SQL access can set —
+no caller input reaches it, and the function takes no arguments. The response is
+returned to an admin as a status code and a truncated body, which is the point:
+it is how they learn the token doesn't match. See
+[backups.md § Test schedule](./backups.md#test-schedule).
 
 One target class *is* refused outright, at save time and on every use
 (`isDeniedOutboundTarget`, wrapped as `isDeniedJenkinsTarget` in

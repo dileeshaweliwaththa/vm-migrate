@@ -21,7 +21,7 @@ import {
 import { PageHeader } from '@/components/layout/page-header';
 import { cn } from '@/lib/utils';
 import { STATUS_PILL_CLASS, STATUS_TONE_CLASS } from '@/lib/vm-utils';
-import { formatTimestamp } from '@/lib/backup-utils';
+import { describeCron, formatTimestamp } from '@/lib/backup-utils';
 import {
   useBackupLogs,
   useBackupTarget,
@@ -31,6 +31,7 @@ import {
 import { BackupDatabasePicker } from '@/components/backups/backup-database-picker';
 import { BackupHistory } from '@/components/backups/backup-history';
 import { BackupLogPanel } from '@/components/backups/backup-log-panel';
+import { BackupScheduleTestPanel } from '@/components/backups/backup-schedule-test';
 import { BackupStatCards } from '@/components/backups/backup-stat-cards';
 import { BackupTargetDialog } from '@/components/backups/backup-target-dialog';
 
@@ -58,8 +59,8 @@ export function BackupTargetDetail({
 }: {
   targetId: string;
   canEdit: boolean;
-  // Admin. Gates the schedule, deleting a dump, removing the target, and the
-  // worker's own cron.
+  // Admin. Gates the schedule and its test, deleting a dump, and removing the
+  // target.
   canPurge: boolean;
 }) {
   const { data: overview, isLoading, error } = useBackupTarget(targetId);
@@ -117,7 +118,9 @@ export function BackupTargetDetail({
             </span>
             <span className="inline-flex items-center gap-1.5">
               <CalendarClock className="size-3.5" />
-              <span className="font-mono text-label-mono">{target.cronSchedule || '—'}</span>
+              {/* In words: the expression itself is in the schedule panel, and
+                  "Daily at 02:00" is what you came here to read. */}
+              <span>{describeCron(target.cronSchedule)}</span>
               {target.scheduleEnabled ? 'scheduled' : 'not scheduled'}
             </span>
           </>
@@ -161,9 +164,9 @@ export function BackupTargetDetail({
                   <AlertDialogHeader>
                     <AlertDialogTitle>Remove “{target.name}”?</AlertDialogTitle>
                     <AlertDialogDescription>
-                      The stored credentials and the schedule are deleted, and this database stops
-                      being backed up. No existing dump is removed — they live on the worker&apos;s
-                      host and in Azure.
+                      The stored credentials, the history and the pg_cron job are deleted, and
+                      this database stops being backed up. <strong>No dump is removed</strong> —
+                      they stay in Azure.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
@@ -264,6 +267,10 @@ export function BackupTargetDetail({
             ) : null}
 
             <BackupLogPanel events={logs?.events ?? []} running={following} />
+
+            {/* Between the log and the read-back, because it is both: the
+                schedule as configured, and a button that checks it. */}
+            <BackupScheduleTestPanel target={target} canAdmin={canPurge} />
 
             {/* Configuration, quietly, at the end — the facts you set once and
                 then only check. Everything here is editable in the dialog above;

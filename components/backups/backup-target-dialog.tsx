@@ -27,7 +27,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { DEFAULT_MYSQL_PORT, type BackupTarget, type BackupTargetInput } from '@/types/common/backup';
+import {
+  BACKUP_CRON_PRESETS,
+  DEFAULT_BACKUP_CRON,
+  DEFAULT_MYSQL_PORT,
+  type BackupTarget,
+  type BackupTargetInput,
+} from '@/types/common/backup';
 
 // A backup target: the MySQL server, its destination, and when to run.
 //
@@ -65,11 +71,17 @@ export function BackupTargetDialog({
   const [dbPassword, setDbPassword] = useState('');
   const [storageId, setStorageId] = useState('');
   const [retentionDays, setRetentionDays] = useState('7');
-  const [cronSchedule, setCronSchedule] = useState('0 2 * * *');
+  const [cronSchedule, setCronSchedule] = useState<string>(DEFAULT_BACKUP_CRON);
   const [scheduleEnabled, setScheduleEnabled] = useState(false);
   const [notes, setNotes] = useState('');
 
   const pending = create.isPending || update.isPending;
+
+  // A stored schedule from before the presets existed. Kept as an option rather
+  // than dropped, so editing the notes cannot change when backups run.
+  const isCustomSchedule =
+    Boolean(cronSchedule) &&
+    !BACKUP_CRON_PRESETS.some((preset) => preset.value === cronSchedule);
 
   // Seeded on every open from the target being edited, so a cancelled edit does
   // not persist into the next one. The two secret fields always start empty —
@@ -81,7 +93,7 @@ export function BackupTargetDialog({
     setDbUser(target?.dbUser ?? '');
     setStorageId(target?.storageId ?? '');
     setRetentionDays(String(target?.retentionDays ?? 7));
-    setCronSchedule(target?.cronSchedule ?? '0 2 * * *');
+    setCronSchedule(target?.cronSchedule || DEFAULT_BACKUP_CRON);
     setScheduleEnabled(target?.scheduleEnabled ?? false);
     setNotes(target?.notes ?? '');
     setDbPassword('');
@@ -259,17 +271,30 @@ export function BackupTargetDialog({
             {canAdmin ? (
               <>
                 <div className="space-y-2">
-                  <Label htmlFor="bt-cron">Schedule (cron)</Label>
-                  <Input
-                    id="bt-cron"
-                    value={cronSchedule}
-                    onChange={(e) => setCronSchedule(e.target.value)}
-                    placeholder="0 2 * * *"
-                    className="font-mono"
-                  />
-                  <p className="text-body-sm text-muted-foreground">
-                    Five fields, run by Postgres (pg_cron).{' '}
-                    <code className="font-mono">0 2 * * *</code> is daily at 02:00.
+                  <Label>When</Label>
+                  {/* Chosen, not typed. Five-field cron is easy to get subtly
+                      wrong, and the cost of a wrong one is discovered a day
+                      later by a backup that never happened. A value from an
+                      older row that is not a preset is offered as-is, so
+                      opening this form cannot silently reschedule it. */}
+                  <Select value={cronSchedule} onValueChange={setCronSchedule}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a schedule" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {BACKUP_CRON_PRESETS.map((preset) => (
+                        <SelectItem key={preset.value} value={preset.value}>
+                          {preset.label}
+                          {preset.hint ? ` — ${preset.hint}` : ''}
+                        </SelectItem>
+                      ))}
+                      {isCustomSchedule ? (
+                        <SelectItem value={cronSchedule}>{cronSchedule} — custom</SelectItem>
+                      ) : null}
+                    </SelectContent>
+                  </Select>
+                  <p className="font-mono text-label-mono text-muted-foreground">
+                    {cronSchedule} · pg_cron
                   </p>
                 </div>
                 {/* `Toggle`, not `Switch`: the generated switch styles on Radix

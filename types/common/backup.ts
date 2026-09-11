@@ -13,6 +13,32 @@ export type BackupTrigger = (typeof BACKUP_TRIGGERS)[number];
 export const BACKUP_STATUSES = ['success', 'failed', 'running'] as const;
 export type BackupStatus = (typeof BACKUP_STATUSES)[number];
 
+// The schedules a target can run on.
+//
+// A fixed set rather than a free-text cron field: five-field syntax is easy to
+// get subtly wrong (`*/5 * * * *` and `* */5 * * *` differ by a factor of 12),
+// and the wrong one here is discovered a day later by a backup that didn't
+// happen. `value` is handed to pg_cron unchanged.
+//
+// **Every 5 minutes is for testing**, and says so wherever it is offered — left
+// on, it dumps every database twelve times an hour.
+export const BACKUP_CRON_PRESETS = [
+  { value: '*/5 * * * *', label: 'Every 5 minutes', hint: 'testing only' },
+  { value: '0 2 * * *', label: 'Daily at 02:00', hint: '' },
+  { value: '0 3 * * *', label: 'Daily at 03:00', hint: '' },
+  { value: '0 5 * * *', label: 'Daily at 05:00', hint: '' },
+] as const;
+
+export type BackupCronPreset = (typeof BACKUP_CRON_PRESETS)[number]['value'];
+
+// The default for a new target: overnight, and not one of the testing ones.
+export const DEFAULT_BACKUP_CRON = '0 2 * * *';
+
+// How one check of the schedule came out. `warn` is for something that is not
+// wrong yet — a schedule deliberately left off, say.
+export const BACKUP_CHECK_STATES = ['pass', 'warn', 'fail'] as const;
+export type BackupCheckState = (typeof BACKUP_CHECK_STATES)[number];
+
 // Who asked for a run (mirrors the `backup_dispatch_source` DB enum).
 export const BACKUP_DISPATCH_SOURCES = ['schedule', 'manual'] as const;
 export type BackupDispatchSource = (typeof BACKUP_DISPATCH_SOURCES)[number];
@@ -68,8 +94,9 @@ export interface BackupTarget {
   // changing it would orphan everything already written under the old one.
   blobPrefix: string;
   retentionDays: number;
-  // Standard five-field cron. Handed to pg_cron unchanged, so this *is* the
-  // schedule rather than a description of one running somewhere else.
+  // Standard five-field cron, handed to pg_cron unchanged — so this *is* the
+  // schedule rather than a description of one running somewhere else. New values
+  // come from `BACKUP_CRON_PRESETS`; an older row may hold anything valid.
   cronSchedule: string;
   scheduleEnabled: boolean;
   notes: string;
@@ -174,6 +201,25 @@ export interface BackupLogPage {
   batchId: string;
   isRunning: boolean;
   events: BackupLogEvent[];
+}
+
+// The result of testing the schedule end to end.
+//
+// A scheduled backup is made of four things the app cannot see — the pg_cron
+// job, two Vault secrets, and an HTTP call out of Supabase — and when nothing
+// happens at 02:00 any of them could be the reason. Each check names one, so
+// the answer is "the token doesn't match", not "it isn't working".
+export interface BackupScheduleCheck {
+  label: string;
+  state: BackupCheckState;
+  detail: string;
+}
+
+export interface BackupScheduleTest {
+  // The whole path works: the request left Supabase and the app accepted it.
+  ok: boolean;
+  summary: string;
+  checks: BackupScheduleCheck[];
 }
 
 // Everything the page needs for one target in one request.

@@ -13,6 +13,10 @@ import { listBackupTargets } from '@/services/backups/backupService';
 // Body: `{ targetId }` for one target, or nothing for every target whose
 // schedule is on. It answers as soon as the runs have *started* — a dump takes
 // minutes, and pg_net's HTTP call is not going to wait for it.
+//
+// `{ test: true }` is a handshake: it authenticates and answers, and starts
+// nothing. That is what the **Test schedule** button sends down this path, so
+// proving the schedule works does not cost nineteen dumps.
 
 const authorized = (request: Request): boolean => {
   const expected = process.env.BACKUP_CRON_SECRET ?? '';
@@ -35,7 +39,17 @@ export async function POST(request: Request) {
   }
 
   try {
-    const body = (await request.json().catch(() => ({}))) as { targetId?: unknown };
+    const body = (await request.json().catch(() => ({}))) as {
+      targetId?: unknown;
+      test?: unknown;
+    };
+
+    // Checked after authorization, so the handshake proves the token as well as
+    // the reachability — an unauthenticated caller has already been turned away.
+    if (body.test === true) {
+      return NextResponse.json({ data: { test: true, accepted: true } });
+    }
+
     const targetId = typeof body.targetId === 'string' ? body.targetId : '';
 
     // A single target when pg_cron names one (the normal path); every enabled

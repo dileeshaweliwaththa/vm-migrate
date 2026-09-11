@@ -89,14 +89,15 @@ The Azure key is the destination's, held the same way.
 | Layer      | Files                                                                                     |
 | ---------- | ----------------------------------------------------------------------------------------- |
 | Routing    | `app/(protected)/(app)/backups/page.tsx` (the index), `backups/[id]/page.tsx` (one target); `app/api/backups/**/route.ts` |
-| UI         | `components/backups/backups-index.tsx`, `backup-target-detail.tsx`, `backup-stat-cards.tsx`, `backup-database-picker.tsx`, `backup-log-panel.tsx`, `backup-history.tsx`, `backup-target-dialog.tsx` |
-| Hook       | `hooks/backups/useBackups.ts`                                                             |
-| Service    | `services/backups/backupService.ts` (rules + mapping), `backupStorageService.ts` (the destinations), `backupRunner.ts` (**the work**) |
-| Repository | `backupTargets/*`, `backupStorage/*`, `backupRuns/*` (Supabase), `mysql/mysqlDumpRepository.ts` (**processes**), `azure/azureBlobRepository.ts` (**Azure SDK**) |
+| UI         | `components/backups/backups-index.tsx`, `backup-target-detail.tsx`, `backup-stat-cards.tsx`, `backup-database-picker.tsx`, `backup-log-panel.tsx`, `backup-history.tsx`, `backup-schedule-test.tsx`, `backup-target-dialog.tsx`, `backup-storage-dialog.tsx` |
+| Hook       | `hooks/backups/useBackups.ts`, `useBackupStorage.ts`                                      |
+| Service    | `services/backups/backupService.ts` (rules + mapping), `backupStorageService.ts` (the destinations), `backupCronService.ts` (**testing the schedule**), `backupRunner.ts` (**the work**) |
+| Repository | `backupTargets/*`, `backupStorage/*`, `backupRuns/*`, `backupCron/*` (Supabase), `mysql/mysqlDumpRepository.ts` (**processes**), `azure/azureBlobRepository.ts` (**Azure SDK**) |
 
-Presentation helpers (`formatBytes`, `formatDuration`, `recordTone`,
-`computeBackupStats`, `groupRecordsByDay`) live in `lib/backup-utils.ts`; domain
-types in `types/common/backup.ts`.
+Presentation helpers (`formatBytes`, `formatDuration`, `describeCron`,
+`recordTone`, `computeBackupStats`, `groupRecordsByDay`) live in
+`lib/backup-utils.ts`; domain types and the schedule presets in
+`types/common/backup.ts`.
 
 Two of those repositories are documented exceptions to "repositories only touch
 Supabase" — `mysqlDumpRepository` spawns `mysqldump`/`mysql`, and
@@ -155,6 +156,32 @@ one fewer thing to deploy.
 
 ## Scheduling
 
+### Four schedules, chosen not typed
+
+`BACKUP_CRON_PRESETS` in [types/common/backup.ts](../types/common/backup.ts) is
+the whole vocabulary, and the form is a `Select`:
+
+| Preset | Expression | For |
+| --- | --- | --- |
+| Every 5 minutes | `*/5 * * * *` | **testing only** |
+| Daily at 02:00 | `0 2 * * *` | the default |
+| Daily at 03:00 | `0 3 * * *` | staggering a second target |
+| Daily at 05:00 | `0 5 * * *` | staggering a third |
+
+Five-field cron is easy to get subtly wrong — `*/5 * * * *` and `* */5 * * *`
+differ by a factor of twelve — and a wrong one is discovered a day later by a
+backup that never happened. The column still holds a plain expression and pg_cron
+still evaluates it, so a target carrying something else from before the presets
+keeps it: the form offers it as *custom* rather than dropping it, because opening
+the dialog to fix a typo in the notes must not silently reschedule the backups.
+
+`describeCron` renders these in words (*Daily at 02:00*), which is what the
+header and the schedule panel show. **Every 5 minutes is for proving the plumbing
+works** and carries a `Testing only` pill wherever it is on — left running it
+dumps every database twelve times an hour.
+
+### The mechanism
+
 `cron_schedule` **is** the schedule. `public.sync_backup_target_schedule()` keeps
 one pg_cron job per target in step with the row, called by a trigger on insert,
 on update of the schedule columns, and on delete — so no code path can change a
@@ -189,6 +216,43 @@ worker's own history could never tell us.
 
 **No cron job exists until a target's schedule is turned on.** A target showing
 `Schedule off` has none by design; that is what the toggle means.
+
+### Test schedule
+
+Every link in that chain is somewhere this app cannot see, and when a schedule
+silently does nothing there are four candidates with one identical symptom:
+
+1. the job was never created (migrations not pushed, or the schedule is off)
+2. a Vault secret is missing, so the job posts to a null URL
+3. Supabase cannot reach the app (private network, or a stale URL)
+4. the token does not match `BACKUP_CRON_SECRET`, so the app answers 401
+
+**Test schedule** on a target page (admin) distinguishes them. It reads
+`cron.job` and the last `cron.job_run_details` row, checks both Vault secrets,
+and then has Postgres send **one real request down the same path a firing job
+takes** — same URL, same token, same `net.http_post`. The body is
+`{"test": true}`, which `/api/backups/cron` authenticates and answers *without
+starting a dump*, so proving the schedule works costs nothing.
+
+Each check names one link, so the answer is "the token doesn't match", not "it
+isn't working". `pass` / `warn` / `fail`: a schedule deliberately left off is a
+warning, a job registered for a schedule that is off is a failure (it will keep
+firing).
+
+Three `security definer` functions make this possible, because `cron.job`,
+`vault.decrypted_secrets` and `net._http_response` are unreachable by the app's
+roles:
+
+| Function | Returns |
+| --- | --- |
+| `backup_cron_diagnostics(uuid)` | the job, its schedule, whether it is active, both secrets' presence, the cron URL (never the token), and the last firing |
+| `backup_cron_ping()` | posts the handshake, returns pg_net's request id |
+| `backup_cron_ping_result(bigint)` | that response — status, body, error — or `settled: false` while in flight |
+
+Execute is granted to **`service_role` only**, the same bar as the secrets
+tables, so a signed-in user cannot call them directly; the admin check is in
+`backupCronService`. pg_net answers asynchronously, so the service polls for the
+response for up to 15s and reports *no answer* as the finding it is.
 
 ## Two levels, like Projects
 
@@ -269,7 +333,7 @@ is a smaller list, not an error page.
 | See the targets, status, databases, history and logs | `viewer` |
 | **Download** a dump — the database contents, not metadata about it | `editor` |
 | Register or edit a target (host, user, credentials, Azure, retention), **run a backup** | `editor` |
-| Change the **schedule**, delete a dump, remove a target | `admin` |
+| Change the **schedule**, **test** it, delete a dump, remove a target | `admin` |
 
 A run is additive — it only ever creates a dump — so it sits at editor, and the
 dispatch row records who asked. The admin set is what loses something or changes
@@ -308,6 +372,7 @@ not lose them.
 | `PATCH  /api/backups/storage/:id` | edit one (blank connection string keeps it) | `editor` |
 | `POST /api/backups/storage/:id` | test it — lists the container | `editor` |
 | `DELETE /api/backups/storage/:id` | remove it; targets keep their history, blobs untouched | `admin` |
+| `POST /api/backups/:id/schedule/test` | check the cron job, the secrets and the path from Supabase | `admin` |
 
 ## Security
 

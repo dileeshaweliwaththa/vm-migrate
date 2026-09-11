@@ -10,7 +10,7 @@ import { PageHeader } from '@/components/layout/page-header';
 import { cn } from '@/lib/utils';
 import { canEdit as canEditRole, isAdmin } from '@/lib/rbac';
 import { STATUS_PILL_CLASS, STATUS_TONE_CLASS } from '@/lib/vm-utils';
-import { computeBackupStats, formatTimestamp } from '@/lib/backup-utils';
+import { computeBackupStats, describeCron, formatTimestamp } from '@/lib/backup-utils';
 import { useBackupTargets } from '@/hooks/backups/useBackups';
 import type { UserRole } from '@/types/common';
 import type { BackupTargetOverview } from '@/types/common/backup';
@@ -72,7 +72,9 @@ function TargetCard({ overview }: { overview: BackupTargetOverview }) {
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-body-sm text-muted-foreground">
             <span className="inline-flex items-center gap-1.5">
               <CalendarClock className="size-3.5" />
-              <span className="font-mono text-label-mono">{target.cronSchedule || '—'}</span>
+              {/* In words, like the target page's header — the expression is
+                  detail the card doesn't need. */}
+              <span>{describeCron(target.cronSchedule)}</span>
               {target.scheduleEnabled ? 'scheduled' : 'off'}
             </span>
             <span className="inline-flex items-center gap-1.5 truncate">

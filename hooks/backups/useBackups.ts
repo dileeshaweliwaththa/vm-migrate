@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   BackupLogPage,
+  BackupScheduleTest,
   BackupTarget,
   BackupTargetInput,
   BackupTargetOverview,
@@ -104,6 +105,15 @@ export const useRunBackup = () =>
       body: JSON.stringify({ databases }),
     })
   );
+
+// Not invalidating: the test changes nothing, it only reports. It is slow on
+// purpose (pg_net answers asynchronously, so the service waits for the
+// response), hence a mutation rather than a query — it runs when asked.
+export const useTestBackupSchedule = () =>
+  useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<BackupScheduleTest>(`/api/backups/${id}/schedule/test`, { method: 'POST' }),
+  });
 
 export const useDeleteBackupRecord = () =>
   useInvalidating(({ id, recordId }: { id: string; recordId: string }) =>

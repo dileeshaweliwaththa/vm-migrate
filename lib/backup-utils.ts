@@ -1,4 +1,5 @@
 import type { StatusTone } from '@/lib/vm-utils';
+import { BACKUP_CRON_PRESETS } from '@/types/common/backup';
 import type { BackupLogEvent, BackupRecord, BackupTargetOverview } from '@/types/common/backup';
 
 // Presentation helpers for the Backups tab. Pure functions, no React, no data
@@ -17,6 +18,16 @@ export function formatBytes(bytes: number): string {
     unit += 1;
   }
   return `${value.toFixed(value >= 100 ? 0 : 1)} ${units[unit]}`;
+}
+
+// A schedule in words. Every value the form can produce is one of the presets,
+// so this is a lookup with the expression itself as the fallback — an older row
+// may hold any valid five-field cron, and showing it is better than pretending
+// not to recognise it.
+export function describeCron(expression: string): string {
+  const trimmed = expression.trim();
+  if (!trimmed) return 'no schedule';
+  return BACKUP_CRON_PRESETS.find((preset) => preset.value === trimmed)?.label ?? trimmed;
 }
 
 // Durations arrive in milliseconds. A dump that took 400ms and one that took
