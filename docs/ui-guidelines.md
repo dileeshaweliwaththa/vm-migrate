@@ -278,8 +278,16 @@ system, and cards are not one of them:
   `--sidebar-primary` so it moves with the accent.
 
 `--radius` is `0.5rem`, which lands the derived steps on the design's shape
-language: `rounded-sm` 4px (buttons, inputs, chips — "precision-molded, not
-bubbly"), `rounded-lg` 8px (cards), `rounded-full` for status pills only.
+language: `rounded-sm` 4px (buttons, inputs, chips, **status labels** —
+"precision-molded, not bubbly"), `rounded-lg` 8px (cards). `rounded-full` is only
+for things that are actually round: avatars, the live dots, the progress bar.
+
+Status labels are square like everything else, and their shape lives in one
+place — **`STATUS_PILL_CLASS`** in [`lib/vm-utils.ts`](../lib/vm-utils.ts),
+alongside `STATUS_TONE_CLASS`. Compose the two (`cn(STATUS_PILL_CLASS,
+STATUS_TONE_CLASS[tone])`) rather than writing the padding and the radius out
+again: a capsule among square cards, inputs and chips reads as a different
+system, and that was copied into a dozen call sites before it was one.
 
 ### `.canvas-grid`
 

@@ -47,7 +47,7 @@ function MigratedFrom({ vm, allVms, allDeleted }: { vm: Vm; allVms: Vm[]; allDel
               {tag ? (
                 <span
                   className={cn(
-                    'ml-2 rounded-full px-2 py-0.5 text-[9px] font-bold text-steel-900',
+                    'ml-2 rounded-sm px-2 py-0.5 text-[9px] font-bold text-steel-900',
                     tag === 'ARCHIVED' ? 'bg-steel-400' : 'bg-steel-50'
                   )}
                 >
@@ -60,7 +60,7 @@ function MigratedFrom({ vm, allVms, allDeleted }: { vm: Vm; allVms: Vm[]; allDel
             <TableRow key={`mig-url-${vm.id}-${src.id}-${u.id}`} className="hover:bg-transparent">
               <TableCell className="w-16 bg-steel-700" />
               <TableCell className="bg-steel-800 py-1 pl-5">
-                <span className="rounded-full bg-steel-400 px-2 py-0.5 text-[9px] font-bold tracking-wide text-steel-900">
+                <span className="rounded-sm bg-steel-400 px-2 py-0.5 text-[9px] font-bold tracking-wide text-steel-900">
                   MIGRATED
                 </span>
               </TableCell>

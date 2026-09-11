@@ -168,7 +168,7 @@ function BuildRow({ run }: { run: EnvironmentBuildRun }) {
         </p>
         <span
           className={cn(
-            'shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold',
+            'shrink-0 rounded-sm px-2.5 py-0.5 text-[11px] font-semibold',
             STATUS_TONE_CLASS[resultTone(run)]
           )}
         >

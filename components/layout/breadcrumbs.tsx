@@ -4,6 +4,7 @@ import { Fragment } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useProject } from '@/hooks/projects/useProjects';
+import { useBackupTarget } from '@/hooks/backups/useBackups';
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -22,6 +23,7 @@ const SECTION_LABEL: Record<string, string> = {
   dashboard: 'Dashboard',
   projects: 'Projects',
   tracker: 'VM Tracker',
+  backups: 'Backups',
   users: 'Users',
   settings: 'Settings',
 };
@@ -35,12 +37,14 @@ export function Breadcrumbs() {
   const pathname = usePathname();
   const segments = pathname.split('/').filter(Boolean);
 
-  // The one dynamic route in the app. The id in the URL is a UUID, which is no
-  // use as a label, so the crumb shows the project's name instead — read through
-  // the *same* query key the detail page uses, so this shares that request rather
-  // than issuing a second one, and fills in as soon as it resolves.
+  // The dynamic routes. An id in the URL is a UUID, which is no use as a label,
+  // so the crumb shows the record's name instead — read through the *same* query
+  // key the detail page uses, so this shares that request rather than issuing a
+  // second one, and fills in as soon as it resolves.
   const projectId = segments[0] === 'projects' && segments[1] ? segments[1] : '';
   const { data: project } = useProject(projectId);
+  const backupTargetId = segments[0] === 'backups' && segments[1] ? segments[1] : '';
+  const { data: backupTarget } = useBackupTarget(backupTargetId);
 
   const crumbs: Crumb[] = [];
   for (const segment of segments) {
@@ -50,8 +54,11 @@ export function Breadcrumbs() {
       crumbs.push({ label, href: `/${segment === 'users' || segment === 'settings' ? 'admin/' : ''}${segment}` });
       continue;
     }
-    // An unmapped segment is a record id — currently only a project's.
+    // An unmapped segment is a record id.
     if (segment === projectId) crumbs.push({ label: project?.name ?? '…' });
+    if (segment === backupTargetId) {
+      crumbs.push({ label: backupTarget?.target.name || backupTarget?.target.dbHost || '…' });
+    }
   }
 
   if (crumbs.length === 0) return null;

@@ -11,6 +11,7 @@ import type {
 
 export const BACKUPS_QUERY_KEY = ['backup-targets'] as const;
 export const backupLogsQueryKey = (id: string) => ['backup-logs', id] as const;
+export const backupTargetQueryKey = (id: string) => ['backup-target', id] as const;
 
 async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -35,6 +36,17 @@ export const useBackupTargets = () =>
     refetchInterval: 60_000,
   });
 
+// One target, for its own page. A separate key from the list so the detail page
+// refreshes (and polls, while a run is in flight) without re-reading every other
+// worker on every tick.
+export const useBackupTarget = (id: string) =>
+  useQuery({
+    queryKey: backupTargetQueryKey(id),
+    queryFn: () => apiFetch<BackupTargetOverview>(`/api/backups/${id}`),
+    refetchOnWindowFocus: false,
+    refetchInterval: 30_000,
+  });
+
 // A running backup's log tail. Polled quickly while something is running and not
 // at all otherwise — `enabled` is what the card flips when it starts a run or
 // sees `isBackupRunning` from the service.
@@ -54,7 +66,13 @@ const useInvalidating = <TArgs, TData>(fn: (args: TArgs) => Promise<TData>) => {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: fn,
-    onSettled: () => queryClient.invalidateQueries({ queryKey: BACKUPS_QUERY_KEY }),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: BACKUPS_QUERY_KEY });
+      // The detail page reads its own key, so both have to be dropped — a run
+      // started from a target's page has to refresh that page, not just the
+      // index behind it.
+      queryClient.invalidateQueries({ queryKey: ['backup-target'] });
+    },
   });
 };
 

@@ -24,7 +24,7 @@ export function YesNoToggle({
   // so it reads from the shared tone map rather than naming its own colours.
   const tone = STATUS_TONE_CLASS[value ? 'success' : 'danger'];
   const base =
-    'inline-flex min-w-14 items-center justify-center rounded-full px-2.5 py-0.5 text-xs font-semibold';
+    'inline-flex min-w-14 items-center justify-center rounded-sm px-2.5 py-0.5 text-xs font-semibold';
 
   if (readOnly) {
     return (

@@ -38,6 +38,17 @@ export function safeStatus(vm: Vm): VmStatus {
 // blue. Every pill that uses them also renders its label as text, so no meaning
 // depends on colour alone — which is what makes the hue cue safe rather than
 // load-bearing. See docs/ui-guidelines.md § Theme.
+// The **shape** every status label shares, next to the tones so a pill is one
+// decision rather than a string copied into a dozen call sites.
+//
+// `rounded-sm` (4px), not `rounded-full`: the design's shape language is
+// "precision-molded, not bubbly" and everything else on a page — cards, inputs,
+// chips, buttons — sits on that 4/8px scale. A capsule among them read as a
+// different system. `rounded-full` stays for things that are actually round:
+// avatars, the live dots, the progress bar.
+export const STATUS_PILL_CLASS =
+  'inline-flex w-fit shrink-0 items-center gap-1.5 rounded-sm px-2 py-0.5 text-xs font-semibold whitespace-nowrap';
+
 export const STATUS_TONE_CLASS: Record<StatusTone, string> = {
   success: 'bg-tone-success text-tone-success-fg',
   info: 'bg-tone-info text-tone-info-fg',

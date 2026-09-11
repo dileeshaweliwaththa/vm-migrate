@@ -3,7 +3,7 @@
 import { Archive, CalendarClock, Database, ServerCog } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
-import { STATUS_TONE_CLASS } from '@/lib/vm-utils';
+import { STATUS_PILL_CLASS, STATUS_TONE_CLASS } from '@/lib/vm-utils';
 import { formatTimestamp, recordLabel, recordTone } from '@/lib/backup-utils';
 import type { BackupTargetOverview } from '@/types/common/backup';
 
@@ -68,12 +68,7 @@ export function BackupStatCards({ overview }: { overview: BackupTargetOverview }
         sub={
           latest ? (
             <span className="flex flex-wrap items-center gap-1.5">
-              <span
-                className={cn(
-                  'inline-block rounded-full px-2 py-0.5 text-xs font-semibold',
-                  STATUS_TONE_CLASS[recordTone(latest)]
-                )}
-              >
+              <span className={cn(STATUS_PILL_CLASS, STATUS_TONE_CLASS[recordTone(latest)])}>
                 {recordLabel(latest)}
               </span>
               <span className="text-label-caps uppercase">{latest.trigger}</span>

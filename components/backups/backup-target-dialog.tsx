@@ -34,11 +34,16 @@ import { DEFAULT_MYSQL_PORT, type BackupTarget, type BackupTargetInput } from '@
 export function BackupTargetDialog({
   target,
   canAdmin,
+  // An existing target's worker address, used as the default for a new one. One
+  // container normally dumps every database, so the second target should not
+  // have to be told where it lives again.
+  defaultWorkerUrl = '',
   trigger,
 }: {
   target?: BackupTarget;
   // Whether to offer the schedule at all. An editor sees the rest.
   canAdmin: boolean;
+  defaultWorkerUrl?: string;
   trigger: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -66,7 +71,7 @@ export function BackupTargetDialog({
   // the browser was never sent them.
   const reset = () => {
     setName(target?.name ?? '');
-    setWorkerUrl(target?.workerUrl ?? '');
+    setWorkerUrl(target?.workerUrl ?? defaultWorkerUrl);
     setDbHost(target?.dbHost ?? '');
     setDbPort(String(target?.dbPort ?? DEFAULT_MYSQL_PORT));
     setDbUser(target?.dbUser ?? '');
@@ -128,9 +133,18 @@ export function BackupTargetDialog({
       }}
     >
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      {/* Match the breakpoint the primitive sets (`sm:max-w-sm`), or the
-          override is ignored above 640px — docs/ui-guidelines.md. */}
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+      {/* `sm:max-w-lg`, matching the breakpoint the primitive sets its own
+          `sm:max-w-sm` at — an unprefixed `max-w-*` is silently ignored above
+          640px (docs/ui-guidelines.md).
+
+          The **fields** scroll, not the dialog. `overflow-y-auto` on
+          `DialogContent` also enables horizontal scrolling (per CSS, one axis
+          non-visible makes the other `auto`), which drags the absolutely
+          positioned close button off with it — and it scrolled the title out of
+          view, which is what made this form look headless. `min-w-0` because
+          `DialogContent` is a grid and its children otherwise refuse to shrink
+          below their content. */}
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{target ? 'Edit backup target' : 'Add backup target'}</DialogTitle>
           <DialogDescription>
@@ -139,7 +153,7 @@ export function BackupTargetDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-5">
+        <div className="max-h-[60vh] min-w-0 space-y-5 overflow-y-auto pr-1">
           <div className="space-y-2">
             <Label htmlFor="bt-name">Name</Label>
             <Input
@@ -269,17 +283,23 @@ export function BackupTargetDialog({
           <div className="space-y-3 rounded-md border border-border p-3">
             <p className="text-label-caps uppercase text-muted-foreground">Worker &amp; schedule</p>
             <div className="space-y-2">
-              <Label htmlFor="bt-worker">Backup worker address</Label>
+              <Label htmlFor="bt-worker">Backup worker</Label>
               <Input
                 id="bt-worker"
                 value={workerUrl}
                 onChange={(e) => setWorkerUrl(e.target.value)}
-                placeholder="20.197.41.68"
+                placeholder={defaultWorkerUrl || '20.197.41.68'}
               />
+              {/* This field asks for something people reasonably query, so it
+                  says what it is for rather than just what to type: the portal
+                  cannot dump a database itself, and this is the machine that
+                  can. It is not the database's address — that is above. */}
               <p className="text-body-sm text-muted-foreground">
-                The container that runs the dumps. Just the host is enough —{' '}
-                <code className="font-mono">:2999</code> and{' '}
-                <code className="font-mono">http://</code> are filled in.
+                Where the MySQL Backup Manager container runs — it is what performs the dump and
+                the upload, and what this page reads status, history and live logs from. Host only
+                is enough: <code className="font-mono">http://</code> and{' '}
+                <code className="font-mono">:2999</code> are filled in.
+                {defaultWorkerUrl && !target ? ' Prefilled from your existing target.' : ''}
               </p>
             </div>
 

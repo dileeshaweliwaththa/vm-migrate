@@ -43,7 +43,7 @@ export function JenkinsStatusBadge({
     // merge safety net that keeps a later override from landing alongside them.
     <span
       className={cn(
-        'inline-flex w-fit items-center gap-1.5 rounded-full px-2 py-0.5 text-label-caps font-bold uppercase',
+        'inline-flex w-fit items-center gap-1.5 rounded-sm px-2 py-0.5 text-label-caps font-bold uppercase',
         cls
       )}
       title={title}

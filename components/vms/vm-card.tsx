@@ -346,7 +346,7 @@ export function VmCard({
                   {src.tag ? (
                     <span
                       className={cn(
-                        'rounded-full px-2 py-0.5 text-[9px] font-bold text-steel-900',
+                        'rounded-sm px-2 py-0.5 text-[9px] font-bold text-steel-900',
                         src.tag === 'ARCHIVED' ? 'bg-steel-400' : 'bg-steel-50'
                       )}
                     >

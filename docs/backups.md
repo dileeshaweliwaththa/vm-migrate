@@ -17,15 +17,16 @@ here, we own the truth and the other system does the work.
 
 | Layer      | Files                                                                                     |
 | ---------- | ----------------------------------------------------------------------------------------- |
-| Routing    | `app/(protected)/(app)/backups/page.tsx` (resolves the role), `app/api/backups/**/route.ts` |
-| UI         | `components/backups/backups-dashboard.tsx`, `backup-target-card.tsx`, `backup-history-table.tsx`, `backup-target-dialog.tsx` |
+| Routing    | `app/(protected)/(app)/backups/page.tsx` (the index), `backups/[id]/page.tsx` (one target) — both resolve the role; `app/api/backups/**/route.ts` |
+| UI         | `components/backups/backups-index.tsx`, `backup-target-detail.tsx`, `backup-stat-cards.tsx`, `backup-database-picker.tsx`, `backup-log-panel.tsx`, `backup-history.tsx`, `backup-target-dialog.tsx` |
 | Hook       | `hooks/backups/useBackups.ts`                                                             |
 | Service    | `services/backups/backupService.ts`                                                        |
 | Repository | `repositories/backupTargets/backupTargetRepository.ts` (Supabase), `backupTargetSecretRepository.ts` (**service-role**), `repositories/backups/backupApiRepository.ts` (**external HTTP**) |
 | Scheduling | `supabase/functions/backup-dispatch/index.ts` (Edge Function), `…_backup_schedule_cron.sql` (pg_cron + the sync function) |
 
 Presentation helpers (`formatBytes`, `formatDuration`, `recordTone`,
-`computeBackupStats`, `hasDuplicateSchedule`, `hasHostMismatch`) live in
+`computeBackupStats`, `groupRecordsByDay`, `hasDuplicateSchedule`,
+`hasHostMismatch`) live in
 `lib/backup-utils.ts`; domain types in `types/common/backup.ts`; row types in
 `types/supabase/response/backupTargets`.
 
@@ -35,6 +36,20 @@ Supabase" (architecture.md / AGENTS.md). Like the first, it builds requests,
 reports what came back, and decides nothing: no call throws, because a backup
 host that is down, renamed or firewalled is an ordinary outcome the page has to
 render rather than an exception to bubble up as a 500.
+
+## Why a target names a worker
+
+The portal cannot dump a database: there is no `mysqldump` in a Next.js route and
+no disk to write 64MB to. The worker container is what performs the dump, the
+gzip and the Azure upload, and it is what this app reads status, the database
+list, the history and the live log stream from, and posts a run to. So a target
+has to say where that container is.
+
+It cannot be derived, either: the worker runs wherever it was deployed
+(`20.197.41.68:2999`) and the database it backs up is somewhere else entirely
+(`mencartdb.mysql.database.azure.com`). What the form does instead is stop asking
+twice — a new target's worker address is **prefilled from an existing target**,
+since one container normally dumps every database.
 
 ## What lives where
 
@@ -125,10 +140,45 @@ isn't one — a card warns when:
   (`hasDuplicateSchedule`) — two schedulers, two nightly runs of the same dumps.
   The **Worker cron** toggle on the card is how you turn that one off.
 
-## What the tab shows
+## Two levels, like Projects
 
-One card per target, laid out the way the worker's own dashboard is — because
-that is the order the questions come in:
+`/backups` is a **grid of target cards**; `/backups/[id]` is where the work
+happens. The first cut stacked every target's stat cards, database picker, log
+panel and 200-row history on one page — which worked for exactly one target and
+ran out of screen at two.
+
+A **card** answers only "is this database being backed up, and is anything
+wrong": the worker's state, the last dump, the schedule, the counts, and a
+warning badge for the two misconfigurations that hide themselves. The counts are
+chips — mono, `rounded-sm`, on the muted fill — the same treatment the project
+card gives *3 environments*, so the two grids read as one system. `3 failed` and
+`2 local only` appear only when they are not zero, in their own tone. The whole card
+is a link, the same as a project card, and hover shifts the border rather than the
+shadow.
+
+The **breadcrumb** resolves the target's name through the same query key the
+detail page uses, so it shares that request instead of making a second one —
+exactly how the project crumb works.
+
+## What a target's page shows
+
+**Two views, switched in place** — the same `ToggleGroup` the project page uses
+for Environments / Documentation:
+
+- **Overview** — the numbers, what to dump, the live log, and the configuration
+  read-back.
+- **History** — every recorded dump, grouped by day. Its nine columns under
+  everything else made the page a scroll rather than a screen.
+
+The header carries the two facts that tell you you are in the right place — the
+database and the schedule — and nothing else. The worker's address, retention,
+the Azure destination and which credentials are stored are *configuration*: they
+sit in a quiet strip at the end of Overview and in the Edit dialog, not in a
+sentence across the top of every visit. The body runs to `max-w-[100rem]`, not
+`max-w-7xl`: `PageHeader` extends to the page's own padding, so a narrower body
+left a gutter down both sides that read as a mistake.
+
+Overview, in the order the questions come in:
 
 1. **Four stat cards** — backups recorded, last backup (with its status, trigger
    and database), databases on the server, and the worker's state (`Online` /
@@ -143,12 +193,57 @@ that is the order the questions come in:
    run, and leaving it ticked would silently narrow the next one.
 3. **Backup logs** — always present, with a `Ready` / `Running` badge and an
    empty state, so there is somewhere for a run to appear and somewhere to read
-   it afterwards. Polled at 2s while a run is in flight, including one this
-   browser didn't start. (On a *fresh* page load with nothing running the panel
-   is empty: the worker's `/api/backup/logs/last` replay is not fetched, to keep
-   page load to three calls per target.)
-4. **Recent backups** — database, filename, when, size, duration, trigger,
-   status, Azure, actions. `Refresh` re-reads it from the worker.
+   it afterwards. It follows the tail and colours failures.
+
+   ### Where a run's progress actually comes from
+
+   The worker has two log channels and only one of them can be relied on:
+
+   | | What it is | Reality |
+   | --- | --- | --- |
+   | `GET /api/backup/events` | Server-Sent Events, pushed per step | **the live channel** — proxied by `GET /api/backups/:id/stream` and consumed with `EventSource` (`useBackupStream`) |
+   | `GET /api/backup/logs?since=` | the same steps, replayed from the worker's MySQL | best-effort: `saveEvent` is fire-and-forget and a failed insert is a warning on the worker's console, so where those tables are missing it answers 200 with an empty list forever |
+
+   So the replay seeds the panel and the stream appends to it. The stream stays
+   attached whenever the worker is reachable — not only while a run is in flight
+   — so a nightly run that starts with the page open fills in by itself.
+
+   **The events carry no message and no timestamp.** A step is structured:
+   `{ type: 'db_dump', database: 'tourcan-prod', index: 3, total: 18 }`. The
+   sentences in the worker's console are formatted from the type at print time,
+   so this side does the same in `describeBackupEvent` — and the clock is ours,
+   stamped when the line arrives (`receivedAt`). A step type this app has never
+   heard of still prints, as the type plus its database.
+
+   The stream is proxied rather than subscribed to from the browser for the same
+   reasons the download is: the worker is on an address the browser may not
+   reach, and its API has no authentication of its own. `X-Accel-Buffering: no`
+   on the response is what stops a proxy holding the lines until the stream ends
+   — which, for a subscription that never ends, means showing nothing.
+The **History** view: **grouped by day and collapsed.** The worker keeps its 200
+The worker keeps its 200 most recent records and a nightly run covers eighteen
+databases, so a flat table is a fortnight of near-identical rows. A day collapses
+to one line — *Wed 13 May · 18 dumps · 214 MB · All uploaded* — which is the check
+you actually make. Open it when it isn't all fine.
+
+The day line is a **grid**, not a flex row — with flex, each day's date decided
+where its "18 dumps" began and no two lines agreed on a column — and the counts
+use `tabular-nums` so the digits line up too.
+
+The day's verdict is green only when every dump succeeded **and** every one
+reached Azure; otherwise it names what went wrong (`3 failed`, `2 local only`).
+
+**Every day starts open**, with `Collapse all` / `Expand all` beside `Refresh`.
+The state tracks which days are *closed* rather than which are open: seeding an
+open-set from the records was a bug as well as a default — it was computed on the
+first render, before the fetch resolved, so there were no days to seed from and
+nothing ever opened. Tracking the closed ones means a day from a later fetch
+arrives open, with no data to derive state from. Collapsing is local state on a
+plain chevron button, the same as the VM tracker's rows rather than another Radix
+primitive.
+
+Inside a day: database, filename, time, size, duration, trigger, status, Azure and
+the per-row actions. `Refresh` re-reads the history from the worker.
 
 Per-row actions, each offered only where it can do something:
 
@@ -213,7 +308,8 @@ All routes require an authenticated session and answer `{ data }` or
 | `GET  /api/backups/:id`                           | one target's overview (refresh a single card) | `viewer` |
 | `PATCH  /api/backups/:id`                         | edit config/credentials (`editor`); schedule fields need `admin` | `editor` |
 | `DELETE /api/backups/:id`                         | remove the target + its credentials + its cron job | `admin` |
-| `GET  /api/backups/:id/logs?since=N`              | a run's progress lines after N                | `viewer` |
+| `GET  /api/backups/:id/logs?since=N`              | a run's progress, replayed from the worker's DB (best-effort) | `viewer` |
+| `GET  /api/backups/:id/stream`                    | live progress, proxied as Server-Sent Events  | `viewer` |
 | `POST /api/backups/:id/run`                       | dump now (`{ databases: [] }` = all)          | `editor` |
 | `POST /api/backups/:id/cron`                      | `{ enabled }` — the **worker's own** node-cron | `admin`  |
 | `POST /api/backups/:id/records/:recordId`         | re-upload that dump to Azure                  | `editor` |

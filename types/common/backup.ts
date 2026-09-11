@@ -124,13 +124,33 @@ export interface BackupDispatch {
   createdAt: string;
 }
 
-// One line of a run's progress, from `GET /api/backup/logs`.
+// One step of a run, as the worker actually reports it.
+//
+// **There is no message and no timestamp.** The worker emits a structured
+// `BackupProgress` — a type, the database, and whatever that step measured — and
+// the sentences in its console are formatted from the type at print time. So the
+// wording lives in `describeBackupEvent` (lib/backup-utils.ts) on this side too,
+// and the clock is ours: `receivedAt` is stamped when the line arrives.
 export interface BackupLogEvent {
-  // The worker's monotonic index within the session; what `since` pages on.
+  // Position in the run. The worker's own `seq` is not in the payload, so this is
+  // the arrival order — which is what the list needs it for.
   seq: number;
-  timestamp: string;
-  message: string;
-  level: string;
+  // 'start' | 'db_start' | 'db_dump' | 'db_compress' | 'db_upload' |
+  // 'db_retention' | 'db_done' | 'db_error' | 'complete'. Left as a string: it is
+  // another app's vocabulary, and an unrecognised value has to render as
+  // something rather than crash the panel.
+  type: string;
+  database: string;
+  // "3 of 18", when the step carries it.
+  index: number;
+  total: number;
+  // Bytes, on the steps that have finished a dump.
+  size: number;
+  azureUploaded: boolean;
+  azureError: string;
+  error: string;
+  // Local ISO time, stamped on arrival — see above.
+  receivedAt: string;
 }
 
 export interface BackupLogPage {

@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-import { safeStatus, STATUS_TONE_CLASS } from '@/lib/vm-utils';
+import { safeStatus, STATUS_PILL_CLASS, STATUS_TONE_CLASS } from '@/lib/vm-utils';
 import type { Vm, VmUrl } from '@/types/common/vm';
 
 // The pieces both tracker views are built from — the field editor, the status
@@ -163,10 +163,7 @@ export function StatusPill({ vm }: { vm: Vm }) {
   const status = safeStatus(vm);
   return (
     <span
-      className={cn(
-        'inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap',
-        STATUS_TONE_CLASS[status.tone]
-      )}
+      className={cn(STATUS_PILL_CLASS, STATUS_TONE_CLASS[status.tone])}
     >
       {status.label}
     </span>

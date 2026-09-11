@@ -496,7 +496,7 @@ export function VmTracker({ role }: { role: UserRole }) {
                 <Plus className="size-4" /> Add VM
               </Button>
             ) : (
-              <span className="rounded-full border border-border px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+              <span className="rounded-sm border border-border px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
                 Read-only
               </span>
             )}

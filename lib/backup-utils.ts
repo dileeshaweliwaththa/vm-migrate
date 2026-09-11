@@ -1,5 +1,5 @@
 import type { StatusTone } from '@/lib/vm-utils';
-import type { BackupRecord, BackupTargetOverview } from '@/types/common/backup';
+import type { BackupLogEvent, BackupRecord, BackupTargetOverview } from '@/types/common/backup';
 
 // Presentation helpers for the Backups tab. Pure functions, no React, no data
 // access — the same arrangement as `lib/vm-utils.ts`.
@@ -102,4 +102,110 @@ export function hasHostMismatch(overview: BackupTargetOverview): boolean {
   const configured = overview.target.dbHost.trim().toLowerCase();
   const actual = overview.status.host.trim().toLowerCase();
   return Boolean(configured) && Boolean(actual) && configured !== actual;
+}
+
+// One day's dumps, as the history renders them.
+export interface BackupDay {
+  // `YYYY-MM-DD` in the reader's own timezone — the key, and what sorts.
+  key: string;
+  label: string;
+  records: BackupRecord[];
+  totalSize: number;
+  failed: number;
+  localOnly: number;
+}
+
+// A nightly run over eighteen databases is eighteen rows, so 200 records is a
+// fortnight of near-identical lines. Grouped by day they become "the 13th ran,
+// all uploaded" — one line to check, openable when it isn't.
+//
+// Grouped by *local* day rather than by the worker's timestamp string: the
+// question is "did last night's run go", which is a question about the reader's
+// night.
+export function groupRecordsByDay(records: BackupRecord[]): BackupDay[] {
+  const byDay = new Map<string, BackupRecord[]>();
+
+  for (const record of records) {
+    const date = new Date(record.timestamp);
+    // An unparseable timestamp still has to appear somewhere, so it gets its own
+    // bucket rather than being dropped from the history.
+    const key = Number.isNaN(date.getTime())
+      ? 'unknown'
+      : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
+          date.getDate()
+        ).padStart(2, '0')}`;
+    const list = byDay.get(key) ?? [];
+    list.push(record);
+    byDay.set(key, list);
+  }
+
+  return Array.from(byDay.entries())
+    // Newest first, with the unknown bucket last: it has no date to sort by.
+    .sort((a, b) => {
+      if (a[0] === 'unknown') return 1;
+      if (b[0] === 'unknown') return -1;
+      return b[0].localeCompare(a[0]);
+    })
+    .map(([key, dayRecords]) => ({
+      key,
+      label:
+        key === 'unknown'
+          ? 'Undated'
+          : new Date(`${key}T00:00:00`).toLocaleDateString(undefined, {
+              weekday: 'short',
+              day: 'numeric',
+              month: 'short',
+              year: 'numeric',
+            }),
+      records: dayRecords,
+      totalSize: dayRecords.reduce((total, record) => total + record.size, 0),
+      failed: dayRecords.filter((record) => record.status === 'failed').length,
+      localOnly: dayRecords.filter((record) => record.status === 'success' && !record.azureUploaded)
+        .length,
+    }));
+}
+
+// The sentence for one step of a run.
+//
+// The worker sends a type and some numbers, never a message — its console builds
+// the wording from the same switch and we have to do the same. Kept here rather
+// than in the panel so the phrasing is one thing, and so an event type this app
+// has never heard of still prints as something readable.
+export function describeBackupEvent(event: BackupLogEvent): string {
+  const db = event.database || 'database';
+  const position = event.total ? ` (${event.index || 0}/${event.total})` : '';
+
+  switch (event.type) {
+    case 'start':
+      return `Starting backup of ${event.total || 0} database(s)`;
+    case 'db_start':
+      return `Started ${db}${position}`;
+    case 'db_dump':
+      return `Dumping ${db}${position}`;
+    case 'db_compress':
+      return `Compressing ${db}`;
+    case 'db_upload':
+      return `Uploading ${db} to Azure`;
+    case 'db_retention':
+      return `Cleaning up old backups of ${db}`;
+    case 'db_done': {
+      const size = event.size ? ` (${formatBytes(event.size)})` : '';
+      if (event.azureUploaded) return `Completed ${db}${size} — uploaded to Azure`;
+      if (event.azureError) return `Completed ${db}${size} — Azure upload failed: ${event.azureError}`;
+      return `Completed ${db}${size} — kept locally`;
+    }
+    case 'db_error':
+      return `Failed ${db}: ${event.error || 'unknown error'}`;
+    case 'complete':
+      return 'Backup finished';
+    // Not a failure of the run — a step this app doesn't know the name of.
+    default:
+      return `${event.type}${event.database ? ` · ${event.database}` : ''}`;
+  }
+}
+
+// Whether a step is bad news, so the panel can colour it without deciding what
+// "bad" means twice.
+export function isBackupEventError(event: BackupLogEvent): boolean {
+  return event.type === 'db_error' || Boolean(event.error) || Boolean(event.azureError);
 }

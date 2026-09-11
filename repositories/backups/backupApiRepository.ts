@@ -99,14 +99,18 @@ export interface RawBackup {
   triggerType?: string;
 }
 
+// The worker's `BackupProgress`, verbatim: a step type plus whatever that step
+// measured. No message, no timestamp — see `describeBackupEvent`.
 export interface RawLogEvent {
-  seq?: number;
-  id?: number;
-  created_at?: string;
-  timestamp?: string;
-  message?: string;
-  level?: string;
   type?: string;
+  database?: string;
+  index?: number;
+  total?: number;
+  size?: number;
+  azureUploaded?: boolean;
+  azureBlobUrl?: string;
+  azureError?: string;
+  error?: string;
 }
 
 export const fetchStatus = (baseUrl: string) => request<RawStatus>(baseUrl, '/api/status');
@@ -154,6 +158,28 @@ export const downloadBackup = async (
         cache: 'no-store',
       }
     );
+  } catch {
+    return null;
+  }
+};
+
+// The worker's live progress stream (Server-Sent Events).
+//
+// Returned as the raw `Response` so a route can pipe it straight to the browser:
+// it never ends on its own, so there is nothing to parse or buffer here. No
+// timeout for the same reason — the connection *is* the subscription.
+//
+// This is the channel that actually carries a run's progress. The worker's
+// `/api/backup/logs` reads a MySQL table it writes to fire-and-forget (a failed
+// insert is a warning on its console and nothing more), so on a deployment where
+// those tables are missing it answers 200 with an empty list forever — which is
+// what the worker's own log box shows too.
+export const streamBackupEvents = async (baseUrl: string): Promise<Response | null> => {
+  try {
+    return await fetch(`${stripTrailingSlash(baseUrl)}/api/backup/events`, {
+      headers: { Accept: 'text/event-stream' },
+      cache: 'no-store',
+    });
   } catch {
     return null;
   }

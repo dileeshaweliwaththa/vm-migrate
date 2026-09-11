@@ -413,8 +413,30 @@ export const listBackupTargetOverviews = async (): Promise<BackupTargetOverview[
   );
 };
 
-// A run's progress. `since` is the last event index the client has, so the page
-// polls for the tail rather than re-reading the whole session.
+// Opens the worker's live progress stream for a route to pipe to the browser.
+// Any signed-in role: watching a backup run is reading.
+export const streamBackupEvents = async (
+  id: string
+): Promise<{ ok: true; response: Response } | { ok: false; message: string }> => {
+  const worker = await resolveWorker(id);
+  if (!worker.ok) return { ok: false, message: worker.message };
+
+  const response = await api.streamBackupEvents(worker.target.workerUrl);
+  if (!response || !response.ok || !response.body) {
+    return { ok: false, message: 'The worker did not open a progress stream.' };
+  }
+  return { ok: true, response };
+};
+
+// A run's progress, from the worker's persisted events — the replay path, for a
+// page opened after a run started.
+//
+// Best-effort by nature: those events are written fire-and-forget into the
+// worker's own MySQL, so a deployment whose `events` table is missing answers
+// with an empty list rather than an error. The live lines come from
+// `streamBackupEvents`.
+//
+// `since` is the last index the client has, so the page asks for the tail.
 export const getBackupLogs = async (id: string, since: number): Promise<BackupLogPage> => {
   const worker = await resolveWorker(id);
   if (!worker.ok) return { sessionId: '', isRunning: false, total: 0, events: [] };
@@ -425,13 +447,21 @@ export const getBackupLogs = async (id: string, since: number): Promise<BackupLo
     sessionId: page?.sessionId ?? '',
     isRunning: Boolean(page?.isRunning),
     total: typeof page?.total === 'number' ? page.total : 0,
+    // The stored payload is the same structured event the stream sends — a type
+    // and some numbers, no message and no timestamp. `receivedAt` is left empty
+    // here because these lines are a replay: we do not know when they happened,
+    // and inventing a time would be worse than showing none.
     events: (page?.events ?? []).map((event, i) => ({
-      // The worker names this field differently across its two log endpoints,
-      // and the index is the fallback so paging still advances either way.
-      seq: typeof event.seq === 'number' ? event.seq : (event.id ?? since + i + 1),
-      timestamp: event.timestamp ?? event.created_at ?? '',
-      message: event.message ?? '',
-      level: event.level ?? event.type ?? 'info',
+      seq: since + i + 1,
+      type: event.type ?? 'unknown',
+      database: event.database ?? '',
+      index: typeof event.index === 'number' ? event.index : 0,
+      total: typeof event.total === 'number' ? event.total : 0,
+      size: typeof event.size === 'number' ? event.size : 0,
+      azureUploaded: Boolean(event.azureUploaded),
+      azureError: event.azureError ?? '',
+      error: event.error ?? '',
+      receivedAt: '',
     })),
   };
 };
