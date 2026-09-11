@@ -160,14 +160,22 @@ export const testBackupSchedule = async (targetId: string): Promise<BackupSchedu
   }
 
   // ---- how the last real firing went --------------------------------------
+  //
+  // `succeeded` here means the *SQL* ran and pg_net accepted the request for
+  // sending. It says nothing about what the app answered — pg_cron records a
+  // return value, not an HTTP status — so a schedule posting into a 404 reports
+  // `succeeded, 1 row` every night. Said plainly, because reading it as "the
+  // backup happened" is the mistake this whole panel exists to prevent.
   if (diagnostics.lastRunStatus) {
     const failed = diagnostics.lastRunStatus === 'failed';
     checks.push({
       label: 'Last firing',
       state: failed ? 'fail' : 'pass',
-      detail: `${diagnostics.lastRunStatus}${diagnostics.lastRunAt ? ` at ${diagnostics.lastRunAt}` : ''}${
-        diagnostics.lastRunMessage ? ` — ${firstClause(diagnostics.lastRunMessage)}` : ''
-      }`,
+      detail: failed
+        ? `${diagnostics.lastRunStatus}${diagnostics.lastRunAt ? ` at ${diagnostics.lastRunAt}` : ''}${
+            diagnostics.lastRunMessage ? ` — ${firstClause(diagnostics.lastRunMessage)}` : ''
+          }`
+        : `The job ran${diagnostics.lastRunAt ? ` at ${diagnostics.lastRunAt}` : ''} and queued its request. pg_cron records no HTTP status, so what the app answered is the check below.`,
     });
   }
 
