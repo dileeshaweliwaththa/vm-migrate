@@ -187,9 +187,17 @@ one pg_cron job per target in step with the row, called by a trigger on insert,
 on update of the schedule columns, and on delete — so no code path can change a
 schedule without the schedule changing.
 
-The job posts to `/api/backups/cron` with a bearer token. Both the URL and the
-token are read **from Vault inside the job command**, so rotating either is one
-statement and neither is copied into `cron.job`.
+The job calls `public.run_backup_cron_job(<target>)`, which posts to
+`/api/backups/cron` with a bearer token. Both the URL and the token are read
+**from Vault at firing time**, so rotating either is one statement and neither is
+copied into `cron.job`.
+
+That function exists so a missing secret reports itself. The command used to
+inline `net.http_post(url := (select … from vault …))`, and an absent secret made
+that `NULL`, so pg_cron recorded *null value in column "url" of relation
+"http_request_queue" violates not-null constraint* — pg_net's internals, every
+five minutes, describing anything but the actual cause. It now raises
+*"backup_cron_url is not set in Supabase Vault"*.
 
 ### Setup, once per project
 
@@ -202,6 +210,12 @@ select vault.create_secret('https://<this app>/api/backups/cron', 'backup_cron_u
 select vault.create_secret('<BACKUP_CRON_SECRET>', 'backup_cron_secret');
 select public.sync_backup_target_schedule(id) from public.backup_targets;
 ```
+
+`backup_cron_url` is this app's own address **as Supabase can reach it** — the
+deployed portal on port 5174, not `localhost`, which from inside Supabase's
+network means one of their servers. `backup_cron_secret` is a random token you
+invent; its only job is to be identical to `BACKUP_CRON_SECRET` in the app's
+environment, since pg_cron has no session to authenticate with.
 
 `BACKUP_CRON_SECRET` must also be in the app's environment (see
 [deployment.md](./deployment.md)) — the two values are compared, in constant

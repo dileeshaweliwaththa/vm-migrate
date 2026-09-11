@@ -509,6 +509,9 @@ In `supabase/migrations/`, applied in timestamp order:
   and `backup_cron_ping_result()`: `security definer`, `service_role`-only, so
   the app can read its own pg_cron job and send one test request down the path a
   firing job takes. See [backups.md § Test schedule](./backups.md#test-schedule).
+- `…_backup_cron_job_function.sql` — moves the job's body into
+  `run_backup_cron_job()`, which raises a readable error when a Vault secret is
+  missing instead of letting pg_net fail on a null URL.
 - `…_vm_jenkins_credentials.sql` — `vm_jenkins` + `vm_jenkins_secrets`: the
   Jenkins server, user and token move from each environment onto the **VM** that
   runs them, seeded from the most recently updated configured environment per VM
