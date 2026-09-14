@@ -12,12 +12,12 @@ import {
   type MysqlConnection,
 } from '@/repositories/mysql/mysqlDumpRepository';
 import {
-  countRunningBackups,
+  countRunningBackupsAsService,
   finishBackupRun,
   insertBackupRun,
   insertBackupRunEvent,
 } from '@/repositories/backupRuns/backupRunRepository';
-import { findBackupTargetById } from '@/repositories/backupTargets/backupTargetRepository';
+import { findBackupTargetByIdAsService } from '@/repositories/backupTargets/backupTargetRepository';
 import { getBackupTargetSecrets } from '@/repositories/backupTargets/backupTargetSecretRepository';
 import { getStorageForWrite } from '@/services/backups/backupStorageService';
 import type { BackupTargetRow } from '@/types/supabase/response/backupTargets';
@@ -72,10 +72,16 @@ export interface BackupRunnerConfig {
 // Resolves everything a run needs, or says which part is missing. Called before
 // anything is recorded, so a misconfigured target fails as a message rather than
 // as a half-written batch.
+//
+// Every read here is **service-role**, because half the runs have no session to
+// read with: pg_cron posts a token, not a cookie, and under RLS the target, its
+// destination and its running rows are all invisible to `anon`. The gate is the
+// caller's — `requireAdmin` for a manual run, the cron route's shared token for
+// a scheduled one — and not the row policies.
 export const resolveRunnerConfig = async (
   targetId: string
 ): Promise<{ ok: true; config: BackupRunnerConfig } | { ok: false; message: string }> => {
-  const target = await findBackupTargetById(targetId);
+  const target = await findBackupTargetByIdAsService(targetId);
   if (!target) return { ok: false, message: 'Backup target not found.' };
 
   const secrets = await getBackupTargetSecrets(targetId);
@@ -313,7 +319,7 @@ export const startBackup = async (
 
   // One run per target at a time. Two concurrent dumps of the same server would
   // double the load for no benefit and race each other's retention pass.
-  const running = await countRunningBackups(
+  const running = await countRunningBackupsAsService(
     targetId,
     new Date(Date.now() - STALE_RUN_MS).toISOString()
   );

@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { timingSafeEqual } from 'node:crypto';
-import { runBackup } from '@/services/backups/backupService';
-import { listBackupTargets } from '@/services/backups/backupService';
+import { listScheduledBackupTargetIds, runBackup } from '@/services/backups/backupService';
 
 // POST /api/backups/cron — the scheduled entry point, called by **pg_cron**.
 //
@@ -54,11 +53,7 @@ export async function POST(request: Request) {
 
     // A single target when pg_cron names one (the normal path); every enabled
     // target when it does not, which makes a catch-all job possible.
-    const targets = targetId
-      ? [targetId]
-      : (await listBackupTargets())
-          .filter((target) => target.scheduleEnabled)
-          .map((target) => target.id);
+    const targets = targetId ? [targetId] : await listScheduledBackupTargetIds();
 
     const started: { targetId: string; ok: boolean; message: string }[] = [];
     for (const id of targets) {

@@ -8,8 +8,8 @@ import type { BackupDispatchRow, BackupTargetRow } from '@/types/supabase/respon
 // are in `backupRuns/backupRunRepository`.
 //
 // Reads and writes of a target use the request-scoped client, so RLS applies and
-// the admin-only write policy holds. The one exception is the dispatch insert
-// below.
+// the admin-only write policy holds. The exceptions are the sessionless reads
+// and the dispatch insert below, both used by the scheduled path.
 
 export type BackupTargetWriteColumns = Partial<{
   name: string;
@@ -91,6 +91,43 @@ export const deleteBackupTarget = async (id: string): Promise<void> => {
   const supabase = await createClient();
   const { error } = await supabase.from('backup_targets').delete().eq('id', id);
   if (error) throw new Error(error.message);
+};
+
+// ---- sessionless reads (service-role; the scheduled path) ------------------
+
+// The two reads above, with the **service-role** client.
+//
+// A scheduled run arrives on `POST /api/backups/cron` carrying a bearer token
+// and no cookie, so the request-scoped client is `anon` — and the select policy
+// on `backup_targets` is `to authenticated`. The row is simply not there, and
+// every nightly run fails as *"Backup target not found."* for a target the page
+// shows perfectly well. Same reason as `insertBackupDispatch` below: pg_cron is
+// not a person and has no policy to satisfy.
+//
+// Only the runner and the cron route call these, and both are already gated —
+// `requireAdmin` on the manual path, the shared token on the scheduled one.
+export const findBackupTargetByIdAsService = async (
+  id: string
+): Promise<BackupTargetRow | null> => {
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .from('backup_targets')
+    .select(SELECT)
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as BackupTargetRow | null) ?? null;
+};
+
+export const findAllBackupTargetsAsService = async (): Promise<BackupTargetRow[]> => {
+  const supabase = createServiceClient();
+  const { data, error } = await supabase
+    .from('backup_targets')
+    .select(SELECT)
+    .order('position', { ascending: true })
+    .order('created_at', { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as BackupTargetRow[];
 };
 
 // ---- dispatch audit --------------------------------------------------------

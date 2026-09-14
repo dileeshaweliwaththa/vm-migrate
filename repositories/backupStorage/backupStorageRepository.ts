@@ -36,10 +36,15 @@ export const findAllStorageAccounts = async (): Promise<BackupStorageAccountRow[
   return (data ?? []) as BackupStorageAccountRow[];
 };
 
-export const findStorageAccountById = async (
+// The destination a run is about to write to, read with the **service-role**
+// client: a scheduled run has no session, so under RLS this row is invisible to
+// it and the dump would fail for want of somewhere to put it. The secret half
+// (`getStorageConnectionString`) has always been read this way; this is the
+// non-secret half of the same lookup. Reached only through `getStorageForWrite`.
+export const findStorageAccountByIdAsService = async (
   id: string
 ): Promise<BackupStorageAccountRow | null> => {
-  const supabase = await createClient();
+  const supabase = createServiceClient();
   const { data, error } = await supabase
     .from('backup_storage_accounts')
     .select('*')

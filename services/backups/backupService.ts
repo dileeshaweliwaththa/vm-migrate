@@ -2,6 +2,7 @@ import {
   countBackupTargets,
   deleteBackupTarget as deleteBackupTargetRow,
   findAllBackupTargets,
+  findAllBackupTargetsAsService,
   findBackupTargetById,
   findRecentBackupDispatches,
   insertBackupDispatch,
@@ -323,6 +324,16 @@ export const listBackupTargets = async (): Promise<BackupTarget[]> => {
   const flags = await findBackupTargetSecretFlags(rows.map((row) => row.id));
   return rows.map((row) => rowToTarget(row, flags.get(row.id)));
 };
+
+// The targets a catch-all cron job would run: every one whose schedule is on.
+//
+// Sessionless, like the rest of the scheduled path — `listBackupTargets` reads
+// under RLS and would hand pg_cron an empty list, which is a night with no
+// backups and nothing to show for it.
+export const listScheduledBackupTargetIds = async (): Promise<string[]> =>
+  (await findAllBackupTargetsAsService())
+    .filter((row) => row.schedule_enabled)
+    .map((row) => row.id);
 
 export const createBackupTarget = async (input: BackupTargetInput): Promise<BackupTarget> => {
   await requireAdmin('add a backup target');

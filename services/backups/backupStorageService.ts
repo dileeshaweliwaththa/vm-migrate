@@ -1,7 +1,7 @@
 import {
   deleteStorageAccount as deleteStorageAccountRow,
   findAllStorageAccounts,
-  findStorageAccountById,
+  findStorageAccountByIdAsService,
   findStorageIdsWithSecret,
   getStorageConnectionString,
   insertStorageAccount,
@@ -112,7 +112,7 @@ export const getStorageForWrite = async (
 > => {
   if (!id) return { ok: false, message: 'This target has no Azure destination selected.' };
 
-  const row = await findStorageAccountById(id);
+  const row = await findStorageAccountByIdAsService(id);
   if (!row) return { ok: false, message: 'The selected Azure destination no longer exists.' };
   if (!row.container.trim()) {
     return { ok: false, message: 'That Azure destination has no container set.' };

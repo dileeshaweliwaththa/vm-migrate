@@ -106,6 +106,25 @@ export const countRunningBackups = async (
   return count ?? 0;
 };
 
+// The same count for the runner, **service-role**. A scheduled run reads it
+// without a session, and under RLS it would come back 0 however many runs were
+// in flight — turning "one run per target" into no limit at all on the one path
+// that fires unattended.
+export const countRunningBackupsAsService = async (
+  targetId: string,
+  staleBefore: string
+): Promise<number> => {
+  const supabase = createServiceClient();
+  const { count, error } = await supabase
+    .from('backup_runs')
+    .select('id', { count: 'exact', head: true })
+    .eq('target_id', targetId)
+    .eq('status', 'running')
+    .gt('started_at', staleBefore);
+  if (error) throw new Error(error.message);
+  return count ?? 0;
+};
+
 // ---- writes (service-role; the runner only) --------------------------------
 
 export const insertBackupRun = async (values: {

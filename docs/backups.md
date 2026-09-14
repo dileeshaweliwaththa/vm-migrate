@@ -199,6 +199,30 @@ that `NULL`, so pg_cron recorded *null value in column "url" of relation
 five minutes, describing anything but the actual cause. It now raises
 *"backup_cron_url is not set in Supabase Vault"*.
 
+### A scheduled run has no session, so it reads service-role
+
+pg_cron sends a **bearer token and no cookie**. The request-scoped Supabase
+client built from that request is therefore `anon`, and every select policy on
+this feature is `to authenticated` — so under RLS the target row, its
+destination and its running-run count are all simply *not there* for the one
+caller that fires unattended.
+
+That is not a permissions question the policies should answer: the scheduled
+path has already been authenticated, by the shared token, before any of it runs.
+So the runner's reads go through the **service-role** client, the same way its
+writes (`insertBackupRun`, `insertBackupRunEvent`, `insertBackupDispatch`)
+always have — `findBackupTargetByIdAsService`,
+`findStorageAccountByIdAsService`, `countRunningBackupsAsService`, and
+`listScheduledBackupTargetIds` for a catch-all job. The gate is the caller's:
+`requireAdmin` on the manual path, the token on the scheduled one.
+
+Read with the request client instead and the schedule fires perfectly, arrives
+perfectly, and fails every night with **"Backup target not found."** for a
+target the page is displaying at the time — which is what `backup_dispatches`
+is for. A failed dispatch is the app's own answer, so its reason is on the
+Configuration card under *Last dispatch* (hover it for the message); the four
+candidates below are all the links *before* that row could be written.
+
 ### Setup, once per project
 
 ```bash
@@ -227,6 +251,10 @@ from the database to wherever the portal is hosted; on a private network it neve
 arrives, and the symptom is a target whose page says *Scheduled, but never
 dispatched yet*. `backup_dispatches` is the record of the asking — the thing the
 worker's own history could never tell us.
+
+A dispatch row written and marked `failed` means the opposite of the four below:
+the whole chain worked and **the app** refused the run. Its `error` is the
+reason, verbatim.
 
 **No cron job exists until a target's schedule is turned on.** A target showing
 `Schedule off` has none by design; that is what the toggle means.
