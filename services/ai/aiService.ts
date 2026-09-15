@@ -8,7 +8,7 @@ import { canEdit } from '@/lib/rbac';
 import { tiptapExtensions } from '@/lib/tiptap/extensions';
 import { interpretGeminiError } from '@/services/ai/errors';
 import type { ApiSingleResponse } from '@/types/common';
-import { recordLiveUrl, recordUrl } from '@/lib/endpoints';
+import { environmentTitle, recordLiveUrl, recordUrl } from '@/lib/endpoints';
 import type {
   CicdProvider,
   EnvironmentPort,
@@ -118,7 +118,10 @@ const buildProjectContext = (project: ProjectDetail): string => {
   );
 
   for (const env of project.environments) {
-    const parts = [`- ${env.name}`, `CI/CD: ${env.cicdProvider}`];
+    const parts = [
+      `- ${environmentTitle(env.name, env.label)}`,
+      `CI/CD: ${env.cicdProvider}`,
+    ];
     if (env.deployUrl) parts.push(`deploy URL: ${env.deployUrl}`);
     if (env.jenkinsUrl) parts.push(`Jenkins: ${env.jenkinsUrl}`);
     if (env.vmName) parts.push(`VM: ${env.vmName}${env.vmIp ? ` (${env.vmIp})` : ''}`);

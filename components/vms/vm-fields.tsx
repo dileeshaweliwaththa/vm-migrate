@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { environmentTitle } from '@/lib/endpoints';
 import { cn } from '@/lib/utils';
 import { safeStatus, STATUS_PILL_CLASS, STATUS_TONE_CLASS } from '@/lib/vm-utils';
 import type { Vm, VmUrl } from '@/types/common/vm';
@@ -134,7 +135,14 @@ export function VmSelectCheckbox({
 export function UrlOwnerBadge({ url }: { url: VmUrl }) {
   if (!url.environmentId) return null;
 
-  const label = [url.projectName, url.environmentName].filter(Boolean).join(' · ');
+  const label = [
+    url.projectName,
+    url.environmentName
+      ? environmentTitle(url.environmentName, url.environmentLabel)
+      : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
   const badge = (
     <Badge
       variant="outline"

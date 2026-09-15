@@ -23,7 +23,7 @@ export const findAllProjects = async (): Promise<ProjectRow[]> => {
     // row per environment carries both that and the tally
     // (`environments.length`).
     .select(
-      '*, environments(id, name, vm_id, vms(name, old_ip, new_ip, migrated)), project_tags(tags(name))'
+      '*, environments(id, name, label, vm_id, vms(name, old_ip, new_ip, migrated)), project_tags(tags(name))'
     )
     .order('created_at', { ascending: true });
   if (error) throw new Error(error.message);

@@ -33,6 +33,9 @@ export interface VmUrl {
   projectName: string;
   projectSlug: string;
   environmentName: string;
+  // The environment's optional display name, so a record's badge can tell two
+  // DEVs on this VM apart. Composed with the stage by `environmentTitle`.
+  environmentLabel: string;
 }
 
 // A purged VM whose URLs were migrated onto a destination VM is preserved here

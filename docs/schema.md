@@ -282,7 +282,8 @@ role-based RLS as `projects` (writes = `editor`/`admin`).
 | --------------- | ------------- | ------------------------------------------------ |
 | `id`            | `uuid`        | primary key                                      |
 | `project_id`    | `uuid`        | FK → `projects.id`, `on delete cascade`          |
-| `name`          | `environment_name` | enum: `DEV` / `STAGE` / `PRODUCTION`        |
+| `name`          | `environment_name` | the **stage** — enum: `DEV` / `STAGE` / `PRODUCTION` |
+| `label`         | `text`        | optional display name, for a project with two environments in one stage (`DEV · CSE UAT`). Empty is the normal case; composed with `name` by `environmentTitle` in [lib/endpoints.ts](../lib/endpoints.ts) |
 | `cicd_provider` | `text`        | overrides the project default                    |
 | `jenkins_url`   | `text`        | Jenkins job URL (secret token lives in `environment_secrets`) |
 | `jenkins_username` | `text`     | Jenkins Basic-auth username (non-secret)         |
@@ -512,6 +513,11 @@ In `supabase/migrations/`, applied in timestamp order:
   and `backup_cron_ping_result()`: `security definer`, `service_role`-only, so
   the app can read its own pg_cron job and send one test request down the path a
   firing job takes. See [backups.md § Test schedule](./backups.md#test-schedule).
+- `…_environment_label.sql` — adds `environments.label`, the optional display
+  name that tells two environments in the same stage apart. The stage stays a
+  closed enum (the switcher, the lifecycle ordering and the dashboard breakdown
+  all depend on it), so the name is a column beside it rather than a loosening
+  of `environment_name`. See [`environments`](#environments).
 - `…_backups_admin_only_writes.sql` — makes the Backups tab admin-write and
   everyone-read: replaces the editor/admin write policies on `backup_targets`
   and `backup_storage_accounts` with admin-only ones, and drops the

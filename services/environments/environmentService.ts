@@ -31,6 +31,9 @@ import type {
 const envInputToColumns = (input: EnvironmentInput): EnvironmentWriteColumns => {
   const cols: EnvironmentWriteColumns = {};
   if (input.name !== undefined) cols.name = input.name;
+  // Trimmed on the way in, so a name that is nothing but spaces is stored as the
+  // empty string — the value every reader already treats as "no name".
+  if (input.label !== undefined) cols.label = input.label.trim();
   if (input.cicdProvider !== undefined) cols.cicd_provider = input.cicdProvider;
   // `jenkins_url` / `jenkins_username` are deliberately not writable from here —
   // they belong to `saveEnvironmentJenkinsConfig`, which owns the whole Jenkins

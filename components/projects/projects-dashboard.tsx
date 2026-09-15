@@ -227,7 +227,15 @@ function EnvironmentsTally({ environments }: { environments: ProjectEnvironmentS
         <ul className="grid grid-cols-[max-content_minmax(0,1fr)_max-content] items-baseline gap-x-4 gap-y-1">
           {environments.map((env) => (
             <li key={env.id} className="col-span-3 grid grid-cols-subgrid items-baseline">
-              <span className="text-label-caps uppercase">{env.name}</span>
+              {/* `whitespace-nowrap` because this column is `max-content`: a two
+                  word name would otherwise wrap and push the VM and its address
+                  off the shared baseline. */}
+              <span className="whitespace-nowrap text-label-caps uppercase">
+                {env.name}
+                {env.label ? (
+                  <span className="normal-case text-background/60"> · {env.label}</span>
+                ) : null}
+              </span>
               {/* Mono for the machine and its address — the same treatment they
                   get everywhere else they're scanned, and it puts the IP digits
                   in a column. The name truncates if it has to; the address never

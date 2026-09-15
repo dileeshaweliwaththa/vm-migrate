@@ -53,7 +53,14 @@ export interface EnvironmentPort {
 export interface Environment {
   id: string;
   projectId: string;
+  // The stage. Fixed set, and what the project page's switcher groups by.
   name: EnvironmentName;
+  // What distinguishes two environments that share a stage — "CSE UAT" on one of
+  // a project's two DEVs. Optional, and usually empty: a project with one
+  // deployment per stage has nothing to disambiguate. Rendered through
+  // `environmentTitle` wherever an environment is named, so the stage and its
+  // name are never joined two different ways.
+  label: string;
   cicdProvider: CicdProvider;
   jenkinsUrl: string;
   jenkinsUsername: string;
@@ -91,6 +98,7 @@ export interface Environment {
 export interface ProjectEnvironmentSummary {
   id: string;
   name: EnvironmentName;
+  label: string;
   vmName: string;
   vmIp: string;
 }
@@ -140,7 +148,10 @@ export interface InlineVmInput {
 // of the other two. Accepting a URL here as well would give one field two write
 // paths, one of which skips the SSRF check on the target. See docs/jenkins-sync.md.
 export type EnvironmentInput = Partial<
-  Pick<Environment, 'name' | 'cicdProvider' | 'deployUrl' | 'vmId' | 'notes' | 'position'>
+  Pick<
+    Environment,
+    'name' | 'label' | 'cicdProvider' | 'deployUrl' | 'vmId' | 'notes' | 'position'
+  >
 > & { newVm?: InlineVmInput };
 
 export type EnvironmentPortInput = Partial<

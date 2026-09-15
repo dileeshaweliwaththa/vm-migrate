@@ -87,6 +87,7 @@ const rowToUrl = (row: EndpointRow): VmUrl => ({
   projectName: row.environments?.projects?.name ?? '',
   projectSlug: row.environments?.projects?.slug ?? '',
   environmentName: row.environments?.name ?? '',
+  environmentLabel: row.environments?.label ?? '',
 });
 
 const rowToVm = (

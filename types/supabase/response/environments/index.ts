@@ -4,7 +4,11 @@ import type { VmSummaryRow } from '@/types/supabase/response/vms';
 export interface EnvironmentRow {
   id: string;
   project_id: string;
+  // The stage — one of the `environment_name` enum's three values.
   name: string;
+  // The optional display name that distinguishes two environments sharing a
+  // stage ("CSE UAT"). Empty for the single-DEV case, which is most of them.
+  label: string;
   cicd_provider: string;
   jenkins_url: string;
   jenkins_username: string;

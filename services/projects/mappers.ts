@@ -33,6 +33,7 @@ export const collectProjectEnvironments = (
   rows: {
     id: string;
     name: string;
+    label?: string;
     vm_id: string | null;
     vms?: VmSummaryRow | null;
   }[]
@@ -43,12 +44,15 @@ export const collectProjectEnvironments = (
         ENVIRONMENT_NAMES.indexOf(a.name as EnvironmentName) -
           ENVIRONMENT_NAMES.indexOf(b.name as EnvironmentName) ||
         // Two environments can share a name (two PRODUCTIONs on different hosts),
-        // so the machine breaks the tie and the pair keeps a stable order.
-        (a.vms?.name ?? '').localeCompare(b.vms?.name ?? '')
+        // so the machine breaks the tie and the pair keeps a stable order — and
+        // then their own names, for the pair that shares a machine as well.
+        (a.vms?.name ?? '').localeCompare(b.vms?.name ?? '') ||
+        (a.label ?? '').localeCompare(b.label ?? '')
     )
     .map((row) => ({
       id: row.id,
       name: row.name as EnvironmentName,
+      label: row.label ?? '',
       vmName: row.vm_id ? row.vms?.name ?? '' : '',
       vmIp: row.vms
         ? vmLiveIp({
@@ -112,6 +116,7 @@ export const rowToEnvironment = (row: EnvironmentRow): Environment => {
     id: row.id,
     projectId: row.project_id,
     name: row.name as EnvironmentName,
+    label: row.label ?? '',
     cicdProvider: row.cicd_provider as CicdProvider,
     jenkinsUrl: row.jenkins_url,
     jenkinsUsername: row.jenkins_username ?? '',

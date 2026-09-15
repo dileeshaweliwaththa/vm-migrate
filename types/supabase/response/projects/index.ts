@@ -18,6 +18,7 @@ export interface ProjectRow {
   environments?: {
     id: string;
     name: string;
+    label: string;
     vm_id: string | null;
     vms: VmSummaryRow | null;
   }[];

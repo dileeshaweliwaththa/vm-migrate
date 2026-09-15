@@ -6,6 +6,7 @@ import type { EnvironmentRow } from '@/types/supabase/response/environments';
 export type EnvironmentWriteColumns = Partial<{
   project_id: string;
   name: string;
+  label: string;
   cicd_provider: string;
   jenkins_url: string;
   jenkins_username: string;

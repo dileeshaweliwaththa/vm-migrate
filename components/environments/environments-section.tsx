@@ -25,7 +25,7 @@ import type {
 } from '@/types/common/project';
 import { ENVIRONMENT_NAMES, providerHasBranch, providerHasPorts } from '@/types/common/project';
 import type { Protocol } from '@/types/common/vm';
-import { recordLiveUrl } from '@/lib/endpoints';
+import { environmentTitle, recordLiveUrl } from '@/lib/endpoints';
 
 // What a hand-added record is created as. Shared by the Add row's handler and its
 // live-link preview so the preview can't promise a URL the record won't get.
@@ -681,6 +681,12 @@ function EnvironmentCard({
         <div className="flex items-center gap-3">
           <h3 className="text-body-md font-bold tracking-wide uppercase">
             {env.name || 'unnamed'}
+            {/* The name is what tells this DEV from the project's other DEV, so it
+                sits in the heading — but a step lighter, because the stage is
+                still what you scan the page for. */}
+            {env.label ? (
+              <span className="font-medium text-muted-foreground"> · {env.label}</span>
+            ) : null}
           </h3>
           <Badge variant="secondary" className="rounded-sm text-label-caps font-bold uppercase">
             {env.cicdProvider}
@@ -777,7 +783,7 @@ function EnvironmentCard({
                   <JenkinsConfigDialog
                     projectId={projectId}
                     envId={env.id}
-                    envName={env.name}
+                    envName={environmentTitle(env.name, env.label)}
                     open={jenkinsOpen}
                     onOpenChange={setJenkinsOpen}
                   />
@@ -786,7 +792,7 @@ function EnvironmentCard({
                     <JenkinsJobsDialog
                       projectId={projectId}
                       envId={env.id}
-                      envName={env.name}
+                      envName={environmentTitle(env.name, env.label)}
                       open={jobsOpen}
                       onOpenChange={setJobsOpen}
                     />
@@ -812,7 +818,7 @@ function EnvironmentCard({
                   <DockerImportDialog
                     projectId={projectId}
                     envId={env.id}
-                    envName={env.name}
+                    envName={environmentTitle(env.name, env.label)}
                     portCount={env.ports.length}
                     open={dockerOpen}
                     onOpenChange={setDockerOpen}
@@ -836,7 +842,11 @@ function EnvironmentCard({
                 </AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader>
-                    <AlertDialogTitle>Delete “{env.name}”?</AlertDialogTitle>
+                    {/* Named in full: with two DEVs on the page, "Delete DEV?" is
+                        the one question that must not be ambiguous. */}
+                    <AlertDialogTitle>
+                      Delete “{environmentTitle(env.name, env.label)}”?
+                    </AlertDialogTitle>
                     <AlertDialogDescription>
                       This removes the environment and its ports. This cannot be undone.
                     </AlertDialogDescription>

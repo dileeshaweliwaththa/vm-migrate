@@ -34,6 +34,7 @@ export interface EndpointRow {
   environments?: {
     id: string;
     name: string;
+    label: string;
     vm_id: string | null;
     project_id: string;
     projects?: { name: string; slug: string } | null;

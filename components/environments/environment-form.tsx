@@ -32,6 +32,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { VmField, type VmSelection } from '@/components/environments/vm-field';
+import { environmentTitle } from '@/lib/endpoints';
 
 // Add or edit an environment. Pass `environment` to edit; omit to add.
 export function EnvironmentForm({
@@ -52,6 +53,7 @@ export function EnvironmentForm({
   const [open, setOpen] = useState(false);
 
   const [name, setName] = useState<EnvironmentName>(environment?.name ?? 'DEV');
+  const [label, setLabel] = useState(environment?.label ?? '');
   const [cicdProvider, setCicdProvider] = useState<CicdProvider>(environment?.cicdProvider ?? 'jenkins');
   const [deployUrl, setDeployUrl] = useState(environment?.deployUrl ?? '');
   const [notes, setNotes] = useState(environment?.notes ?? '');
@@ -62,7 +64,7 @@ export function EnvironmentForm({
   const pending = addEnvironment.isPending || updateEnvironment.isPending;
 
   const handleSave = () => {
-    const input: EnvironmentInput = { name, cicdProvider, deployUrl, notes };
+    const input: EnvironmentInput = { name, label, cicdProvider, deployUrl, notes };
     if (vm.mode === 'existing') input.vmId = vm.vmId || null;
     else if (vm.mode === 'none') input.vmId = null;
     else input.newVm = vm.newVm;
@@ -123,6 +125,29 @@ export function EnvironmentForm({
                 </SelectContent>
               </Select>
             </div>
+          </div>
+          {/* The stage says what this deployment is *for*; the name says which one
+              it is. Optional because most projects have one environment per stage
+              and have nothing to tell apart — and full width under the two
+              selects rather than beside them, since a name like
+              "CSE UAT (client-hosted)" needs the room the selects don't. */}
+          <div className="space-y-2">
+            <Label htmlFor="e-label">
+              Name <span className="font-normal text-muted-foreground">(optional)</span>
+            </Label>
+            <Input
+              id="e-label"
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="e.g. CSE UAT"
+            />
+            <p className="text-xs text-muted-foreground">
+              Shown as{' '}
+              <span className="font-medium text-foreground">
+                {environmentTitle(name, label || 'CSE UAT')}
+              </span>
+              . Worth setting when a project has more than one {name}.
+            </p>
           </div>
           {/* No Jenkins job URL here. The URL, username and token are one unit of
               configuration, and the token can only be set in the Jenkins settings

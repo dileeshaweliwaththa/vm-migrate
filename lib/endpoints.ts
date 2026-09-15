@@ -5,6 +5,23 @@ import type { Protocol, Vm } from '@/types/common/vm';
 // Pure helper, no React/DB — lives here (like lib/rbac.ts) so the docs generator
 // and the UI can't derive it two different ways.
 
+// How an environment is named wherever one is shown: the stage, plus its
+// optional display name when it has one.
+//
+//   DEV                 one DEV — nothing to disambiguate
+//   DEV · CSE UAT       two DEVs on one machine, told apart at last
+//
+// One function rather than a template string per component, because an
+// environment is named in five places (its card, the delete confirmation, the
+// project list's hover, the Jenkins dialogs' titles and the tracker's record
+// badge) and a separator that differs between them reads as two conventions.
+// `·` is the one this app already uses to join a thing to its qualifier —
+// `PROJECT · STAGE` on a record badge, `VM · IP` in an environment header.
+export const environmentTitle = (name: string, label: string): string => {
+  const trimmed = label.trim();
+  return trimmed ? `${name} · ${trimmed}` : name;
+};
+
 // The scheme each protocol forms a browsable URL with. Absent means "not a link":
 // a TCP/UDP record is a port, not a URL. Keyed by `Protocol` rather than by string
 // so the set can only ever be the enum's (AGENTS.md §types), and so both questions

@@ -23,7 +23,8 @@ export type EndpointWriteColumns = Partial<{
 
 // What the tracker needs on a project-owned row: which environment it belongs
 // to, which VM that environment sits on, and the project's name for the label.
-const ENVIRONMENT_EMBED = 'environments!inner(id, name, vm_id, project_id, projects(name, slug))';
+const ENVIRONMENT_EMBED =
+  'environments!inner(id, name, label, vm_id, project_id, projects(name, slug))';
 
 export const findEndpointById = async (id: string): Promise<EndpointRow | null> => {
   const supabase = await createClient();
