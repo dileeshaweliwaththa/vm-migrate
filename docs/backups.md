@@ -172,13 +172,27 @@ Supabase Postgres is which binary produces the SQL.
 | List the databases | `mysql -N -B -e 'SHOW DATABASES'` | `psql -A -t -q -c 'select datname from pg_database …'` |
 | Dump one | `mysqldump --single-transaction --routines --triggers --events` | `pg_dump` |
 | Credential | `MYSQL_PWD` | `PGPASSWORD` |
+| Connect timeout | `--connect-timeout=10` | `PGCONNECT_TIMEOUT=10` |
 | Default port | 3306 | 5432 |
 | Repository | `repositories/mysql/mysqlDumpRepository.ts` | `repositories/postgres/pgDumpRepository.ts` |
 | Alpine package | `mysql-client` | `postgresql17-client` |
 
 A lookup rather than an `if` at each call site: a third engine is a third entry
 there and a value in the `backup_engine` enum, not a search for every place the
-runner asked which one it was.
+runner asked which one it was. That is not a hypothetical tidiness argument —
+`startBackup` was missed when the dispatch went in and kept calling the MySQL
+client directly, so "back up all databases" on a Postgres target ran `mysql`
+against Postgres.
+
+**Both clients cap the connection phase**, which is what made that bug
+disappointing rather than catastrophic. Pointed at a listening port that is not
+its own protocol, the MySQL client does not fail — it *hangs*: MySQL's handshake
+has the server send the first packet while Postgres waits for the client, so both
+block. Measured against the live Postgres port: with no timeout it was still
+waiting when killed at 25s; with `--connect-timeout=10` it exits after 10s with
+*"Lost connection to MySQL server at 'waiting for initial communication
+packet'"*. A hung dump call hangs the HTTP request behind it, which reaches the
+browser as a bodiless gateway error with no message to show.
 
 ### What each dump contains, and why
 

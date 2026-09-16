@@ -39,10 +39,24 @@ const credentialEnv = (connection: MysqlConnection): NodeJS.ProcessEnv => ({
   MYSQL_PWD: connection.password,
 });
 
+// Ten seconds to get connected, then give up.
+//
+// Without this the client waits forever, because MySQL's handshake has the
+// *server* speak first: pointed at a port that is listening but is not MySQL —
+// a Postgres one, say — the client blocks reading an initial packet that never
+// arrives while the other end blocks waiting for a request. Nothing times out,
+// and the HTTP request that triggered it hangs until a proxy kills it, which
+// reaches the browser as a bodiless gateway error rather than as a message.
+//
+// It bounds the connection phase only; a dump itself may take as long as it
+// takes.
+const CONNECT_TIMEOUT_SECONDS = 10;
+
 const connectionArgs = (connection: MysqlConnection): string[] => [
   `--host=${connection.host}`,
   `--port=${String(connection.port)}`,
   `--user=${connection.user}`,
+  `--connect-timeout=${String(CONNECT_TIMEOUT_SECONDS)}`,
 ];
 
 // A password can still reach stderr by way of a URL or a config echo, so every

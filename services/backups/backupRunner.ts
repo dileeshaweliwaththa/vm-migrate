@@ -383,7 +383,15 @@ export const startBackup = async (
   const requested = databases.filter((name) => typeof name === 'string' && name.trim());
   let selected = requested;
   if (selected.length === 0) {
-    const all = await listMysqlDatabases(resolved.config.connection);
+    // **Through `ENGINE_CLIENTS`, like every other client call.** This was the
+    // one place that named the MySQL client directly, which meant "back up all
+    // databases" on a Postgres target ran `mysql` against Postgres — and that
+    // does not fail, it *hangs*: MySQL's protocol has the server send the first
+    // packet and Postgres waits for the client, so both sides block until
+    // something upstream times the request out.
+    const all = await ENGINE_CLIENTS[resolved.config.engine].listDatabases(
+      resolved.config.connection
+    );
     if (!all.ok) {
       return { ok: false, message: all.error ?? 'Could not list the databases to back up.' };
     }
