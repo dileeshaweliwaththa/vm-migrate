@@ -10,10 +10,20 @@ import { PageHeader } from '@/components/layout/page-header';
 import { cn } from '@/lib/utils';
 import { isAdmin } from '@/lib/rbac';
 import { STATUS_PILL_CLASS, STATUS_TONE_CLASS } from '@/lib/vm-utils';
-import { computeBackupStats, describeCron, formatTimestamp } from '@/lib/backup-utils';
-import { useBackupTargets } from '@/hooks/backups/useBackups';
+import {
+  computeBackupStats,
+  countDatabases,
+  describeCron,
+  formatTimestamp,
+  newerTimestamp,
+} from '@/lib/backup-utils';
+import { useBackupTargets, useBackupTargetsLive } from '@/hooks/backups/useBackups';
 import type { UserRole } from '@/types/common';
-import type { BackupTargetOverview } from '@/types/common/backup';
+import {
+  BACKUP_ENGINE_DETAILS,
+  type BackupTargetLive,
+  type BackupTargetSummary,
+} from '@/types/common/backup';
 import { BackupStorageDialog } from '@/components/backups/backup-storage-dialog';
 import { BackupTargetDialog } from '@/components/backups/backup-target-dialog';
 
@@ -24,17 +34,42 @@ import { BackupTargetDialog } from '@/components/backups/backup-target-dialog';
 // Same two-level shape as Projects now: a grid you scan, and a page you work in.
 //
 // A card answers only "is this database being backed up, and is anything wrong":
-// the worker's state, when the last dump was, the schedule, and the two
-// misconfigurations that hide themselves (a second scheduler, a worker pointed at
-// a different host).
+// the target's state, when the last dump was, the schedule, and the
+// misconfiguration that hides itself (a target with nowhere to put a dump).
+//
+// **It draws in two passes.** The card's text — name, host, schedule,
+// destination, how many dumps there have been — is all in Postgres and arrives
+// in one request. Whether the server actually answers, and how many databases
+// are on it, means connecting to another host; that is a second request per
+// card, and until it lands the card says so rather than guessing.
 
-function TargetCard({ overview }: { overview: BackupTargetOverview }) {
-  const { target, status, databases, records } = overview;
-  const latest = records[0] ?? null;
-  const failed = records.filter((record) => record.status === 'failed').length;
+function TargetCard({
+  summary,
+  live,
+  checking,
+  checkError,
+}: {
+  summary: BackupTargetSummary;
+  // Undefined until this target's live check comes back — or for good, if it
+  // failed. Every field it would carry is rendered as unknown rather than as
+  // zero, because "no databases" and "we haven't asked yet" are different
+  // things to read on a backup page.
+  live: BackupTargetLive | undefined;
+  checking: boolean;
+  // The check itself could not be made. Said out loud rather than shown as an
+  // absence, because on this page silence looks like "nothing is wrong".
+  checkError: Error | null;
+}) {
+  const { target, runs, azureConfigured } = summary;
+
+  // Blob-only dumps land with the live check, so the count climbs once — from
+  // what this app recorded to everything the container holds.
+  const records = runs.total + (live?.archived.length ?? 0);
+  const last = newerTimestamp(runs.last, live?.archived[0]?.timestamp);
   // The one misconfiguration that hides itself: a target that can be read but
-  // has nowhere to put a dump.
-  const missingDestination = status.reachable && !status.azureConfigured;
+  // has nowhere to put a dump. Only worth saying once the server has answered —
+  // a target nothing can reach has a larger problem.
+  const missingDestination = live?.status.reachable && !azureConfigured;
 
   return (
     <Link href={`/backups/${target.id}`} className="block">
@@ -46,25 +81,48 @@ function TargetCard({ overview }: { overview: BackupTargetOverview }) {
             <CardTitle className="min-w-0 font-display text-headline-md tracking-normal">
               <span className="block truncate">{target.name || target.dbHost}</span>
             </CardTitle>
-            <span
-              className={cn(
-                STATUS_PILL_CLASS,
-                STATUS_TONE_CLASS[
-                  status.reachable ? (status.isBackupRunning ? 'info' : 'success') : 'danger'
-                ]
-              )}
-              title={status.error || undefined}
-            >
-              {status.reachable
-                ? status.isBackupRunning
-                  ? 'Backing up'
-                  : 'Ready'
-                : 'Unreachable'}
-            </span>
+            {/* A run in flight is our own rows, so it is known immediately;
+                "Ready" and "Unreachable" both wait for the server to answer. */}
+            {runs.isRunning ? (
+              <span className={cn(STATUS_PILL_CLASS, STATUS_TONE_CLASS.info)}>Backing up</span>
+            ) : live ? (
+              <span
+                className={cn(
+                  STATUS_PILL_CLASS,
+                  STATUS_TONE_CLASS[live.status.reachable ? 'success' : 'danger']
+                )}
+                title={live.status.error || undefined}
+              >
+                {live.status.reachable ? 'Ready' : 'Unreachable'}
+              </span>
+            ) : checkError ? (
+              <span
+                className={cn(STATUS_PILL_CLASS, STATUS_TONE_CLASS.warning)}
+                title={checkError.message}
+              >
+                Check failed
+              </span>
+            ) : (
+              <span
+                className={cn(
+                  STATUS_PILL_CLASS,
+                  'border border-border text-muted-foreground',
+                  checking && 'animate-pulse'
+                )}
+              >
+                {checking ? 'Checking' : 'Not checked'}
+              </span>
+            )}
           </div>
           <p className="flex items-center gap-1.5 truncate font-mono text-label-mono text-muted-foreground">
             <Database className="size-3.5 shrink-0" />
-            {target.dbHost || '—'}
+            <span className="truncate">{target.dbHost || '—'}</span>
+            {/* Which server this is, in one word. Two cards that both say "Ready"
+                over an IP address are otherwise indistinguishable, and a
+                Postgres dump and a MySQL dump are not interchangeable. */}
+            <span className="shrink-0 text-muted-foreground/70">
+              · {BACKUP_ENGINE_DETAILS[target.engine].label}
+            </span>
           </p>
         </CardHeader>
 
@@ -92,34 +150,36 @@ function TargetCard({ overview }: { overview: BackupTargetOverview }) {
           <div className="flex flex-wrap items-center gap-1">
             <Badge
               variant="outline"
-              className="rounded-sm bg-muted/50 px-1.5 font-mono text-label-mono font-medium text-muted-foreground"
+              className={cn(
+                'rounded-sm bg-muted/50 px-1.5 font-mono text-label-mono font-medium text-muted-foreground',
+                checking && 'animate-pulse'
+              )}
             >
               <Database className="size-3" />
-              {status.reachable ? databases.length : '—'} database
-              {databases.length === 1 ? '' : 's'}
+              {live?.status.reachable ? `${countDatabases(live.databases)} ` : '— '}
+              database{live && countDatabases(live.databases) === 1 ? '' : 's'}
             </Badge>
             <Badge
               variant="outline"
               className="rounded-sm bg-muted/50 px-1.5 font-mono text-label-mono font-medium text-muted-foreground"
             >
               <Archive className="size-3" />
-              {records.length} backup{records.length === 1 ? '' : 's'}
+              {records} backup{records === 1 ? '' : 's'}
             </Badge>
-            {failed ? (
+            {runs.failed ? (
               <Badge
                 variant="outline"
                 className="rounded-sm bg-tone-danger px-1.5 font-mono text-label-mono font-medium text-tone-danger-fg"
               >
-                {failed} failed
+                {runs.failed} failed
               </Badge>
             ) : null}
-
           </div>
 
           <p className="text-body-sm text-muted-foreground">
             Last backup:{' '}
             <span className="font-mono text-label-mono text-foreground">
-              {latest ? formatTimestamp(latest.timestamp) : 'none yet'}
+              {last ? formatTimestamp(last) : 'none yet'}
             </span>
           </p>
 
@@ -146,8 +206,13 @@ export function BackupsIndex({ role }: { role: UserRole }) {
   // middle ground worth modelling. Everyone else reads.
   const canManage = isAdmin(role);
 
-  const { data: overviews, isLoading, error } = useBackupTargets();
-  const stats = computeBackupStats(overviews ?? []);
+  const { data: summaries, isLoading, error } = useBackupTargets();
+  const targets = summaries ?? [];
+
+  // One outbound check per card, in parallel, under the same query keys the
+  // target page uses — so opening a card shows what the card already knew.
+  const live = useBackupTargetsLive(targets.map((summary) => summary.target.id));
+  const stats = computeBackupStats(targets, live.byTarget);
 
   return (
     <>
@@ -174,7 +239,7 @@ export function BackupsIndex({ role }: { role: UserRole }) {
 
             {stats.latest ? (
               <span>
-                Last: <b className="text-foreground">{formatTimestamp(stats.latest.timestamp)}</b>
+                Last: <b className="text-foreground">{formatTimestamp(stats.latest)}</b>
               </span>
             ) : null}
           </>
@@ -220,7 +285,7 @@ export function BackupsIndex({ role }: { role: UserRole }) {
           <p className="text-body-sm text-destructive">
             {error instanceof Error ? error.message : 'Failed to load backup targets.'}
           </p>
-        ) : (overviews ?? []).length === 0 ? (
+        ) : targets.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border py-16 text-center text-body-sm text-muted-foreground">
             No backup targets yet.
             {canManage ? (
@@ -231,8 +296,14 @@ export function BackupsIndex({ role }: { role: UserRole }) {
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {(overviews ?? []).map((overview) => (
-              <TargetCard key={overview.target.id} overview={overview} />
+            {targets.map((summary) => (
+              <TargetCard
+                key={summary.target.id}
+                summary={summary}
+                live={live.byTarget.get(summary.target.id)}
+                checking={live.pending.has(summary.target.id)}
+                checkError={(live.errors.get(summary.target.id) as Error | null) ?? null}
+              />
             ))}
           </div>
         )}

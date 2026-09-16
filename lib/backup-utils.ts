@@ -1,6 +1,11 @@
 import type { StatusTone } from '@/lib/vm-utils';
-import { BACKUP_CRON_PRESETS } from '@/types/common/backup';
-import type { BackupLogEvent, BackupRecord, BackupTargetOverview } from '@/types/common/backup';
+import { BACKUP_CRON_PRESETS, POSTGRES_GLOBALS_DUMP } from '@/types/common/backup';
+import type {
+  BackupLogEvent,
+  BackupRecord,
+  BackupTargetLive,
+  BackupTargetSummary,
+} from '@/types/common/backup';
 
 // Presentation helpers for the Backups tab. Pure functions, no React, no data
 // access — the same arrangement as `lib/vm-utils.ts`.
@@ -59,32 +64,73 @@ export function recordLabel(record: BackupRecord): string {
   return record.status === 'success' ? 'Success' : 'Failed';
 }
 
-export interface BackupStats {
-  targets: number;
-  unreachable: number;
-  // Dumps recorded across every reachable worker — the histories are capped by
-  // the worker at 200 each, so this is "recent", not "ever".
-  records: number;
-  failed: number;
-  // The most recent dump anywhere, or null when there is nothing yet.
-  latest: BackupRecord | null;
+// How many of a target's dump entries are actually databases.
+//
+// A Postgres target's list starts with `_globals` — the cluster's roles and
+// grants, which have to be dumped and restored but are not a database. It is a
+// chip in the picker like any other, and it must not be counted in "19
+// databases", which is a claim about the server.
+export function countDatabases(databases: string[]): number {
+  return databases.filter((name) => name !== POSTGRES_GLOBALS_DUMP).length;
 }
 
-export function computeBackupStats(overviews: BackupTargetOverview[]): BackupStats {
-  const records = overviews.flatMap((overview) => overview.records);
-  const latest = records.reduce<BackupRecord | null>((newest, record) => {
-    if (!record.timestamp) return newest;
-    if (!newest) return record;
-    return record.timestamp > newest.timestamp ? record : newest;
-  }, null);
+// A target's whole history: the runs this app recorded, plus the dumps found in
+// the container that no run row accounts for.
+//
+// The two arrive in separate payloads — one from Postgres, one from Azure — so
+// the join happens here rather than on the server, and the rows render while the
+// blobs are still being listed.
+export function mergeRecords(records: BackupRecord[], archived: BackupRecord[]): BackupRecord[] {
+  if (archived.length === 0) return records;
+  // Newest first, which is the order every consumer of this list wants.
+  return [...records, ...archived].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+}
 
-  return {
-    targets: overviews.length,
-    unreachable: overviews.filter((overview) => !overview.status.reachable).length,
-    records: records.length,
-    failed: records.filter((record) => record.status === 'failed').length,
-    latest,
-  };
+// The later of two ISO timestamps, either of which may be missing. A target's
+// newest dump is whichever is newer of its last run row and the newest blob the
+// container turned up, and those arrive separately.
+export function newerTimestamp(a: string | undefined, b: string | undefined): string {
+  if (!a) return b ?? '';
+  if (!b) return a;
+  return a > b ? a : b;
+}
+
+export interface BackupStats {
+  targets: number;
+  // Only targets that have actually been checked count — a check still in flight
+  // is not a failure, and reporting it as one would flash a red number on every
+  // page load.
+  unreachable: number;
+  // Every dump known about: the runs recorded here plus the older ones still in
+  // the container. Grows as the live checks land.
+  records: number;
+  failed: number;
+  // When the most recent dump anywhere was, ISO; '' when there is nothing yet.
+  latest: string;
+}
+
+// The index header's line, assembled from both tiers: the counts Postgres
+// aggregated, plus whatever the live checks have returned so far.
+export function computeBackupStats(
+  summaries: BackupTargetSummary[],
+  live: Map<string, BackupTargetLive | undefined>
+): BackupStats {
+  let records = 0;
+  let failed = 0;
+  let unreachable = 0;
+  let latest = '';
+
+  for (const summary of summaries) {
+    const checked = live.get(summary.target.id);
+    records += summary.runs.total + (checked?.archived.length ?? 0);
+    failed += summary.runs.failed;
+    if (checked && !checked.status.reachable) unreachable += 1;
+
+    // The archived list is newest first, so its head is the only candidate.
+    latest = newerTimestamp(latest, newerTimestamp(summary.runs.last, checked?.archived[0]?.timestamp));
+  }
+
+  return { targets: summaries.length, unreachable, records, failed, latest };
 }
 
 // Timestamps are rendered in the reader's own locale, like the tracker's build

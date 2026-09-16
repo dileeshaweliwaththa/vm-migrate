@@ -1,12 +1,17 @@
 // Raw `backup_targets` row as returned by Supabase (snake_case, DB column
-// names). One row per MySQL server we back up: what to connect to, where the
-// dumps go, when it runs, and which worker does the dumping.
+// names). One row per database server we back up — MySQL or Postgres, per
+// `engine` — holding what to connect to, where the dumps go and when it runs.
 //
 // The DB password and the Azure connection string are **not** here — they live in
 // `backup_target_secrets`, which no client can read (see the migration).
 export interface BackupTargetRow {
   id: string;
   name: string;
+  // `backup_engine`: 'mysql' | 'postgres'. Left as a string here like every
+  // other enum column — the service validates it against `BACKUP_ENGINES` on
+  // the way into a domain type, so a value added to the DB enum before the app
+  // knows about it degrades rather than crashes.
+  engine: string;
   // The backup worker's address, e.g. `http://20.197.41.68:2999`.
   worker_url: string;
   db_host: string;

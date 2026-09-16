@@ -4,15 +4,19 @@ import { Archive, CalendarClock, Cloud, Database } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { STATUS_PILL_CLASS, STATUS_TONE_CLASS } from '@/lib/vm-utils';
-import { formatTimestamp, recordLabel, recordTone } from '@/lib/backup-utils';
-import type { BackupTargetOverview } from '@/types/common/backup';
+import { countDatabases, formatTimestamp, recordLabel, recordTone } from '@/lib/backup-utils';
+import type { BackupRecord, BackupTargetLive, BackupTargetOverview } from '@/types/common/backup';
 
-// The four numbers you want before anything else — the same four the worker's own
-// dashboard leads with: how many dumps exist, when the last one was, how many
-// databases are on the server, and whether the worker is up.
+// The four numbers you want before anything else: how many dumps exist, when the
+// last one was, how many databases are on the server, and where the dumps go.
 //
 // Composed from `Card`, one per stat, on the muted surface so a row of them reads
 // as a panel *inside* the target card rather than as four more cards.
+//
+// Two of the four are answered by Postgres and two by the database server, and
+// they arrive separately. The pair that has to wait renders as a pulsing dash
+// rather than as a zero — on a backup page, "no databases" and "we have not
+// asked yet" must not look the same.
 
 function Stat({
   label,
@@ -43,10 +47,24 @@ function Stat({
   );
 }
 
-export function BackupStatCards({ overview }: { overview: BackupTargetOverview }) {
-  const { status, databases, records, target } = overview;
-  // The history is the worker's 200 most recent, so "total" is honestly capped —
-  // said in the sub-line rather than implied by the number.
+function Pending() {
+  return <span className="animate-pulse font-mono text-muted-foreground">—</span>;
+}
+
+export function BackupStatCards({
+  overview,
+  live,
+  records,
+  checking,
+}: {
+  overview: BackupTargetOverview;
+  // Undefined until the target's live check answers, or for good if it failed.
+  live: BackupTargetLive | undefined;
+  // The merged history — this app's runs plus whatever the container turned up.
+  records: BackupRecord[];
+  checking: boolean;
+}) {
+  const { target, azureConfigured } = overview;
   const latest = records[0] ?? null;
 
   return (
@@ -55,7 +73,7 @@ export function BackupStatCards({ overview }: { overview: BackupTargetOverview }
         label="Backups"
         icon={<Archive className="size-3.5" />}
         value={<span className="font-mono">{records.length}</span>}
-        sub="recorded"
+        sub={checking ? 'counting the container…' : 'recorded'}
       />
       <Stat
         label="Last backup"
@@ -82,14 +100,26 @@ export function BackupStatCards({ overview }: { overview: BackupTargetOverview }
       <Stat
         label="Databases"
         icon={<Database className="size-3.5" />}
-        value={<span className="font-mono">{status.reachable ? databases.length : '—'}</span>}
+        value={
+          live ? (
+            <span className="font-mono">
+              {live.status.reachable ? countDatabases(live.databases) : '—'}
+            </span>
+          ) : (
+            <Pending />
+          )
+        }
         // Reachability belongs here: the count comes *from* the connection, so
         // its absence and the reason are the same fact.
-        tone={status.reachable ? undefined : 'text-destructive'}
+        tone={!live || live.status.reachable ? undefined : 'text-destructive'}
         sub={
-          status.reachable
-            ? `on ${status.host || target.dbHost}`
-            : status.error || 'database unreachable'
+          !live
+            ? checking
+              ? 'asking the server…'
+              : 'could not be checked'
+            : live.status.reachable
+              ? `on ${live.status.host || target.dbHost}`
+              : live.status.error || 'database unreachable'
         }
       />
       <Stat
@@ -99,14 +129,14 @@ export function BackupStatCards({ overview }: { overview: BackupTargetOverview }
         // so it is the whole answer to "where are my backups".
         value={
           <span className="text-body-md font-medium">
-            {status.azureConfigured ? 'Azure Blob' : 'Not configured'}
+            {azureConfigured ? 'Azure Blob' : 'Not configured'}
           </span>
         }
-        tone={status.azureConfigured ? undefined : 'text-destructive'}
+        tone={azureConfigured ? undefined : 'text-destructive'}
         sub={
-          status.azureConfigured ? (
+          azureConfigured ? (
             <span className="font-mono text-label-mono">
-              {status.azureContainer}
+              {target.storageContainer}
               {target.blobPrefix ? `/${target.blobPrefix}` : ''}
             </span>
           ) : (

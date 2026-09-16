@@ -218,6 +218,13 @@ its own folder inside it; retention deletes by age within that prefix. It is
 derived from the target's name at creation and then fixed — renaming a target
 would otherwise orphan everything under the old prefix.
 
+`engine` (`backup_engine`: `mysql` \| `postgres`, default `mysql`) says which
+client performs the dump. Everything else on the row is engine-neutral — the same
+host/port/user/password, destination, schedule and retention — so this is one
+column rather than a second kind of target. The TS constant `BACKUP_ENGINES`
+lists the same values in the same order. See
+[backups.md § Two engines](./backups.md#two-engines-one-pipe).
+
 ## `backup_runs` / `backup_run_events`
 
 What the app's backup runner did. One `backup_runs` row per dump attempt, grouped
@@ -241,6 +248,32 @@ session to write as.
 `backup_run_status` is `running` \| `success` \| `failed`. A `running` row older
 than three hours is treated as a dead container rather than a live run, or a
 target whose container was killed mid-dump could never be backed up again.
+
+### `backup_run_stats` (view)
+
+One row per target, aggregating the above — what the Backups index draws its
+cards from.
+
+| column | |
+| --- | --- |
+| `target_id` | the target |
+| `total_runs` | dumps recorded |
+| `failed_runs` | how many of them failed |
+| `last_started_at` | the newest run |
+| `last_running_at` | the newest run still marked `running` |
+
+`security_invoker = on`, so RLS on `backup_runs` decides who sees what exactly as
+it does for a direct select — a view without it would hand every target's counts
+to anyone who could reach the view.
+
+`last_running_at` rather than an `is_running` flag because the three-hour cutoff
+above is the runner's, and re-typing it here as an interval is a second place for
+it to drift from the value the runner actually enforces. The service compares the
+timestamp against its own `STALE_RUN_MS`.
+
+Cards used to be built by selecting 200 run rows per target and counting them in
+Node, for three numbers and a maximum. See
+[backups.md § How the pages load](./backups.md#how-the-pages-load).
 
 ## `projects`
 
@@ -513,6 +546,13 @@ In `supabase/migrations/`, applied in timestamp order:
   and `backup_cron_ping_result()`: `security definer`, `service_role`-only, so
   the app can read its own pg_cron job and send one test request down the path a
   firing job takes. See [backups.md § Test schedule](./backups.md#test-schedule).
+- `…_backup_run_stats_view.sql` — `backup_run_stats`, the per-target aggregate
+  the Backups index reads instead of every run row for every target. See
+  [`backup_run_stats`](#backup_run_stats-view).
+- `…_backup_target_engine.sql` — the `backup_engine` enum and
+  `backup_targets.engine`, so a target can be a PostgreSQL/Supabase server as
+  well as a MySQL one. Existing rows default to `mysql`. See
+  [`backup_targets`](#backup_targets--backup_target_secrets--backup_dispatches).
 - `…_environment_label.sql` — adds `environments.label`, the optional display
   name that tells two environments in the same stage apart. The stage stays a
   closed enum (the switcher, the lifecycle ordering and the dashboard breakdown

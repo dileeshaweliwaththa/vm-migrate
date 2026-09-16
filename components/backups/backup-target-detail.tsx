@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { CalendarClock, Database, Pencil, Trash2 } from 'lucide-react';
@@ -21,11 +21,14 @@ import {
 import { PageHeader } from '@/components/layout/page-header';
 import { cn } from '@/lib/utils';
 import { STATUS_PILL_CLASS, STATUS_TONE_CLASS } from '@/lib/vm-utils';
-import { describeCron, formatTimestamp } from '@/lib/backup-utils';
+import { describeCron, formatTimestamp, mergeRecords } from '@/lib/backup-utils';
+import { BACKUP_ENGINE_DETAILS } from '@/types/common/backup';
 import {
   useBackupLogs,
   useBackupTarget,
+  useBackupTargetLive,
   useDeleteBackupTarget,
+  useRefreshBackupLive,
   useRunBackup,
 } from '@/hooks/backups/useBackups';
 import { BackupDatabasePicker } from '@/components/backups/backup-database-picker';
@@ -56,6 +59,12 @@ import { BackupTargetDialog } from '@/components/backups/backup-target-dialog';
 // the stat cards, the database list, the log, the schedule, the history — with no
 // buttons on it, because a backup that stopped running is something anyone here
 // should be able to notice.
+//
+// **It loads in two passes**, like the index. The configuration, the schedule and
+// the runs this app recorded are one Supabase request and draw the page
+// immediately; the database list and the dumps that predate this app's own
+// records mean a MySQL connection and a container listing, and fill in behind
+// their own request. Only the parts that depend on the second wait for it.
 
 export function BackupTargetDetail({
   targetId,
@@ -68,6 +77,10 @@ export function BackupTargetDetail({
   canManage: boolean;
 }) {
   const { data: overview, isLoading, error } = useBackupTarget(targetId);
+  // Shares its key with the card on the index, so arriving from there usually
+  // costs nothing.
+  const { data: live, isPending: checking, error: checkError } = useBackupTargetLive(targetId);
+  const refreshLive = useRefreshBackupLive();
   const run = useRunBackup();
   const removeTarget = useDeleteBackupTarget();
   const router = useRouter();
@@ -81,8 +94,17 @@ export function BackupTargetDetail({
   // A run in flight, either started here or by the schedule. The runner records
   // its own progress, so this is just our database — nothing to stream and
   // nothing to reconnect.
-  const following = run.isPending || Boolean(overview?.status.isBackupRunning);
+  const following = run.isPending || Boolean(overview?.runs.isRunning);
   const { data: logs } = useBackupLogs(targetId, following);
+
+  // When a run we were watching finishes, the container has dumps in it that
+  // the last listing did not. That is the one moment worth paying for another —
+  // not when the run *starts*, which is minutes before any blob exists.
+  const wasFollowing = useRef(following);
+  useEffect(() => {
+    if (wasFollowing.current && !following) refreshLive(targetId);
+    wasFollowing.current = following;
+  }, [following, refreshLive, targetId]);
 
   const report = (result: { ok: boolean; message: string }) =>
     result.ok ? toast.success(result.message) : toast.error(result.message);
@@ -108,7 +130,10 @@ export function BackupTargetDetail({
     );
   }
 
-  const { target, status, databases, records, lastDispatch } = overview;
+  const { target, runs, azureConfigured, lastDispatch } = overview;
+  // This app's runs, plus the older dumps only the container knows about — the
+  // rows are on screen while that listing is still in flight.
+  const records = mergeRecords(overview.records, live?.archived ?? []);
 
   return (
     <>
@@ -119,6 +144,7 @@ export function BackupTargetDetail({
             <span className="inline-flex items-center gap-1.5">
               <Database className="size-3.5" />
               <span className="font-mono text-label-mono">{target.dbHost || '—'}</span>
+              <span>{BACKUP_ENGINE_DETAILS[target.engine].label}</span>
             </span>
             <span className="inline-flex items-center gap-1.5">
               <CalendarClock className="size-3.5" />
@@ -131,21 +157,38 @@ export function BackupTargetDetail({
         }
         actions={
           <>
-            <span
-              className={cn(
-                STATUS_PILL_CLASS,
-                STATUS_TONE_CLASS[
-                  status.reachable ? (status.isBackupRunning ? 'info' : 'success') : 'danger'
-                ]
-              )}
-              title={status.error || undefined}
-            >
-              {status.reachable
-                ? status.isBackupRunning
-                  ? 'Backing up'
-                  : 'Ready'
-                : 'Unreachable'}
-            </span>
+            {/* A run in flight is our own rows, so it is known at once; "Ready"
+                and "Unreachable" are the database server's answer to give. */}
+            {runs.isRunning ? (
+              <span className={cn(STATUS_PILL_CLASS, STATUS_TONE_CLASS.info)}>Backing up</span>
+            ) : live ? (
+              <span
+                className={cn(
+                  STATUS_PILL_CLASS,
+                  STATUS_TONE_CLASS[live.status.reachable ? 'success' : 'danger']
+                )}
+                title={live.status.error || undefined}
+              >
+                {live.status.reachable ? 'Ready' : 'Unreachable'}
+              </span>
+            ) : checkError ? (
+              <span
+                className={cn(STATUS_PILL_CLASS, STATUS_TONE_CLASS.warning)}
+                title={checkError.message}
+              >
+                Check failed
+              </span>
+            ) : (
+              <span
+                className={cn(
+                  STATUS_PILL_CLASS,
+                  'border border-border text-muted-foreground',
+                  checking && 'animate-pulse'
+                )}
+              >
+                {checking ? 'Checking' : 'Not checked'}
+              </span>
+            )}
             {canManage ? (
               <BackupTargetDialog
                 target={target}
@@ -230,12 +273,21 @@ export function BackupTargetDetail({
 
         {/* Shown on both views: it is the reason you came, whichever tab you
             land on. */}
-        {!status.reachable ? (
+        {live && !live.status.reachable ? (
           <p className="rounded-md bg-tone-danger px-3 py-2 text-body-sm text-tone-danger-fg">
-            {status.error || 'The database could not be reached.'}
+            {live.status.error || 'The database could not be reached.'}
           </p>
         ) : null}
-        {status.reachable && !status.azureConfigured ? (
+        {/* The check itself failed, which is not the same as the database being
+            down — and the page below is still every fact Supabase holds, so it
+            is a banner rather than an error page. */}
+        {checkError ? (
+          <p className="rounded-md bg-tone-warning px-3 py-2 text-body-sm text-tone-warning-fg">
+            Could not check this server or list its container: {checkError.message} — the
+            configuration and this app&rsquo;s own run history below are unaffected.
+          </p>
+        ) : null}
+        {live?.status.reachable && !azureConfigured ? (
           <p className="rounded-md bg-tone-warning px-3 py-2 text-body-sm text-tone-warning-fg">
             No Azure destination is configured — a run has nowhere to put its dumps. Add the
             connection string and container under Edit.
@@ -244,15 +296,22 @@ export function BackupTargetDetail({
 
         {view === 'overview' ? (
           <>
-            <BackupStatCards overview={overview} />
+            <BackupStatCards
+              overview={overview}
+              live={live}
+              records={records}
+              checking={checking}
+            />
 
             {/* Shown to everyone when the server answered: the list of databases
                 is what "this is being backed up" actually means, and a viewer
                 who cannot run one still needs to see it. The component renders
                 them as labels without the controls. */}
-            {status.reachable ? (
+            {checking ? (
+              <Skeleton className="h-32 rounded-lg" />
+            ) : live?.status.reachable ? (
               <BackupDatabasePicker
-                databases={databases}
+                databases={live.databases}
                 selected={selected}
                 onSelectedChange={setSelected}
                 running={following}
@@ -291,15 +350,23 @@ export function BackupTargetDetail({
                   <dt className="text-muted-foreground">Connects as</dt>
                   <dd className="truncate font-mono text-label-mono" title={target.dbHost}>
                     {target.dbUser || '—'}
-                    {target.dbPort && target.dbPort !== 3306 ? `:${target.dbPort}` : ''}
+                    {/* The port only when it is not this engine's usual one —
+                        3306 for MySQL, 5432 for Postgres — so the line carries
+                        information rather than a constant. */}
+                    {target.dbPort && target.dbPort !== BACKUP_ENGINE_DETAILS[target.engine].defaultPort
+                      ? `:${target.dbPort}`
+                      : ''}
                   </dd>
                 </div>
                 <div>
                   <dt className="text-muted-foreground">Dumped by</dt>
                   {/* This app, in-process — there is no worker to name any more.
                       Worth stating, because "where does the dump happen" is the
-                      first question when one fails. */}
-                  <dd className="font-mono text-label-mono">this app → Azure</dd>
+                      first question when one fails, and *which binary* is the
+                      second. */}
+                  <dd className="font-mono text-label-mono">
+                    {BACKUP_ENGINE_DETAILS[target.engine].client} → Azure
+                  </dd>
                 </div>
                 <div>
                   <dt className="text-muted-foreground">Destination</dt>

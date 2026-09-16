@@ -8,9 +8,14 @@ import {
 } from '@/repositories/azure/azureBlobRepository';
 import {
   listDatabases as listMysqlDatabases,
-  openDumpStream,
+  openDumpStream as openMysqlDumpStream,
+  type DumpStream,
   type MysqlConnection,
 } from '@/repositories/mysql/mysqlDumpRepository';
+import {
+  listDatabases as listPostgresDatabases,
+  openDumpStream as openPostgresDumpStream,
+} from '@/repositories/postgres/pgDumpRepository';
 import {
   countRunningBackupsAsService,
   finishBackupRun,
@@ -21,19 +26,32 @@ import { findBackupTargetByIdAsService } from '@/repositories/backupTargets/back
 import { getBackupTargetSecrets } from '@/repositories/backupTargets/backupTargetSecretRepository';
 import { getStorageForWrite } from '@/services/backups/backupStorageService';
 import type { BackupTargetRow } from '@/types/supabase/response/backupTargets';
+import {
+  BACKUP_ENGINES,
+  BACKUP_ENGINE_DETAILS,
+  DEFAULT_BACKUP_ENGINE,
+  type BackupEngine,
+} from '@/types/common/backup';
 
 // The backup runner: this app dumps the databases itself.
 //
-//   mysqldump (stdout) → gzip → Azure Blob uploadStream
+//   mysqldump | pg_dump (stdout) → gzip → Azure Blob uploadStream
 //
 // **Nothing touches disk.** The three are pipes, so a 64MB database costs a few
 // megabytes of memory rather than 64 of them plus a file to clean up. The worker
 // container it replaces read the whole dump into a string (`maxBuffer: 500MB`),
 // wrote it to local disk, then uploaded that file.
 //
+// **Two engines, one pipe.** A target says whether it is MySQL or Postgres and
+// `engineClient` hands back the matching pair of functions; everything after
+// that — the gzip, the upload, the byte counter, the run rows, retention — is
+// identical, because the only thing that actually differs between backing up a
+// MySQL server and a Supabase Postgres is which binary produces the SQL.
+//
 // It runs here because it can: this app is a long-lived Node process in a
-// container we build, so it has `mysqldump` (Alpine's `mysql-client`, added to
-// the Dockerfile) and no execution limit. That is what distinguishes it from a
+// container we build, so it has `mysqldump` and `pg_dump` (Alpine's
+// `mysql-client` and `postgresql17-client`, added to the Dockerfile) and no
+// execution limit. That is what distinguishes it from a
 // Supabase Edge Function, which has 2s of CPU, 256MB and no binaries — the
 // constraint that sent the first version of this feature to an external worker.
 //
@@ -62,12 +80,41 @@ const blobNameFor = (prefix: string, database: string, startedAt: Date): string 
 
 export interface BackupRunnerConfig {
   target: BackupTargetRow;
+  engine: BackupEngine;
+  // The same four fields either way, which is why one type covers both: a host,
+  // a port, a user and a password is all `mysql` and `libpq` are given.
   connection: MysqlConnection;
   azureConnectionString: string;
   azureContainer: string;
   // Everything this target writes lives under here. See `blobNameFor`.
   blobPrefix: string;
 }
+
+// The two client repositories, behind one shape.
+//
+// A lookup rather than an `if` at each call site: adding a third engine is a
+// third entry here and a value in the `backup_engine` enum, not a search for
+// every place the runner asked which one it was.
+const ENGINE_CLIENTS: Record<
+  BackupEngine,
+  {
+    listDatabases: (
+      connection: MysqlConnection
+    ) => Promise<{ ok: boolean; databases: string[]; error?: string }>;
+    openDumpStream: (connection: MysqlConnection, database: string) => DumpStream;
+  }
+> = {
+  mysql: { listDatabases: listMysqlDatabases, openDumpStream: openMysqlDumpStream },
+  postgres: { listDatabases: listPostgresDatabases, openDumpStream: openPostgresDumpStream },
+};
+
+// A column value the app does not recognise — a row written by a newer
+// migration, say — falls back rather than crashing a nightly run with an
+// undefined lookup.
+export const toBackupEngine = (value: string | null | undefined): BackupEngine =>
+  BACKUP_ENGINES.includes(value as BackupEngine)
+    ? (value as BackupEngine)
+    : DEFAULT_BACKUP_ENGINE;
 
 // Resolves everything a run needs, or says which part is missing. Called before
 // anything is recorded, so a misconfigured target fails as a message rather than
@@ -96,13 +143,18 @@ export const resolveRunnerConfig = async (
   const storage = await getStorageForWrite(target.storage_id);
   if (!storage.ok) return { ok: false, message: storage.message };
 
+  const engine = toBackupEngine(target.engine);
+
   return {
     ok: true,
     config: {
       target,
+      engine,
       connection: {
         host: target.db_host.trim(),
-        port: target.db_port || 3306,
+        // A row saved before this column existed, or one whose port was cleared,
+        // gets its own engine's default rather than MySQL's.
+        port: target.db_port || BACKUP_ENGINE_DETAILS[engine].defaultPort,
         user: target.db_user.trim(),
         password: secrets.dbPassword,
       },
@@ -120,7 +172,8 @@ export const listTargetDatabases = async (
   const resolved = await resolveRunnerConfig(targetId);
   if (!resolved.ok) return { ok: false, databases: [], error: resolved.message };
 
-  const result = await listMysqlDatabases(resolved.config.connection);
+  const { engine, connection } = resolved.config;
+  const result = await ENGINE_CLIENTS[engine].listDatabases(connection);
   return { ok: result.ok, databases: result.databases, error: result.error };
 };
 
@@ -156,7 +209,7 @@ const backupOneDatabase = async (
     message: `Dumping ${database}`,
   });
 
-  const dump = openDumpStream(config.connection, database);
+  const dump = ENGINE_CLIENTS[config.engine].openDumpStream(config.connection, database);
   const gzip = createGzip();
   const counter = new PassThrough();
   let size = 0;
@@ -168,10 +221,10 @@ const backupOneDatabase = async (
 
   try {
     // Both have to finish, and the dump's failure is the one that matters: a
-    // `mysqldump` that dies halfway still produces a valid *gzip* of a truncated
-    // dump, which would upload happily and restore to nothing. So the upload is
-    // awaited for its result and the dump for its exit code, and either one
-    // failing fails the database.
+    // dump process that dies halfway still produces a valid *gzip* of a
+    // truncated dump, which would upload happily and restore to nothing. So the
+    // upload is awaited for its result and the dump for its exit code, and
+    // either one failing fails the database.
     await Promise.all([
       uploadBlobStream(
         config.azureConnectionString,

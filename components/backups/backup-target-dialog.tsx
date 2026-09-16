@@ -29,18 +29,27 @@ import {
 } from '@/components/ui/select';
 import {
   BACKUP_CRON_PRESETS,
+  BACKUP_ENGINES,
+  BACKUP_ENGINE_DETAILS,
   DEFAULT_BACKUP_CRON,
-  DEFAULT_MYSQL_PORT,
+  DEFAULT_BACKUP_ENGINE,
+  type BackupEngine,
   type BackupTarget,
   type BackupTargetInput,
 } from '@/types/common/backup';
 
-// A backup target: the MySQL server, its destination, and when to run.
+// A backup target: the database server, its destination, and when to run.
 //
 // Four things and no more: the database credentials, how long to keep dumps,
 // which Azure destination to write to, and the schedule. There is no worker
 // address (this app performs the dump) and no Azure key (that belongs to the
 // destination, configured once for everyone).
+//
+// **The engine is the first field** because it changes what the rest of them
+// mean: the default port, the user a server of that kind ships with, and which
+// binary will do the dumping. It is a picker rather than something inferred from
+// the host — a Postgres server on a bare IP looks like nothing in particular,
+// and guessing wrong is a nightly backup that fails at 02:00.
 //
 // The two credentials are **write-only**. They are stored in a table no client
 // can read, the payload behind this form says only whether one is stored, and a
@@ -66,8 +75,9 @@ export function BackupTargetDialog({
   const { data: accounts } = useBackupStorageAccounts();
 
   const [name, setName] = useState('');
+  const [engine, setEngine] = useState<BackupEngine>(DEFAULT_BACKUP_ENGINE);
   const [dbHost, setDbHost] = useState('');
-  const [dbPort, setDbPort] = useState(String(DEFAULT_MYSQL_PORT));
+  const [dbPort, setDbPort] = useState(String(BACKUP_ENGINE_DETAILS[DEFAULT_BACKUP_ENGINE].defaultPort));
   const [dbUser, setDbUser] = useState('');
   const [dbPassword, setDbPassword] = useState('');
   const [storageId, setStorageId] = useState('');
@@ -77,6 +87,18 @@ export function BackupTargetDialog({
   const [notes, setNotes] = useState('');
 
   const pending = create.isPending || update.isPending;
+  const details = BACKUP_ENGINE_DETAILS[engine];
+
+  // Switching engine moves the port to the new engine's default — but only when
+  // the field still holds a default. A port someone typed is theirs, and
+  // correcting the engine on an existing target must not silently repoint it.
+  const changeEngine = (next: BackupEngine) => {
+    const isUntouched = BACKUP_ENGINES.some(
+      (candidate) => String(BACKUP_ENGINE_DETAILS[candidate].defaultPort) === dbPort.trim()
+    );
+    setEngine(next);
+    if (isUntouched) setDbPort(String(BACKUP_ENGINE_DETAILS[next].defaultPort));
+  };
 
   // A stored schedule from before the presets existed. Kept as an option rather
   // than dropped, so editing the notes cannot change when backups run.
@@ -88,9 +110,11 @@ export function BackupTargetDialog({
   // not persist into the next one. The two secret fields always start empty —
   // the browser was never sent them.
   const reset = () => {
+    const nextEngine = target?.engine ?? DEFAULT_BACKUP_ENGINE;
     setName(target?.name ?? '');
+    setEngine(nextEngine);
     setDbHost(target?.dbHost ?? '');
-    setDbPort(String(target?.dbPort ?? DEFAULT_MYSQL_PORT));
+    setDbPort(String(target?.dbPort ?? BACKUP_ENGINE_DETAILS[nextEngine].defaultPort));
     setDbUser(target?.dbUser ?? '');
     setStorageId(target?.storageId ?? '');
     setRetentionDays(String(target?.retentionDays ?? 7));
@@ -103,8 +127,9 @@ export function BackupTargetDialog({
   const handleSave = () => {
     const input: BackupTargetInput = {
       name,
+      engine,
       dbHost,
-      dbPort: Number(dbPort) || DEFAULT_MYSQL_PORT,
+      dbPort: Number(dbPort) || details.defaultPort,
       dbUser,
       // Null clears the destination, which the service distinguishes from
       // "unchanged" — so an unselected picker has to send null, not ''.
@@ -161,8 +186,8 @@ export function BackupTargetDialog({
         <DialogHeader>
           <DialogTitle>{target ? 'Edit backup target' : 'Add backup target'}</DialogTitle>
           <DialogDescription>
-            A MySQL server, its Azure destination and its schedule. Credentials are stored
-            server-side and never sent back to the browser.
+            A MySQL or PostgreSQL server, its Azure destination and its schedule. Credentials
+            are stored server-side and never sent back to the browser.
           </DialogDescription>
         </DialogHeader>
 
@@ -173,7 +198,7 @@ export function BackupTargetDialog({
               id="bt-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="mencartdb (Azure MySQL)"
+              placeholder={`server name (${details.label})`}
               autoFocus
             />
           </div>
@@ -181,6 +206,30 @@ export function BackupTargetDialog({
           {/* ---- the database ------------------------------------------- */}
           <div className="space-y-3 rounded-md border border-border p-3">
             <p className="text-label-caps uppercase text-muted-foreground">Database</p>
+            <div className="space-y-2">
+              <Label>Engine</Label>
+              <Select value={engine} onValueChange={(v) => changeEngine(v as BackupEngine)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {BACKUP_ENGINES.map((value) => (
+                    <SelectItem key={value} value={value}>
+                      {BACKUP_ENGINE_DETAILS[value].label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="font-mono text-label-mono text-muted-foreground">
+                dumped with {details.client}
+              </p>
+              {/* The trap this engine has and the other doesn't: the connection
+                  can succeed and the dump still fail, so the warning belongs
+                  next to the credentials rather than in a failed run. */}
+              {details.note ? (
+                <p className="text-body-sm text-muted-foreground">{details.note}</p>
+              ) : null}
+            </div>
             <div className="grid grid-cols-3 gap-3">
               <div className="col-span-2 space-y-2">
                 <Label htmlFor="bt-db-host">Host</Label>
@@ -188,7 +237,7 @@ export function BackupTargetDialog({
                   id="bt-db-host"
                   value={dbHost}
                   onChange={(e) => setDbHost(e.target.value)}
-                  placeholder="mencartdb.mysql.database.azure.com"
+                  placeholder={details.hostPlaceholder}
                 />
               </div>
               <div className="space-y-2">
@@ -207,7 +256,7 @@ export function BackupTargetDialog({
                 id="bt-db-user"
                 value={dbUser}
                 onChange={(e) => setDbUser(e.target.value)}
-                placeholder="admin_user"
+                placeholder={details.defaultUser}
                 autoComplete="off"
               />
             </div>

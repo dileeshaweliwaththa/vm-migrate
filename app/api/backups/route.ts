@@ -3,14 +3,19 @@ import { getCurrentUser } from '@/services/auth/authService';
 import { isForbidden } from '@/lib/errors';
 import {
   createBackupTarget,
-  listBackupTargetOverviews,
+  listBackupTargetSummaries,
 } from '@/services/backups/backupService';
 import type { BackupTargetInput } from '@/types/common/backup';
 
-// GET /api/backups — every registered backup service with its live state,
-// databases and history. One request for the whole page; a service that can't be
-// reached comes back with `status.reachable = false` rather than failing the
-// response, because the other services' histories are still worth showing.
+// GET /api/backups — every registered target with the facts Supabase can answer
+// on its own: the configuration, the schedule, how its runs have gone, and
+// whether it has a destination to write to.
+//
+// **No outbound call happens here**, which is the point: this is what the index
+// draws with, so it answers in one round trip rather than after a MySQL
+// handshake and a container listing per target. Whether a server is actually
+// reachable, which databases are on it and what older dumps the container holds
+// are `GET /api/backups/:id/live`, fetched per card once the page is up.
 export async function GET() {
   const user = await getCurrentUser();
   if (!user) {
@@ -18,7 +23,7 @@ export async function GET() {
   }
 
   try {
-    const data = await listBackupTargetOverviews();
+    const data = await listBackupTargetSummaries();
     return NextResponse.json({ data });
   } catch (error) {
     return NextResponse.json(

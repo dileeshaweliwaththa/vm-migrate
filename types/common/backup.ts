@@ -2,8 +2,70 @@
 // snake_case Supabase rows (the target, its schedule, the dispatch audit) and the
 // backup worker's own JSON (status, databases, history) into these.
 
-// MySQL's default port, so the target form only asks when it differs.
-export const DEFAULT_MYSQL_PORT = 3306;
+// Which database engine a target speaks, and therefore which client binary dumps
+// it. Mirrors the `backup_engine` DB enum — same values, same order.
+//
+// Everything else about a target is engine-neutral: the same host/port/user/
+// password, the same Azure destination, the same schedule, the same retention,
+// the same `.sql.gz` blob. Only the dump command and the "list the databases"
+// query differ, which is why this is one column rather than a second kind of
+// target.
+export const BACKUP_ENGINES = ['mysql', 'postgres'] as const;
+export type BackupEngine = (typeof BACKUP_ENGINES)[number];
+
+// What every existing target is, and what a new one starts as.
+export const DEFAULT_BACKUP_ENGINE: BackupEngine = 'mysql';
+
+// The per-engine facts the UI and the runner would otherwise re-type: the port
+// the form fills in, the user a server of that kind usually has, and what to
+// show in an empty host field. One place, so a default port cannot say 3306 in
+// the form and 5432 in the runner.
+export const BACKUP_ENGINE_DETAILS: Record<
+  BackupEngine,
+  {
+    label: string;
+    // Shown under the picker — which binaries the dump actually uses, because
+    // "is that in the image?" is the first question when one fails.
+    client: string;
+    defaultPort: number;
+    defaultUser: string;
+    hostPlaceholder: string;
+    // What the form has to say about this engine that the fields cannot. Empty
+    // when there is nothing.
+    note: string;
+  }
+> = {
+  mysql: {
+    label: 'MySQL / MariaDB',
+    client: 'mysqldump',
+    defaultPort: 3306,
+    defaultUser: 'admin_user',
+    hostPlaceholder: 'mencartdb.mysql.database.azure.com',
+    note: '',
+  },
+  postgres: {
+    label: 'PostgreSQL / Supabase',
+    client: 'pg_dump',
+    defaultPort: 5432,
+    // Not `postgres`. On a self-hosted Supabase that role is **not** a
+    // superuser, so `pg_dump` fails on the tables `supabase_admin` owns — and it
+    // fails only at *dump* time, because listing the databases works fine as
+    // `postgres`. Saying so here is cheaper than finding out at 02:00.
+    defaultUser: 'supabase_admin',
+    hostPlaceholder: 'db.example.com',
+    note: 'A full dump needs a superuser. On a self-hosted Supabase that is supabase_admin — the postgres role can list the databases but cannot dump the auth, storage and _analytics schemas.',
+  },
+};
+
+// Cluster-wide roles and grants, dumped by `pg_dumpall --globals-only` and
+// listed alongside a Postgres target's real databases.
+//
+// It is not a database, but it *is* a thing that has to be dumped and restored,
+// and it belongs to no single one of them: a Supabase dump restored without its
+// roles restores every table and then fails on the first `grant to anon`. The
+// picker therefore offers it like any other entry, and the underscore says it is
+// not a database name.
+export const POSTGRES_GLOBALS_DUMP = '_globals';
 
 // How a backup run was started. Mirrors the worker's `trigger_type`.
 export const BACKUP_TRIGGERS = ['manual', 'auto'] as const;
@@ -77,6 +139,8 @@ export type BackupStorageInput = Partial<
 export interface BackupTarget {
   id: string;
   name: string;
+  // Which client dumps it. See `BACKUP_ENGINES`.
+  engine: BackupEngine;
   // Legacy: the external worker this feature used before the app performed its
   // own dumps. Still read so an older deployment's row is not silently lost;
   // nothing writes it and no form asks for it. See docs/backups.md.
@@ -110,6 +174,7 @@ export type BackupTargetInput = Partial<
   Pick<
     BackupTarget,
     | 'name'
+    | 'engine'
     | 'dbHost'
     | 'dbPort'
     | 'dbUser'
@@ -154,6 +219,10 @@ export interface BackupRecord {
 // asking the database server for its list of databases — the same call the
 // runner makes, so "reachable" means reachable *for a backup*, not just
 // pingable.
+//
+// **Only the outside world can answer this**, which is why it is not on
+// `BackupTargetSummary`: establishing it means opening a MySQL connection to
+// another host, and the page must not wait on that to draw a card.
 export interface BackupTargetStatus {
   reachable: boolean;
   // Why not, when not: a refused connection, a rejected password, a missing
@@ -161,12 +230,6 @@ export interface BackupTargetStatus {
   error: string;
   host: string;
   port: number;
-  // A run is in flight for this target (an unfinished `backup_runs` row).
-  isBackupRunning: boolean;
-  // A destination is selected and its connection string is on file, so a run has
-  // somewhere to put its output.
-  azureConfigured: boolean;
-  azureContainer: string;
 }
 
 // The record that a run was asked for. Pairs with the worker's history, which is
@@ -222,13 +285,60 @@ export interface BackupScheduleTest {
   checks: BackupScheduleCheck[];
 }
 
-// Everything the page needs for one target in one request.
-export interface BackupTargetOverview {
+// ---- the two tiers a Backups page loads in ---------------------------------
+//
+// One payload used to carry all of this, and it could not arrive until a MySQL
+// connection to another host and a listing of an Azure container had both
+// answered — several seconds of blank page for a card whose text was sitting in
+// Postgres the whole time.
+//
+// So it is split by *who can answer*:
+//
+//   `BackupTargetSummary` / `BackupTargetOverview` — Supabase alone. A handful
+//     of indexed queries, no outbound call, and enough to draw the whole page.
+//   `BackupTargetLive` — the outside world. The MySQL server's database list and
+//     the container's older dumps, fetched under their own query key and filled
+//     in when they arrive.
+//
+// The tiers are separate types rather than optional fields so a component cannot
+// read a live value without having handled its absence.
+
+// This target's `backup_runs`, aggregated by the `backup_run_stats` view.
+export interface BackupRunStats {
+  total: number;
+  failed: number;
+  // The newest run's `started_at`, ISO; '' when there has never been one.
+  last: string;
+  // A run is in flight — an unfinished row newer than the runner's stale cutoff.
+  isRunning: boolean;
+}
+
+// What a card needs, and all of it from Supabase.
+export interface BackupTargetSummary {
   target: BackupTarget;
-  status: BackupTargetStatus;
-  databases: string[];
-  records: BackupRecord[];
+  runs: BackupRunStats;
+  // A destination is selected and its connection string is on file, so a run has
+  // somewhere to put its output. The container itself is `target.storageContainer`.
+  azureConfigured: boolean;
   // The last time a run was asked for, from either source. Null when none has
   // been — which for an enabled schedule is itself the finding.
   lastDispatch: BackupDispatch | null;
+}
+
+// The target page's fast tier: the summary plus this app's own run rows.
+//
+// `records` is the runs **this app performed**. Dumps that exist only as blobs —
+// everything the worker this feature replaced wrote — arrive in the live tier,
+// because finding them means listing the container.
+export interface BackupTargetOverview extends BackupTargetSummary {
+  records: BackupRecord[];
+}
+
+// The slow tier: two outbound calls, made in parallel, for one target.
+export interface BackupTargetLive {
+  status: BackupTargetStatus;
+  databases: string[];
+  // Dumps in the container that no `backup_runs` row accounts for. Merged into
+  // the history client-side by `mergeRecords`.
+  archived: BackupRecord[];
 }

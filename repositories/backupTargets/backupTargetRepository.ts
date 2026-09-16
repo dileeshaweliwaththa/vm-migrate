@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service';
 import type { BackupDispatchRow, BackupTargetRow } from '@/types/supabase/response/backupTargets';
+import type { BackupEngine } from '@/types/common/backup';
 
 // Repository layer: pure Supabase data access for `backup_targets` and the
 // `backup_dispatches` audit. The credentials are in
@@ -13,6 +14,10 @@ import type { BackupDispatchRow, BackupTargetRow } from '@/types/supabase/respon
 
 export type BackupTargetWriteColumns = Partial<{
   name: string;
+  // `backup_engine`: which client dumps this target. Typed as the shared union
+  // rather than `string`, so a typo is a compile error here and not a Postgres
+  // enum error at insert time.
+  engine: BackupEngine;
   db_host: string;
   db_port: number;
   db_user: string;

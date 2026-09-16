@@ -10,8 +10,10 @@ import type { BackupTargetInput } from '@/types/common/backup';
 
 type Context = { params: Promise<{ id: string }> };
 
-// GET /api/backups/:id — one service's state, databases and history. Used to
-// refresh a single card after a run without re-reading every other host.
+// GET /api/backups/:id — one target's configuration, run statistics and the
+// dumps this app performed. Supabase only, like the index it mirrors; the
+// reachability check, the database list and the container's older dumps are
+// `GET /api/backups/:id/live`.
 export async function GET(_request: Request, context: Context) {
   const user = await getCurrentUser();
   if (!user) {

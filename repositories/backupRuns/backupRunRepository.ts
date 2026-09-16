@@ -53,6 +53,58 @@ export const findBackupRuns = async (
   return (data ?? []) as BackupRunRow[];
 };
 
+// One row per target, from the `backup_run_stats` view: how many dumps it has,
+// how many failed, the newest, and the newest still marked `running`.
+//
+// This is what the index cards are built from. Reading the rows themselves and
+// counting them in Node cost 200 rows per target for three numbers, and grew
+// with the history; a view costs one row per target forever.
+export interface BackupRunStatsRow {
+  target_id: string;
+  total_runs: number;
+  failed_runs: number;
+  last_started_at: string | null;
+  last_running_at: string | null;
+}
+
+// Every target's aggregates in one query — the index renders them all, so
+// asking per target would be N round trips for N small rows.
+export const findBackupRunStats = async (): Promise<BackupRunStatsRow[]> => {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from('backup_run_stats').select('*');
+  if (error) throw new Error(error.message);
+  return (data ?? []) as BackupRunStatsRow[];
+};
+
+// The same row for one target. A target with no runs yet has no row in the
+// view, which is `null` here rather than an error — it means zero.
+export const findBackupRunStatsFor = async (
+  targetId: string
+): Promise<BackupRunStatsRow | null> => {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('backup_run_stats')
+    .select('*')
+    .eq('target_id', targetId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return (data as BackupRunStatsRow | null) ?? null;
+};
+
+// Just the blob names, for deciding which dumps in the container this app has no
+// row for. The full rows are a hundred times the bytes for a set membership
+// test.
+export const findBackupRunBlobNames = async (targetId: string): Promise<string[]> => {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('backup_runs')
+    .select('blob_name')
+    .eq('target_id', targetId)
+    .not('blob_name', 'is', null);
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as { blob_name: string }[]).map((row) => row.blob_name).filter(Boolean);
+};
+
 export const findBackupRunById = async (id: string): Promise<BackupRunRow | null> => {
   const supabase = await createClient();
   const { data, error } = await supabase.from('backup_runs').select('*').eq('id', id).maybeSingle();

@@ -38,6 +38,7 @@ import {
   BACKUPS_QUERY_KEY,
   backupTargetQueryKey,
   useDeleteBackupRecord,
+  useRefreshBackupLive,
 } from '@/hooks/backups/useBackups';
 import type { BackupDay } from '@/lib/backup-utils';
 import type { BackupRecord } from '@/types/common/backup';
@@ -209,6 +210,7 @@ export function BackupHistory({
   canManage: boolean;
 }) {
   const queryClient = useQueryClient();
+  const refreshLive = useRefreshBackupLive();
   const days = groupRecordsByDay(records);
 
   // Which days the reader has collapsed. Empty — the initial state — means every
@@ -256,8 +258,12 @@ export function BackupHistory({
             onClick={() => {
               queryClient.invalidateQueries({ queryKey: backupTargetQueryKey(targetId) });
               queryClient.invalidateQueries({ queryKey: BACKUPS_QUERY_KEY });
+              // The half that costs something, and the half this button is for:
+              // the history's older rows are read back from the container, and
+              // nothing else on the page re-lists it.
+              refreshLive(targetId);
             }}
-            title="Re-read the history from the worker"
+            title="Re-read the run rows and re-list the container"
           >
             <RefreshCw className="size-4" /> Refresh
           </Button>

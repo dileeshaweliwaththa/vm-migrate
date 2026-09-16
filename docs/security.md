@@ -17,7 +17,7 @@ credentials that can *trigger deployments*. So the assets, in order of value:
 | Asset | Where | Who may reach it |
 | ----- | ----- | ---------------- |
 | Jenkins API tokens | `environment_secrets`, `vm_jenkins_secrets` | **nobody** via any client; server code only |
-| Backup DB passwords + Azure connection strings | `backup_target_secrets` | **nobody** via any client; server code only |
+| Backup DB passwords (MySQL and Postgres alike) + Azure connection strings | `backup_target_secrets` | **nobody** via any client; server code only |
 | Scheduled-backup bearer token | `BACKUP_CRON_SECRET` (env) + Supabase Vault | server code only; pg_cron reads its copy from Vault |
 | Gemini API key | `app_settings.gemini_api_key` | admins (write-only), server code (read) |
 | Supabase service-role key | server env var | server process only |
@@ -145,10 +145,11 @@ is the audit — it should return exactly the rows above.
 ## SSRF
 
 **Jenkins** is the one integration that fetches a URL a user supplied, and it is
-therefore the whole SSRF surface. (The backup runner also reaches outward — a MySQL host and an
-Azure storage account an editor typed in — but it opens a database connection and
+therefore the whole SSRF surface. (The backup runner also reaches outward — a MySQL or
+Postgres host and an
+Azure storage account an admin typed in — but it opens a database connection and
 an SDK client rather than fetching a URL, so there is no redirect to follow and no
-response body to reflect. What an editor can do there is dump a database they can
+response body to reflect. What an admin can do there is dump a database they can
 already reach into a container they control; see
 [backups.md](./backups.md#security).) The server it reaches is the **VM's**, not
 the environment's, since Jenkins credentials moved onto the machine — see

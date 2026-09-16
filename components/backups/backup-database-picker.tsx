@@ -3,6 +3,7 @@
 import { Play, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { countDatabases } from '@/lib/backup-utils';
 
 // Which databases to dump. A run takes a list and treats an empty one as "all",
 // so this is a multi-select with two shortcuts, because that is how the job is
@@ -17,6 +18,10 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 // are on a server, and therefore what is being backed up, is the most useful
 // thing on the page for someone who cannot press anything — so a viewer sees the
 // list rather than an empty panel or a row of dead controls.
+//
+// A Postgres target's list opens with `_globals`, the cluster's roles and grants.
+// It is a chip like any other because it is dumped and restored like any other —
+// but it is not a database, so the "on this server" count leaves it out.
 // One chip. Shared so the read-only list is visibly the same list, not a second
 // rendering that drifts from it.
 const CHIP_CLASS =
@@ -47,7 +52,7 @@ export function BackupDatabasePicker({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-label-caps uppercase text-muted-foreground">Databases</p>
           <span className="font-mono text-label-mono text-muted-foreground">
-            {databases.length} on this server
+            {countDatabases(databases)} on this server
           </span>
         </div>
         <div className="flex flex-wrap gap-1">

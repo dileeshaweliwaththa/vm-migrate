@@ -1,13 +1,14 @@
 # Database Backups
 
-The **Backups** tab is where the team's MySQL backups are configured, scheduled,
-run and inspected. All of it is this app:
+The **Backups** tab is where the team's database backups are configured,
+scheduled, run and inspected — **MySQL/MariaDB and PostgreSQL/Supabase alike**.
+All of it is this app:
 
 ```
 pg_cron (per target, its own cron expression)
   └─ POST /api/backups/cron          shared-token auth; pg_cron has no session
        └─ backupRunner
-            mysqldump (stdout) → gzip → Azure Blob uploadStream
+            mysqldump | pg_dump (stdout) → gzip → Azure Blob uploadStream
             └─ backup_runs / backup_run_events      the history and the log
 ```
 
@@ -62,12 +63,13 @@ Removing a destination leaves its targets without one (`on delete set null`) and
 
 ## What a target is
 
-One MySQL **server** —
+One database **server** —
 [`backup_targets`](./schema.md#backup_targets--backup_target_secrets--backup_dispatches).
-Four things, and nothing else:
+Five things, and nothing else:
 
 | | |
 | --- | --- |
+| Engine | `engine` — `mysql` or `postgres`, which decides the client and nothing else |
 | Connection | `db_host`, `db_port`, `db_user` + the password in `backup_target_secrets` |
 | Retention | `retention_days` — blobs older than this are deleted from its prefix after each run |
 | Destination | `storage_id` → a shared `backup_storage_accounts` row |
@@ -75,7 +77,9 @@ Four things, and nothing else:
 
 `db_name` is deliberately absent: the runner asks the server what databases it
 has and dumps each one, which is why "18 databases" is a property of the server
-rather than 18 rows here.
+rather than 18 rows here. (Postgres cannot be connected to without naming a
+database, so `psql` asks *from* `postgres`, the one every cluster has — a
+connection detail, not a column.)
 
 **The database password lives in `backup_target_secrets`** — RLS on with **no
 policies**, so no authenticated client can read or write it; only server code,
@@ -88,42 +92,294 @@ The Azure key is the destination's, held the same way.
 
 | Layer      | Files                                                                                     |
 | ---------- | ----------------------------------------------------------------------------------------- |
-| Routing    | `app/(protected)/(app)/backups/page.tsx` (the index), `backups/[id]/page.tsx` (one target); `app/api/backups/**/route.ts` |
+| Routing    | `app/(protected)/(app)/backups/page.tsx` (the index), `backups/[id]/page.tsx` (one target); `app/api/backups/**/route.ts`, of which `[id]/live/route.ts` is the one that talks to anything outside Supabase |
 | UI         | `components/backups/backups-index.tsx`, `backup-target-detail.tsx`, `backup-stat-cards.tsx`, `backup-database-picker.tsx`, `backup-log-panel.tsx`, `backup-history.tsx`, `backup-schedule-test.tsx`, `backup-target-dialog.tsx`, `backup-storage-dialog.tsx` |
 | Hook       | `hooks/backups/useBackups.ts`, `useBackupStorage.ts`                                      |
 | Service    | `services/backups/backupService.ts` (rules + mapping), `backupStorageService.ts` (the destinations), `backupCronService.ts` (**testing the schedule**), `backupRunner.ts` (**the work**) |
-| Repository | `backupTargets/*`, `backupStorage/*`, `backupRuns/*`, `backupCron/*` (Supabase), `mysql/mysqlDumpRepository.ts` (**processes**), `azure/azureBlobRepository.ts` (**Azure SDK**) |
+| Repository | `backupTargets/*`, `backupStorage/*`, `backupRuns/*`, `backupCron/*` (Supabase), `mysql/mysqlDumpRepository.ts` + `postgres/pgDumpRepository.ts` (**processes**), `azure/azureBlobRepository.ts` (**Azure SDK**) |
 
 Presentation helpers (`formatBytes`, `formatDuration`, `describeCron`,
-`recordTone`, `computeBackupStats`, `groupRecordsByDay`) live in
+`recordTone`, `computeBackupStats`, `groupRecordsByDay`, and `mergeRecords` /
+`newerTimestamp`, which join the two payloads below) live in
 `lib/backup-utils.ts`; domain types and the schedule presets in
 `types/common/backup.ts`.
 
-Two of those repositories are documented exceptions to "repositories only touch
-Supabase" — `mysqlDumpRepository` spawns `mysqldump`/`mysql`, and
-`azureBlobRepository` holds the Blob SDK. They join `jenkinsRepository` (HTTP).
-Each builds requests and reports results; the rules are the service's.
+Three of those repositories are documented exceptions to "repositories only touch
+Supabase" — `mysqlDumpRepository` spawns `mysqldump`/`mysql`, `pgDumpRepository`
+spawns `pg_dump`/`pg_dumpall`/`psql`, and `azureBlobRepository` holds the Blob
+SDK. They join `jenkinsRepository` (HTTP). Each builds requests and reports
+results; the rules are the service's. The two dump repositories expose the **same
+two functions** (`listDatabases`, `openDumpStream`), which is what lets the runner
+treat them as interchangeable.
+
+## How the pages load
+
+**Two tiers, because two of these facts cost a thousand times what the others
+do.** The name, the host, the schedule, the destination, how the runs have gone —
+all of it is in Postgres. Whether the server *answers*, which databases are on it,
+and what the container holds are a MySQL handshake to another host and a blob
+listing.
+
+They used to be one payload, so nothing rendered until both had returned: a
+several-second blank page for a card whose text had been sitting in Postgres the
+whole time. Worse, it scaled the wrong way — one MySQL connection and one full
+container listing **per target**, on every visit, before anything appeared.
+
+So the split is by *who can answer*:
+
+| | Answered by | Route | Query key | Policy |
+| --- | --- | --- | --- | --- |
+| Configuration, schedule, run counts, last run, last dispatch | Supabase | `GET /api/backups`, `GET /api/backups/:id` | `backup-targets`, `backup-target` | refetched every 30s |
+| Reachability, the database list, the dumps only the container knows about | MySQL + Azure | `GET /api/backups/:id/live` | `backup-live`, one per target | 5-minute `staleTime`, never polled, no refetch on focus, no retry |
+
+The page draws from the first and fills in from the second. Until a live check
+lands, a card says **Checking** rather than guessing — "no databases" and "we have
+not asked yet" must not look the same on a page whose job is to say whether
+backups are happening, and neither may look like **Check failed**, which is the
+route erroring rather than the database refusing.
+
+Three things make this cheap rather than merely deferred:
+
+- **The counts are aggregated in Postgres**, by
+  [`backup_run_stats`](./schema.md#backup_run_stats-view). The index was reading
+  200 run rows per target to call `.length` on them.
+- **The container is listed under the target's own prefix.** `listBlobs` takes a
+  prefix and this app writes `<blob_prefix>/<database>/<file>`, so Azure returns
+  exactly this target's blobs instead of every dump every target ever wrote. Only
+  a target claiming the old flat `<database>/<file>` layout still lists the whole
+  container, because that layout has no prefix to narrow by.
+- **The index and the target page share the `backup-live` key**, so opening a
+  card costs nothing — the check its tile already made is the check the page
+  wants.
+
+The live key is only invalidated when something actually changed out there:
+editing a target (the host and credentials decide reachability), deleting a dump,
+and a run **finishing** — which the target page watches for, because a run
+*starting* returns minutes before any blob exists and the log panel is what
+follows it in between.
+
+## Two engines, one pipe
+
+A target says whether it is MySQL or Postgres and the runner picks the matching
+pair of functions out of `ENGINE_CLIENTS`. **Everything after that is identical**
+— the gzip, the upload, the byte counter, the run rows, the blob layout,
+retention, the schedule, the history — because the only thing that actually
+differs between backing up an Azure MySQL server and backing up the self-hosted
+Supabase Postgres is which binary produces the SQL.
+
+| | `mysql` | `postgres` |
+| --- | --- | --- |
+| List the databases | `mysql -N -B -e 'SHOW DATABASES'` | `psql -A -t -q -c 'select datname from pg_database …'` |
+| Dump one | `mysqldump --single-transaction --routines --triggers --events` | `pg_dump` |
+| Credential | `MYSQL_PWD` | `PGPASSWORD` |
+| Default port | 3306 | 5432 |
+| Repository | `repositories/mysql/mysqlDumpRepository.ts` | `repositories/postgres/pgDumpRepository.ts` |
+| Alpine package | `mysql-client` | `postgresql17-client` |
+
+A lookup rather than an `if` at each call site: a third engine is a third entry
+there and a value in the `backup_engine` enum, not a search for every place the
+runner asked which one it was.
+
+### What each dump contains, and why
+
+**MySQL** keeps the flags the old worker proved against this same Azure server:
+`--single-transaction` for a consistent InnoDB snapshot without locking, and
+`--routines --triggers --events` because a schema without them is not a restore.
+Alpine's client is MariaDB's build, which rejects Oracle-only options like
+`--column-statistics`.
+
+**Postgres takes no snapshot flag**, because it does not need one: `pg_dump`
+already reads the whole dump from a single repeatable-read snapshot.
+(`--serializable-deferrable` is stronger still, but it *waits* for a snapshot
+with no anomalies and can sit there indefinitely on a busy server — a hung
+nightly backup rather than a better one.)
+
+**Owners and grants are kept**, which is the one place the obvious recipe is
+wrong. The "move your database to Supabase" guides use `--no-owner --no-acl`
+because they are restoring into a cluster whose roles differ. This is a backup of
+*that* cluster, and a self-hosted Supabase is held together by its grants: `anon`,
+`authenticated` and `service_role` are what PostgREST connects as, and every RLS
+policy is written against them. A dump stripped of that restores every table and
+then serves 401s.
+
+**`_globals` is dumped alongside the databases.** Roles and grants are
+cluster-wide, so they belong to no single database — `pg_dumpall --globals-only`
+captures them, and `listDatabases` returns `_globals` first because that is the
+order a restore needs: the roles have to exist before a dump that grants to them
+can be replayed. It appears in the picker and the history like any other entry;
+the underscore says it is not a database name.
+
+Both engines produce **plain SQL gzipped to `.sql.gz`**, not `-Fc`. One restore
+story (`gunzip -c … | psql` / `| mysql`), one blob layout, and a file you can read
+without the tool that wrote it.
+
+### The Supabase target specifically
+
+It is an ordinary Postgres target with **one trap**, found by pointing this code
+at the real server rather than by reasoning about it:
+
+| | |
+| --- | --- |
+| Engine | PostgreSQL / Supabase |
+| Host / Port | the database's address and **its own port** — this deployment publishes **5433**, not 5432 |
+| User | **`supabase_admin`**, not `postgres` — see below |
+| Password | the database password, stored write-only like every other |
+
+**`postgres` is not enough, and fails late.** On a self-hosted Supabase the
+`postgres` role is *not* a superuser (`rolsuper = false`; it has `bypassrls`, which
+is a different thing), while `auth`, `storage`, `_analytics` and `_realtime` are
+owned by `supabase_admin`. `pg_dump` takes an ACCESS SHARE lock on every table it
+is about to dump, so one unreadable table fails the **whole** dump:
+
+```
+pg_dump: error: query failed: ERROR:  permission denied for table schema_migrations
+pg_dump: detail: Query was: LOCK TABLE auth.users, auth.refresh_tokens, … IN ACCESS SHARE MODE
+```
+
+The trap is that **listing the databases succeeds as `postgres`**, so the target's
+live check says *Ready* and only the 02:00 run fails. Hence two mitigations: the
+form says so under the engine picker, and `pgDumpRepository.explainFailure`
+appends the reason to any "permission denied" a run reports, because the raw
+message is a hundred-table `LOCK` statement that never names the role.
+
+Supabase's own [Postgres 17 upgrade
+guide](https://supabase.com/docs/guides/self-hosting/postgres-upgrade-17) takes
+its logical backup with `-U supabase_admin` for the same reason. (That page has
+nothing to say about client versions, flags or which databases to dump — the
+rest of this section is from PostgreSQL's own behaviour, checked against the
+server.)
+
+**Verified against the live server** (self-hosted Supabase, PostgreSQL 15.1):
+
+| Check | Result |
+| --- | --- |
+| `psql … -c 'select datname from pg_database …'` | exit 0 — one database, `postgres` |
+| `pg_dump --schema-only` as `postgres` | **exit 1**, permission denied |
+| `pg_dump --schema-only` as `supabase_admin` | exit 0, 328 KB |
+| `pg_dumpall --globals-only` as `postgres` | exit 0, 6.2 KB, 18 roles |
+| `pg_dump \| gzip` as `supabase_admin`, the runner's own pipe | exit 0, **158 MB gzipped in 32m 33s** |
+
+Three consequences for this deployment:
+
+- Everything lives in the single `postgres` database, so the target dumps
+  **two** entries: `_globals` and `postgres`. The card reads *1 database*,
+  because `_globals` is not one.
+- **A run takes half an hour and produces 158MB.** That is the case the runner
+  was already built for — `startBackup` returns as soon as the work begins and
+  the log panel follows it, so no request is waiting on the response — and it is
+  comfortably inside the three-hour `STALE_RUN_MS` window that decides whether a
+  `running` row is a live run or a dead container. Worth re-checking that margin
+  if a target ever grows to many large databases, since they are dumped
+  **sequentially**.
+- At the default seven-day retention that is roughly **1.1GB** in the container
+  for this target alone.
+
+`pg_dump` emits one warning on this database, and it is benign here:
+
+```
+pg_dump: warning: there are circular foreign-key constraints on this table: key
+pg_dump: hint: Consider using a full dump instead of a --data-only dump to avoid this problem.
+```
+
+It warns that a *data-only* restore could fail on the cycle. These are full
+dumps, which is what the hint itself recommends — and the exit code is 0, which
+is what the runner judges on. Both clients write notices to stderr on a good run,
+so stderr is only ever the explanation of a non-zero exit, never the verdict.
+
+**TLS is off on this server.** `PGSSLMODE` defaults to `prefer`, which negotiates
+TLS and falls back, so the connection here is plaintext — verified with
+`pg_stat_ssl`, which reports `ssl=off`. The password and the whole dump therefore
+cross the network in the clear, and the host is a public address. Fixing that is
+a change on the server (enable TLS), not here.
+
+Note the limitation if you do: `PGSSLMODE` is read from the **app's process
+environment**, so it applies to every Postgres target at once. Setting it to
+`require` would insist for all of them, and break any that cannot. Per-target TLS
+would need its own column. `PGCONNECT_TIMEOUT` (default 10s) is process-wide for
+the same reason; it keeps an unreachable host from hanging the page's live
+check.
+
+### What a Supabase dump contains, and what it cannot
+
+**This feature takes a logical backup over a database connection.** That is a
+real constraint, not a detail: everything it can reach is reachable through
+libpq, and everything else on that host is not. Supabase's own
+[upgrade guide](https://supabase.com/docs/guides/self-hosting/postgres-upgrade-17)
+lists three backups for that reason — the data directory, the pgsodium key, and
+the logical dump — and **only the third is this**.
+
+What the dump does carry, counted from the live server:
+
+| | |
+| --- | --- |
+| Schemas | 12 — `public`, `auth`, `storage`, `realtime`, `_realtime`, `_analytics`, `supabase_functions`, `extensions`, `graphql`, `graphql_public`, `pgbouncer`, `pgsodium`, `vault` |
+| Tables | 25 `public`, 16 `auth`, 5 `storage` |
+| Rows that matter | 302 `auth.users`, 3 `storage.buckets`, 245 `storage.objects` |
+| Extensions | 9, emitted as `CREATE EXTENSION` |
+| Access control | 21 RLS policies, 496 `GRANT`s, 224 `OWNER TO` |
+| Cluster-wide | 18 roles with their password hashes, in `_globals` |
+
+Those 496 grants and 224 ownership statements are the concrete reason this does
+**not** pass `--no-owner --no-acl`: every one of them would be discarded.
+
+**Four things it cannot capture**, each because they are not in the database:
+
+| Gap | Where it actually lives | Does it bite today? |
+| --- | --- | --- |
+| The **245 storage files** | the storage container's filesystem or S3 — `storage.objects` is only metadata | **Yes.** The rows restore; the files are gone. |
+| The **pgsodium root key** | `/etc/postgresql-custom/pgsodium_root.key`, in the `db-config` Docker *named volume* | **Not yet** — `pgsodium` 3.1.8 and `supabase_vault` 0.2.8 are installed but `vault.secrets` and `pgsodium.key` are both empty. The day something is put in Vault, this backup silently stops being complete. |
+| Edge Functions, Auth settings, API keys, Realtime config | Supabase's own config, not Postgres | Yes, if any are customised. |
+| The physical data directory | `./volumes/db/data` | It is a different kind of backup — a binary copy for `pg_upgrade` and point-in-time recovery, which a logical dump is not a substitute for. |
+
+The first two are covered by two commands on the Supabase host, which belong in
+that host's own routine rather than in this app:
+
+```bash
+# the pgsodium root key — lose it with secrets in Vault and they are unrecoverable
+docker compose run --rm db cat /etc/postgresql-custom/pgsodium_root.key > ./pgsodium_root.key.backup
+
+# the data directory, for pg_upgrade / PITR
+cp -a ./volumes/db/data ./volumes/db/data-manual-backup
+```
+
+Restoring into a **new** Supabase project has further gaps that are Supabase's,
+not ours — extensions must be re-enabled first, and `auth`/`storage` already
+exist there so their `CREATE`s error harmlessly. See
+[Restore a dashboard backup](https://supabase.com/docs/guides/platform/migrating-within-supabase/dashboard-restore).
+
+### Why not `pg_dumpall`, and why not `--create`
+
+Supabase's guide suggests `pg_dumpall -U supabase_admin` as its optional logical
+backup. **This feature's output is equivalent in content** — `pg_dumpall` is
+globals plus a `pg_dump` of each database, which is exactly `_globals` plus the
+per-database dumps — but it is split into one blob per database instead of one
+file per cluster. That is deliberate: a per-database blob can be restored,
+retained, downloaded and deleted on its own, and the history reads as a row per
+database rather than a single opaque object.
+
+`pg_dump --create` was considered and rejected. It would make each blob
+self-contained by emitting `CREATE DATABASE`, which sounds strictly better — but
+Supabase's own restore path connects to the existing `postgres` database
+(`psql -d <connection string> -f dump.sql`), where a `CREATE DATABASE postgres`
+would simply fail. Confirmed against the server: the dump as produced contains
+**zero** `CREATE DATABASE` statements, which is what that restore path wants.
 
 ## The runner
 
 `services/backups/backupRunner.ts`, one database at a time:
 
-1. `mysqldump --single-transaction --routines --triggers --events <db>` — a
-   consistent InnoDB snapshot including routines, triggers and events, because a
-   schema without them is not a restore. These are the flags the old worker
-   proved against this same Azure MySQL server, and Alpine's client is MariaDB's
-   build, which rejects Oracle-only options like `--column-statistics`.
+1. The engine's dump command (above), streaming to stdout.
 2. `zlib.createGzip()`.
 3. `BlockBlobClient.uploadStream` into
    `<container>/<target prefix>/<database>/<database>_<timestamp>.sql.gz`.
 
 Details that matter:
 
-- **The password goes in `MYSQL_PWD`, never argv** — anything on a command line
-  is visible to every process in the container and lands in error messages.
-  Every message leaving that repository is scrubbed of `-p…` and `password=…`
-  regardless.
-- **Both halves must succeed.** A `mysqldump` that dies mid-stream still produces
+- **The password goes in `MYSQL_PWD` / `PGPASSWORD`, never argv** — anything on a
+  command line is visible to every process in the container and lands in error
+  messages. Every message leaving those repositories is scrubbed of `-p…`,
+  `password=…` and `postgres://user:pass@` regardless.
+- **Both halves must succeed.** A dump that dies mid-stream still produces
   a *valid gzip of a truncated dump*, which would upload happily and restore to
   nothing — so the upload's result and the dump's exit code are both awaited, and
   either failing fails that database.
@@ -365,6 +621,10 @@ one opaque segment. `resolveRecordBlob` re-checks ownership on the way back in �
 the id comes from the client, and a crafted one would otherwise reach any blob
 in a shared container, including dumps an admin may delete.
 
+The two halves arrive separately — the rows with the page, the blobs with the
+live check — and `mergeRecords` joins them in the browser, so the history this app
+recorded is on screen while the container is still being listed.
+
 If Azure cannot be reached the history falls back to the run rows alone, which
 is a smaller list, not an error page.
 
@@ -413,9 +673,10 @@ not lose them.
 
 | Method + path | Action | Role |
 | --- | --- | --- |
-| `GET  /api/backups` | every target with status, databases, history (rows + blobs) | `viewer` |
+| `GET  /api/backups` | every target's configuration, schedule, run counts and last dispatch — Supabase only | `viewer` |
 | `POST /api/backups` | register a target | `admin` |
-| `GET  /api/backups/:id` | one target's overview | `viewer` |
+| `GET  /api/backups/:id` | the same for one target, plus the runs this app performed | `viewer` |
+| `GET  /api/backups/:id/live` | is the server reachable, which databases are on it, and which dumps in the container have no run row — **the slow one** | `viewer` |
 | `PATCH  /api/backups/:id` | edit config, credentials and schedule | `admin` |
 | `DELETE /api/backups/:id` | remove the target + credentials + history + cron job | `admin` |
 | `GET  /api/backups/:id/logs?since=N` | the current batch's progress lines after N | `viewer` |

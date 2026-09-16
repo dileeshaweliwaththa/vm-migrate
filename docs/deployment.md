@@ -156,16 +156,28 @@ docker run -d --name upview-vm-tracker -p 5174:5174 \
 - **Rotate the service-role key** if it has ever been committed or pasted into a
   build log.
 
-## The image carries `mysql-client`
+## The image carries the database clients
 
-The runner stage installs it (`apk add --no-cache mysql-client`) because the
-**Backups** feature dumps databases in-process: `mysqldump` → gzip → Azure Blob,
-streamed, with nothing written to disk. Without the binary a run fails with *"Is
-mysql-client in the image?"* and nothing else breaks.
+The runner stage installs both
+(`apk add --no-cache mysql-client postgresql17-client`) because the **Backups**
+feature dumps databases in-process: `mysqldump` / `pg_dump` → gzip → Azure Blob,
+streamed, with nothing written to disk. Without the binary a run of that engine
+fails with *"Is … in the image?"* and nothing else breaks.
 
 Alpine's `mysql-client` is MariaDB's build, which is what the previous external
 worker used against the same Azure MySQL server — `mysqlDumpRepository` sticks to
 flags it accepts.
+
+`postgresql17-client` supplies `pg_dump`, `pg_dumpall` and `psql` for targets
+whose engine is `postgres`, the self-hosted Supabase among them.
+
+**Its major version is pinned deliberately, and is a floor.** `pg_dump` refuses
+to dump a server newer than itself, so this package must be at least the newest
+Postgres any target runs; Alpine's unversioned `postgresql-client` follows
+whatever the base image's release defaults to, which could silently go *backwards*
+on a `node:22-alpine` bump and break every Postgres backup at 02:00 with a version
+error. **Upgrading a backed-up server past Postgres 17 means bumping that line in
+the Dockerfile first.**
 
 Two things follow for deployment:
 

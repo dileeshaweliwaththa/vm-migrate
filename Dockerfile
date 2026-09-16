@@ -76,16 +76,25 @@ RUN npm run build
 FROM node:22-alpine AS runner
 WORKDIR /app
 
-# `mysqldump` and `mysql`, for the backup runner
-# (services/backups/backupRunner.ts). The app dumps the databases itself and
-# streams the output into Azure Blob Storage, so this binary is a runtime
-# dependency of the Backups feature — without it a run fails with "Is
-# mysql-client in the image?".
+# The database clients, for the backup runner (services/backups/backupRunner.ts).
+# The app dumps the databases itself and streams the output into Azure Blob
+# Storage, so these are runtime dependencies of the Backups feature — without
+# them a run fails with "Is … in the image?".
 #
-# Alpine's `mysql-client` is MariaDB's build, which is what the previous external
+# `mysql-client` is Alpine's MariaDB build, which is what the previous external
 # worker used against the same Azure MySQL server; `mysqlDumpRepository` sticks
-# to flags it accepts.
-RUN apk add --no-cache mysql-client
+# to flags it accepts (no Oracle-only `--column-statistics`).
+#
+# `postgresql17-client` gives `pg_dump`, `pg_dumpall` and `psql`, for targets
+# whose engine is `postgres` — the self-hosted Supabase among them.
+#
+# **The major version is pinned on purpose.** pg_dump refuses to dump a server
+# newer than itself ("server version: 17.x; pg_dump version: 16.x"), so this has
+# to be at least the newest Postgres any target runs. Alpine's unversioned
+# `postgresql-client` tracks whatever the base image's release defaults to, which
+# would silently go backwards on a base-image bump and break every Postgres
+# backup at 02:00. Upgrading a target server past 17 means bumping this line.
+RUN apk add --no-cache mysql-client postgresql17-client
 
 # HOSTNAME is what the standalone server binds to. It defaults to localhost,
 # which inside a container means "unreachable from outside" — a published port
