@@ -10,7 +10,7 @@ vertical slice through all five layers (see [architecture.md](./architecture.md)
 | Routing    | `app/(protected)/(app)/tracker/page.tsx` (resolves the role), `app/api/vms/**/route.ts`, `app/api/vm-groups/**/route.ts` |
 | UI         | `components/vms/vm-tracker.tsx`, `vm-row.tsx`, `vm-card.tsx`, `vm-fields.tsx`, `vm-addresses.tsx`, `vm-groups.tsx`, `vm-view-toggle.tsx`, `vm-trash.tsx`, `yes-no-toggle.tsx` |
 | Hook       | `hooks/vms/useVmTracker.ts` (TanStack Query query + mutations), `hooks/vms/useVmGroups.ts` (group mutations) |
-| Service    | `services/vms/vmService.ts` (mapping, soft delete, purge-with-archive, addresses, import), `services/vms/vmGroupService.ts` (groups) |
+| Service    | `services/vms/vmService.ts` (mapping, soft delete, restore, addresses, import), `services/vms/vmGroupService.ts` (groups) |
 | Repository | `repositories/vms/vmRepository.ts`, `repositories/endpoints/endpointRepository.ts`, `repositories/vmIps/vmIpRepository.ts`, `repositories/vmGroups/vmGroupRepository.ts` |
 
 Presentation helpers (`buildFullUrl`, `vmAddresses`, `endpointAddress`,
@@ -135,10 +135,6 @@ on the primary rather than failing the import. `sourceVmId` is deliberately *not
 remapped onto the freshly minted VM ids: the name snapshot is what the provenance
 is read from, and a dangling FK would be worse than a null one.
 
-**Purge-with-archive only archives VM-owned rows.** A project's records outlive
-the VM (the environment merely loses its `vm_id`), so archiving a copy would
-preserve nothing and duplicate rows that still exist.
-
 ## A VM can hold several addresses
 
 `old_ip` and `new_ip` say *"this machine moved from A to B"*. That is one of the
@@ -161,7 +157,7 @@ this a pure add rather than a migration of every existing row.
 **Provenance is stored, not inferred.** "Migrated from" works by matching
 `s.newIp === vm.newIp && s.oldIp !== s.newIp` — a rule that can never see an
 address that moved *without changing*. `vm_ips.source_vm_id` (plus the
-`source_vm_name` snapshot, which survives that VM's purge) is the explicit link
+`source_vm_name` snapshot, which survives that VM being removed) is the explicit link
 instead. An adopted address is deliberately **not** added to `migratedSources`:
 its endpoints are live rows on this VM, not a snapshot of a machine that no longer
 serves them, so listing them there would render every one of them twice. Where the
@@ -313,6 +309,34 @@ arrive with. The replace-all import replaces groups too, remapping each VM's
 `groupId` onto the freshly created rows; a backup written before groups existed
 has none and imports as an ungrouped tracker.
 
+## The archive is permanent
+
+**Nothing in the app can permanently delete a VM.** Not an editor, not an admin,
+not a hand-crafted request — `vms` has no delete policy at all, so Postgres
+refuses it for every signed-in session
+(`…_vms_are_never_deleted_by_a_session.sql`).
+
+A VM row is the only record that a machine existed: what it was called, the
+addresses it answered on, what migrated onto it, which endpoints it served. The
+old **Delete** button sat on each trashed row and **Clear all** on each list, both
+guarded by a `confirm()` — and a confirm dialog does not catch the mistake that
+actually happens, which is acting on the wrong row. Trashing already removes a
+machine from the grid, which is all "deleted" needs to mean day to day.
+
+So the trash is an **archive**: rows are kept indefinitely, `Restore` brings one
+back, and the section header says so. The icon is an archive box rather than a
+bin, and the column reads *Archived At*.
+
+Removing one for real is a **database-level act** — the Supabase SQL editor, or
+the service-role key, both of which bypass RLS. That is the point: it is done
+where you can see exactly what you are about to destroy.
+
+**One exception, and it is deliberate:** the admin-only replace-all import has to
+clear the table before it can restore a backup over it. It does that through
+`deleteAllVmsForImport`, the one service-role call in `vmRepository`, behind
+`requireAdmin` in `importTracker` — which is therefore the only gate in front of
+it. See [security.md](./security.md#service-role-paths-are-the-load-bearing-ones).
+
 ## Permissions
 
 The tracker is **read-only for viewers**. Three roles, enforced in three places
@@ -320,11 +344,12 @@ The tracker is **read-only for viewers**. Three roles, enforced in three places
 
 | Action                                            | Minimum role |
 | ------------------------------------------------- | ------------ |
-| View the grid and trash, expand/collapse, Export  | `viewer`     |
-| Add / edit a VM or URL, move to trash, restore    | `editor`     |
+| View the grid and the archive, expand/collapse, Export | `viewer` |
+| Add / edit a VM or URL, archive one, restore it   | `editor`     |
 | Add / edit / remove an address, move one between VMs | `editor`  |
 | Select VMs, create/rename/delete a group, group or ungroup VMs | `editor`     |
-| Permanent delete, empty trash, replace-all import | `admin`      |
+| Replace-all import                                | `admin`      |
+| **Permanently delete a VM**                       | **nobody — see [The archive is permanent](#the-archive-is-permanent)** |
 
 - **RLS** is authoritative — see [`vms`](./schema.md#vms),
   [`endpoints`](./schema.md#endpoints), [`vm_ips`](./schema.md#vm_ips) and
@@ -335,7 +360,7 @@ The tracker is **read-only for viewers**. Three roles, enforced in three places
   policy-violation error.
 - **The UI** hides what the role can't do: `tracker/page.tsx` resolves the role
   server-side and passes it to `VmTracker`, which derives `canWrite`
-  (`canEdit`) and `canPurge` (`isAdmin`). A viewer gets plain text cells, static
+  (`canEdit`) and `canImport` (`isAdmin`). A viewer gets plain text cells, static
   Yes/No pills, no action buttons, and a "Read-only" badge in the header.
   Expand/collapse stays live for everyone — it is local view state, not data.
 
@@ -352,9 +377,8 @@ All routes require an authenticated session and return `{ data }` or
 | `GET  /api/vms`                     | full payload `{ vms, deleted, groups }` | `viewer` |
 | `POST /api/vms`                     | create a VM                          | `editor` |
 | `PATCH  /api/vms/:id`               | update VM fields                     | `editor` |
-| `DELETE /api/vms/:id`               | soft delete (to trash)               | `editor` |
-| `POST /api/vms/:id/restore`         | restore from trash                   | `editor` |
-| `DELETE /api/vms/:id/purge`         | permanent delete (+ archive URLs)    | `admin`  |
+| `DELETE /api/vms/:id`               | archive (soft delete) — **the only delete the API has** | `editor` |
+| `POST /api/vms/:id/restore`         | restore from the archive             | `editor` |
 | `POST /api/vms/:id/urls`            | add a **VM-owned** URL row           | `editor` |
 | `PATCH  /api/vms/:id/urls/:urlId`   | update a URL row (`ipId` moves it to another of the VM's addresses) | `editor` |
 | `DELETE /api/vms/:id/urls/:urlId`   | delete a URL row — **400** on a project's record (delete it from the project) | `editor` |
@@ -362,7 +386,6 @@ All routes require an authenticated session and return `{ data }` or
 | `PATCH  /api/vms/:id/ips/:ipId`     | edit one of its extra addresses      | `editor` |
 | `DELETE /api/vms/:id/ips/:ipId`     | remove one — its URLs fall back to the primary | `editor` |
 | `POST /api/vms/:id/ips/move`        | take another VM's address: address + its URLs + trash the source, in one call | `editor` |
-| `DELETE /api/vms/trash?type=…`      | empty one trash list (`upview`/`client`) | `admin`  |
 | `POST /api/vms/import`              | replace-all from a backup (groups included) | `admin`  |
 | `GET  /api/vm-groups`               | every group (the grid reads them from the tracker payload instead) | `viewer` |
 | `POST /api/vm-groups`               | create a group                       | `editor` |
@@ -375,16 +398,13 @@ All routes require an authenticated session and return `{ data }` or
 - **Local-first editing.** `vm-tracker.tsx` mirrors the loaded payload into
   local state so typing is instant with no per-keystroke requests: text fields
   persist on blur, toggles/structural changes persist immediately. The query
-  only re-syncs local state on initial load and after an explicit refetch
-  (purge / clear-trash / import), so in-progress edits are never clobbered.
-- **Purge-with-archive.** Permanently deleting a VM whose URLs were migrated
-  onto a destination copies those URLs into the destination's
-  `migrated_archive` (jsonb) first — mirrored in the "Migrated from" rows. The
-  destination is looked up by the explicit `vm_ips.source_vm_id` link **before**
-  the IP-equality guess, because an address that moved without changing leaves the
-  two rows with no matching pair of `new_ip`s for that guess to find. A VM whose
-  URLs already moved with its address has nothing left to archive, which is
-  correct: those rows are live on the destination, not a snapshot.
+  only re-syncs local state on initial load and after an explicit refetch (an
+  import, or an address move), so in-progress edits are never clobbered.
+- **`migrated_archive` is historical.** It was written by the old
+  purge-with-archive path, which existed because purging destroyed the source
+  row. Nothing writes it now except a backup import carrying one back in — the
+  source VM's own row is the record. The grid still reads it, so entries written
+  before the change keep rendering with their `ARCHIVED` tag.
 - **Migrated-from display** is derived on the client: a VM that is the
   "primary" destination for its IP (`old_ip === new_ip`) shows the active,
   trashed, and archived source VMs that migrated onto it.

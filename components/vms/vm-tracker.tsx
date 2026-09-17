@@ -16,7 +16,7 @@ import { PageHeader } from '@/components/layout/page-header';
 import { computeStats, groupVms } from '@/lib/vm-utils';
 import { canEdit, isAdmin } from '@/lib/rbac';
 import type { UserRole } from '@/types/common';
-import type { TrackerData, Vm, VmUrl, TrashType } from '@/types/common/vm';
+import type { TrackerData, Vm, VmUrl } from '@/types/common/vm';
 import {
   useAssignVmsToGroup,
   useCreateVmGroup,
@@ -29,8 +29,6 @@ import {
   useUpdateVm,
   useTrashVm,
   useRestoreVm,
-  usePurgeVm,
-  useClearTrash,
   useAddUrl,
   useUpdateUrl,
   useDeleteUrl,
@@ -85,13 +83,18 @@ const SECTIONS: { label: string; isClient: boolean }[] = [
 ];
 
 // The tracker is readable by every signed-in role. Editors and admins can edit
-// it; the irreversible actions — permanent delete, empty trash, and the
-// replace-all import — are admin-only. These flags only decide which controls
-// render: `vmService` re-checks the role and RLS enforces it in Postgres, so a
-// hidden button is convenience, never the boundary.
+// it; the one destructive action left — the replace-all import — is admin-only.
+// Permanent delete and empty-trash are gone entirely: a VM row is never
+// destroyed by a session, so the trash is an archive (see `vm-trash.tsx`).
+// These flags only decide which controls render: `vmService` re-checks the role
+// and RLS enforces it in Postgres, so a hidden button is convenience, never the
+// boundary.
 export function VmTracker({ role }: { role: UserRole }) {
   const canWrite = canEdit(role);
-  const canPurge = isAdmin(role);
+  // Admin-only, and now only for the replace-all import: it is the one action
+  // left that destroys data, because restoring a backup has to clear the table
+  // first. A VM is never deleted any other way — see `vm-trash.tsx`.
+  const canImport = isAdmin(role);
 
   const { data: loaded, isLoading, error, refetch } = useTrackerData();
   const [data, setData] = useState<TrackerData | null>(null);
@@ -101,8 +104,8 @@ export function VmTracker({ role }: { role: UserRole }) {
 
   // Local state is the source of truth for rendering (instant edits, no
   // per-keystroke requests). It re-syncs whenever the query payload changes —
-  // which only happens on the initial load and after an explicit refetch
-  // (purge / clear trash / import), so in-progress edits are never clobbered.
+  // which only happens on the initial load and after an explicit refetch (an
+  // import, or an address move), so in-progress edits are never clobbered.
   useEffect(() => {
     // The page opens with every VM **collapsed** — 14 VMs with 48 URLs between
     // them is more than a screen of rows before you have chosen what to look at.
@@ -124,8 +127,6 @@ export function VmTracker({ role }: { role: UserRole }) {
   const updateVm = useUpdateVm();
   const trashVm = useTrashVm();
   const restoreVm = useRestoreVm();
-  const purgeVm = usePurgeVm();
-  const clearTrash = useClearTrash();
   const addUrl = useAddUrl();
   const updateUrl = useUpdateUrl();
   const deleteUrl = useDeleteUrl();
@@ -435,23 +436,6 @@ export function VmTracker({ role }: { role: UserRole }) {
     restoreVm.mutate(id);
   };
 
-  const handlePurge = (id: string) => {
-    if (!confirm('Permanently delete this VM? This cannot be undone.')) return;
-    setData((d) => (d ? { ...d, deleted: d.deleted.filter((v) => v.id !== id) } : d));
-    purgeVm.mutate(id, { onSuccess: () => refetch() });
-  };
-
-  const handleClearTrash = (type: TrashType) => {
-    const label = type === 'client' ? 'CLIENT' : 'UPVIEW';
-    if (!confirm(`Permanently delete ALL ${label} VMs in the trash? This cannot be undone.`)) return;
-    setData((d) =>
-      d
-        ? { ...d, deleted: d.deleted.filter((v) => (type === 'client' ? !v.isClient : !!v.isClient)) }
-        : d
-    );
-    clearTrash.mutate(type, { onSuccess: () => refetch() });
-  };
-
   const setAllExpanded = (expanded: boolean) =>
     setData((d) => (d ? { ...d, vms: d.vms.map((v) => ({ ...v, expanded })) } : d));
 
@@ -560,7 +544,7 @@ export function VmTracker({ role }: { role: UserRole }) {
             <Button variant="outline" size="sm" onClick={handleExport}>
               <Download className="size-4" /> Export
             </Button>
-            {canPurge ? (
+            {canImport ? (
               <Button variant="outline" size="sm" onClick={handleImport}>
                 <Upload className="size-4" /> Import
               </Button>
@@ -783,14 +767,7 @@ export function VmTracker({ role }: { role: UserRole }) {
           />
         ) : null}
 
-        <VmTrash
-          deleted={data.deleted}
-          onRestore={handleRestore}
-          onPurge={handlePurge}
-          onClearTrash={handleClearTrash}
-          canWrite={canWrite}
-          canPurge={canPurge}
-        />
+        <VmTrash deleted={data.deleted} onRestore={handleRestore} canWrite={canWrite} />
       </main>
     </div>
   );

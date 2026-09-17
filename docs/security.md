@@ -67,7 +67,7 @@ Verified in this review:
 
 ### Service-role paths are the load-bearing ones
 
-Nine repositories use the service-role client and therefore **bypass RLS**. For
+Ten repositories use the service-role client and therefore **bypass RLS**. For
 these the service-layer check is the *only* enforcement:
 
 | Repository | Gate that must hold |
@@ -80,6 +80,7 @@ these the service-layer check is the *only* enforcement:
 | `backupTargetRepository.insertBackupDispatch` | `requireAdmin` in `runBackup`, or the cron route's bearer token for a scheduled run. Service-role because pg_cron has no session; the table has no insert policy |
 | `backupStorageRepository` (the connection string) | `requireAdmin` in `backupStorageService`; `getStorageForWrite` is server-internal |
 | `backupRunRepository` (the writes) | called only by `backupRunner`, reachable via `runBackup` (`admin`, or the token-authenticated cron route). Reads use the request client, so the history is RLS-governed |
+| `vmRepository.deleteAllVmsForImport` | `requireAdmin` in `importTracker`. Service-role because `vms` has **no delete policy** — no session may destroy a VM row (see [tracker.md](./tracker.md#the-archive-is-permanent)) — yet restoring a backup has to clear the table first. It is the only delete of a VM anywhere in the app |
 | `backupCronRepository` | `requireAdmin` in `backupCronService`. Its three RPCs are `security definer` with execute granted to `service_role` only, so they are unreachable even with a stolen session |
 
 Adding a function to any of those without a preceding role check silently
@@ -248,7 +249,7 @@ live production response:
 
 | Header | Value | Why |
 | ------ | ----- | --- |
-| `Content-Security-Policy` | `frame-ancestors 'none'` | clickjacking — admins have irreversible one-click actions (purge, clear trash, replace-all import) |
+| `Content-Security-Policy` | `frame-ancestors 'none'` | clickjacking — an admin still has one irreversible one-click action (the replace-all import) |
 | `X-Frame-Options` | `DENY` | same, for readers of the older header |
 | `X-Content-Type-Options` | `nosniff` | MIME confusion on API responses |
 | `Referrer-Policy` | `strict-origin-when-cross-origin` | internal hostnames and project ids stay out of `Referer` on outbound clicks |
@@ -361,10 +362,12 @@ environment's Jenkins credentials and job, and any signed-in user can trigger a
 build. That is the documented design ([jenkins-sync.md](./jenkins-sync.md)), with
 attribution in `environment_build_runs` standing in for a stricter gate.
 
-**A8 — Build runs are the only audit trail.** Role changes, user deletions, VM
-purges, trash clears, and replace-all imports leave no record of who did them.
-`environment_build_runs` proves the pattern; the destructive actions are the ones
-that would most benefit from it.
+**A8 — Build runs are the only audit trail.** Role changes, user deletions and
+replace-all imports leave no record of who did them. `environment_build_runs`
+proves the pattern; the destructive actions are the ones that would most benefit
+from it. VM deletion is no longer on that list — the app cannot do it at all (see
+[tracker.md § The archive is permanent](./tracker.md#the-archive-is-permanent)),
+which removes the risk rather than logging it.
 
 ## Checklist for new code
 

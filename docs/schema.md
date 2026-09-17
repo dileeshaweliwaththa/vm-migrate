@@ -48,12 +48,23 @@ One row per virtual machine tracked through a migration. **Shared across all
 authenticated users** — this is an internal team tool, so there is no per-user
 ownership: every signed-in user sees the same rows.
 
-RLS follows the same role split as the Phase 2 tables: read = any authenticated
-user (**viewers included, read-only**), insert/update = `editor`/`admin`,
-delete = `admin`. Delete is admin-only because the destructive tracker actions
-(purge, clear-trash, replace-all import) all bottom out in a row delete. The
-table originally shipped with full write access for any authenticated user;
-`…_restrict_vm_tracker_writes.sql` brought it under RBAC.
+RLS: read = any authenticated user (**viewers included, read-only**),
+insert/update = `editor`/`admin`, and **no delete policy at all**.
+
+That last part is the point: a VM row is the only record a machine ever existed,
+so no signed-in session may destroy one — admins included. `deleted`/`deleted_at`
+are a soft delete (the tracker's archive) and `restore` undoes it; removing a row
+for real is a service-role or SQL-editor act, done where you can see what you are
+about to lose. See
+[tracker.md § The archive is permanent](./tracker.md#the-archive-is-permanent).
+
+The app's one remaining delete is the admin-only replace-all import, which clears
+the table through the service-role client before restoring a backup
+(`deleteAllVmsForImport`).
+
+The table originally shipped with full write access for any authenticated user;
+`…_restrict_vm_tracker_writes.sql` brought it under RBAC, and
+`…_vms_are_never_deleted_by_a_session.sql` dropped the admin delete policy.
 
 | column             | type          | notes                                              |
 | ------------------ | ------------- | -------------------------------------------------- |
@@ -67,9 +78,9 @@ table originally shipped with full write access for any authenticated user;
 | `is_client`        | `boolean`     | Client VM (vs. our UPVIEW servers)                 |
 | `expanded`         | `boolean`     | UI expand state                                    |
 | `notes`            | `text`        | free text                                          |
-| `migrated_archive` | `jsonb`       | purged source VMs whose URLs were archived here    |
-| `deleted`          | `boolean`     | soft-delete flag (in trash)                        |
-| `deleted_at`       | `timestamptz` | when trashed                                       |
+| `migrated_archive` | `jsonb`       | **historical** — source VMs archived here by the old purge path; still read by the grid, no longer written |
+| `deleted`          | `boolean`     | archived (soft-delete) flag — the only "delete" there is |
+| `deleted_at`       | `timestamptz` | when it was archived                               |
 | `group_id`         | `uuid`        | FK -> `vm_groups.id`, `on delete set null`; null = ungrouped |
 | `created_at`       | `timestamptz` | default `now()`                                    |
 | `updated_at`       | `timestamptz` | kept fresh by the `set_updated_at` trigger         |
@@ -148,7 +159,7 @@ piece of configuration, not a machine, and its endpoints fall back to the primar
 | `label`          | `text`          | free text — what it serves                     |
 | `origin`         | `vm_ip_origin`  | `assigned` \| `moved`                          |
 | `source_vm_id`   | `uuid`          | FK → `vms.id`, `on delete set null`; the machine it came off |
-| `source_vm_name` | `text`          | name snapshot, so the provenance survives that machine's purge |
+| `source_vm_name` | `text`          | name snapshot, so the provenance survives that machine being removed |
 | `moved_at`       | `date`          | when it was reattached                         |
 | `position` / `notes` | `integer` / `text` | display order, free text              |
 | `created_at` / `updated_at` | `timestamptz` | `set_updated_at` trigger          |
@@ -646,6 +657,10 @@ In `supabase/migrations/`, applied in timestamp order:
 - `…_endpoint_ip.sql` — `endpoints.ip_id`, naming which of its VM's addresses a
   row answers on. Null (every pre-existing row) is the primary, so it is a pure
   add with no backfill. See [`endpoints`](#endpoints).
+- `…_vms_are_never_deleted_by_a_session.sql` — drops the admin delete policy on
+  `vms`, so no authenticated session can destroy a machine's record. The tracker
+  trash becomes an archive; real deletion is a database-level act. See
+  [`vms`](#vms).
 
 ## Deploying migrations
 

@@ -8,7 +8,6 @@ import type {
   VmIpMoveInput,
   VmUrlInput,
   TrackerData,
-  TrashType,
 } from '@/types/common/vm';
 
 // Hook layer: bridges the tracker UI to the API/service layer via TanStack
@@ -56,18 +55,6 @@ export const useRestoreVm = () =>
   useMutation({
     mutationFn: (id: string) =>
       apiFetch<{ id: string }>(`/api/vms/${id}/restore`, { method: 'POST' }),
-  });
-
-export const usePurgeVm = () =>
-  useMutation({
-    mutationFn: (id: string) =>
-      apiFetch<{ id: string }>(`/api/vms/${id}/purge`, { method: 'DELETE' }),
-  });
-
-export const useClearTrash = () =>
-  useMutation({
-    mutationFn: (type: TrashType) =>
-      apiFetch<{ type: TrashType }>(`/api/vms/trash?type=${type}`, { method: 'DELETE' }),
   });
 
 export const useAddUrl = () =>

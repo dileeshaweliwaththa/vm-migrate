@@ -110,14 +110,20 @@ export function TrackerCheckbox({
   onCheckedChange,
   label,
   className,
+  id,
 }: {
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
   label: string;
   className?: string;
+  // Set where the tick has a visible `<Label htmlFor>` beside it — a `button` is
+  // a labelable element, so that association makes the text a hit target too.
+  // The gutter ticks have no visible label and rely on `aria-label` alone.
+  id?: string;
 }) {
   return (
     <Checkbox
+      id={id}
       checked={checked}
       onCheckedChange={(v) => onCheckedChange(v === true)}
       aria-label={label}

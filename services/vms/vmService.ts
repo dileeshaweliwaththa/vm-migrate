@@ -3,7 +3,7 @@ import {
   findVmById,
   insertVm,
   updateVm as updateVmRow,
-  deleteVm as deleteVmRow,
+  deleteAllVmsForImport,
   type VmWriteColumns,
 } from '@/repositories/vms/vmRepository';
 import {
@@ -27,7 +27,6 @@ import {
 import { setEnvironmentsVm } from '@/repositories/environments/environmentRepository';
 import {
   findVmIpsForVms,
-  findVmIpsBySourceVm,
   insertVmIp,
   updateVmIp as updateVmIpRow,
   deleteVmIp as deleteVmIpRow,
@@ -51,19 +50,20 @@ import type {
   VmIpMoveInput,
   VmUrlInput,
   TrackerData,
-  TrashType,
   Protocol,
 } from '@/types/common/vm';
 
 // Service layer: business logic and orchestration for the VM tracker. Calls
-// repositories, maps raw rows into domain types, and owns all the rules
-// (soft delete, restore, purge-with-archive). No React dependency.
+// repositories, maps raw rows into domain types, and owns all the rules (soft
+// delete, restore, addresses, replace-all import). No React dependency.
 
 // ---- authorization ---------------------------------------------------------
 
 // Reading is open to every signed-in role; writing is not. Editors and admins
-// may create, edit, trash and restore, while the irreversible operations —
-// purge, clear-trash, and the replace-all import — are admin-only.
+// may create, edit, trash and restore. The one irreversible operation left — the
+// replace-all import, which clears the table before restoring a backup — is
+// admin-only. There is no purge and no clear-trash: a VM row is never destroyed
+// by a session at all (see `restoreVm` below).
 //
 // Role-based RLS on `vms`/`endpoints` enforces the same split in Postgres and is
 // authoritative. These checks exist so a denied action fails as a clean 403
@@ -300,81 +300,16 @@ export const restoreVm = async (id: string): Promise<void> => {
   await updateVmRow(id, { deleted: false, deleted_at: null });
 };
 
-// Permanently remove a VM. If it carried migrated URLs, first preserve them on
-// the destination VM (mirrors the original tracker's archive-on-purge rule):
-// prefer the "primary" VM for that IP (old_ip === new_ip = the destination
-// server itself), else any other active VM sharing the new IP.
-export const purgeVm = async (id: string): Promise<void> => {
-  await requireAdmin('permanently delete a VM');
-
-  const target = await findVmById(id);
-  if (!target) return;
-
-  const source = rowToVm(target, groupUrlsByVm(await findEndpointsForVms([id])).get(id) ?? []);
-  await archiveMigratedUrls(source);
-  await deleteVmRow(id);
-};
-
-export const clearTrash = async (type: TrashType): Promise<void> => {
-  await requireAdmin('empty the trash');
-
-  const rows = await findAllVms();
-  const trashed = rows.filter(
-    (r) => r.deleted && (type === 'client' ? r.is_client : !r.is_client)
-  );
-  const ids = trashed.map((r) => r.id);
-  const urlsByVm = groupUrlsByVm(await findEndpointsForVms(ids));
-
-  for (const row of trashed) {
-    await archiveMigratedUrls(rowToVm(row, urlsByVm.get(row.id) ?? []));
-    await deleteVmRow(row.id);
-  }
-};
-
-// Copy a soon-to-be-purged VM's URLs onto the destination VM's archive, unless
-// that VM has nothing migrated or the destination already has it archived.
-const archiveMigratedUrls = async (source: Vm): Promise<void> => {
-  // Only the VM's own endpoints: a project's records outlive the VM (they hang
-  // off the environment, which merely loses its `vm_id`), so archiving a copy of
-  // them here would preserve nothing and duplicate rows that still exist.
-  const ownUrls = source.urls.filter((url) => !url.environmentId);
-  if (ownUrls.length === 0) return;
-
-  const rows = await findAllVms();
-
-  // The machine that took this one's address, if that was recorded — an explicit
-  // link, so it beats every guess below. Checked first because the IP-equality
-  // rule cannot find it: an address that moved without changing leaves the source
-  // and destination with no matching pair of `new_ip`s.
-  const adopted = (await findVmIpsBySourceVm(source.id))
-    .map((ip) => rows.find((r) => r.id === ip.vm_id && !r.deleted))
-    .find(Boolean);
-
-  // Only meaningful when the source names a destination address at all — without
-  // that, every VM with a blank `new_ip` would look like a match.
-  const candidates = source.newIp
-    ? rows.filter((r) => !r.deleted && r.id !== source.id && r.new_ip === source.newIp)
-    : [];
-  const primary = candidates.find((r) => r.old_ip === r.new_ip);
-  const dest = adopted ?? primary ?? candidates[0];
-  if (!dest) return;
-
-  const archive = dest.migrated_archive ?? [];
-  if (archive.some((entry) => entry.id === source.id)) return;
-
-  await updateVmRow(dest.id, {
-    migrated_archive: [
-      ...archive,
-      {
-        id: source.id,
-        name: source.name,
-        oldIp: source.oldIp,
-        newIp: source.newIp,
-        urls: ownUrls,
-      },
-    ],
-  });
-};
+// There is no "permanently delete". The trash is an **archive**: a VM row is the
+// only record that a machine existed — its name, its addresses, what migrated
+// onto it — and destroying that used to be one click on a row in a list. It is
+// now a database-level act (the SQL editor or the service-role key), performed
+// where you can see what you are about to lose.
+//
+// `vms` has no delete policy at all, so this is enforced in Postgres rather than
+// by the absence of a function here. See
+// `…_vms_are_never_deleted_by_a_session.sql`, and `migrated_archive` below, which
+// existing rows still carry and the grid still reads.
 
 // ---- address mutations -----------------------------------------------------
 
@@ -548,10 +483,13 @@ export const deleteUrl = async (urlId: string): Promise<void> => {
 export const importTracker = async (payload: TrackerData): Promise<void> => {
   await requireAdmin('import tracker data');
 
-  const existing = await findAllVms();
-  for (const row of existing) {
-    await deleteVmRow(row.id);
-  }
+  // The one place in the app that destroys VM rows, and the reason it needs the
+  // service-role client: `vms` has no delete policy, so not even an admin's own
+  // session can clear the table (see
+  // `…_vms_are_never_deleted_by_a_session.sql`). The `requireAdmin` above is
+  // therefore the only gate in front of it — docs/security.md § Service-role
+  // paths are the load-bearing ones.
+  await deleteAllVmsForImport();
 
   // Groups are replaced too, or "replace-all" would leave the old groups behind
   // with nothing in them. Recreating them mints new ids, so the payload's VM

@@ -73,8 +73,14 @@ export interface VmUrl {
   environmentLabel: string;
 }
 
-// A purged VM whose URLs were migrated onto a destination VM is preserved here
-// (stored as jsonb on the destination row) so the migrated endpoints survive.
+// A source VM whose URLs were migrated onto a destination, preserved on the
+// destination row as jsonb so its endpoints survive the source going away.
+//
+// **Historical.** These were written by the old purge-with-archive path, which
+// existed because purging destroyed the source. Nothing writes them any more
+// (beyond a backup import carrying them back in) — a VM is no longer deleted by
+// the app at all, so the source row itself is the record. The grid still reads
+// them, so entries written before that change keep rendering.
 export interface MigratedArchiveEntry {
   id: string;
   name: string;
@@ -188,4 +194,3 @@ export interface VmIpMoveInput {
   trashSource?: boolean;
 }
 
-export type TrashType = 'upview' | 'client';

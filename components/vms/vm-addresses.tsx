@@ -9,6 +9,7 @@ import { TableCell, TableRow } from '@/components/ui/table';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -149,34 +150,52 @@ export function VmAddressDialog({
       }}
     >
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      {/* `sm:` to actually replace the primitive's own `sm:max-w-sm` — see
-          docs/ui-guidelines.md § Overriding widths on a primitive. */}
+      {/* `sm:max-w-lg` — the `sm:` prefix is required to actually replace the
+          primitive's own `sm:max-w-sm`; an unprefixed `max-w-lg` is silently
+          ignored above 640px (docs/ui-guidelines.md § Overriding widths).
+
+          The fields scroll, not the dialog: `overflow-y-auto` on `DialogContent`
+          would enable horizontal scrolling too and drag the absolutely
+          positioned close button off with it. `min-w-0` because `DialogContent`
+          is a grid, whose children otherwise refuse to shrink below their
+          content. */}
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
             {editing ? 'Edit address' : `Add an address to ${vm.name || 'this VM'}`}
           </DialogTitle>
+          <DialogDescription>
+            {editing
+              ? 'An address this machine answers on beyond its own. Its endpoints keep pointing at it.'
+              : 'A machine can answer on more than one public address — typically one reattached from a box that was retired without touching its DNS.'}
+          </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="max-h-[60vh] min-w-0 space-y-5 overflow-y-auto pr-1">
           {editing ? null : (
             <div className="space-y-2">
               <Label>Where it came from</Label>
+              {/* `w-full` on the root: the primitive is `w-fit`, so without it
+                  `flex-1` on the items has nothing to divide and the control
+                  shrinks to its text — two segments of different widths rather
+                  than a segmented control. Same `data-[state=on]` styling as
+                  `VmViewToggle`; `ui/tabs` is not an option here (it targets
+                  Radix 2.x attributes — docs/ui-guidelines.md). */}
               <ToggleGroup
                 type="single"
                 value={origin}
                 onValueChange={(next) => next && setOrigin(next as VmIpOrigin)}
-                className="gap-0.5 rounded-sm border border-border bg-muted p-0.5"
+                className="w-full gap-0.5 rounded-sm border border-border bg-muted p-0.5"
               >
                 <ToggleGroupItem
                   value="assigned"
-                  className="h-8 flex-1 rounded-sm px-2.5 text-xs data-[state=on]:bg-card data-[state=on]:font-medium data-[state=on]:text-foreground"
+                  className="h-8 flex-1 rounded-sm px-2.5 text-xs data-[state=on]:bg-card data-[state=on]:font-medium data-[state=on]:text-foreground data-[state=on]:shadow-sm"
                 >
                   Newly assigned
                 </ToggleGroupItem>
                 <ToggleGroupItem
                   value="moved"
-                  className="h-8 flex-1 rounded-sm px-2.5 text-xs data-[state=on]:bg-card data-[state=on]:font-medium data-[state=on]:text-foreground"
+                  className="h-8 flex-1 rounded-sm px-2.5 text-xs data-[state=on]:bg-card data-[state=on]:font-medium data-[state=on]:text-foreground data-[state=on]:shadow-sm"
                 >
                   Moved from another VM
                 </ToggleGroupItem>
@@ -223,6 +242,7 @@ export function VmAddressDialog({
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
                 placeholder="0.0.0.0"
+                className="font-mono"
               />
             </div>
             <div className="space-y-2">
@@ -236,60 +256,78 @@ export function VmAddressDialog({
             </div>
           </div>
 
-          {editing || origin === 'moved' ? (
-            <div className="space-y-2">
-              <Label htmlFor="vm-ip-date">Moved on</Label>
+          <div className="grid grid-cols-2 gap-3">
+            {editing || origin === 'moved' ? (
+              <div className="space-y-2">
+                <Label htmlFor="vm-ip-date">Moved on</Label>
+                {/* No `w-fit`: `Input` is `w-full` by default and `Label` is a
+                    bare `<label>` (inline), so a fit-width input sits *beside*
+                    its own label instead of under it — which is what knocked
+                    this row out of line with every other field. */}
+                <Input
+                  id="vm-ip-date"
+                  type="date"
+                  value={movedAt}
+                  onChange={(e) => setMovedAt(e.target.value)}
+                />
+              </div>
+            ) : null}
+            <div
+              className={cn(
+                'space-y-2',
+                // Notes takes the whole row when there is no date beside it, so
+                // the grid never leaves a half-width field stranded.
+                editing || origin === 'moved' ? '' : 'col-span-2'
+              )}
+            >
+              <Label htmlFor="vm-ip-notes">Notes</Label>
               <Input
-                id="vm-ip-date"
-                type="date"
-                value={movedAt}
-                onChange={(e) => setMovedAt(e.target.value)}
-                className="w-fit"
+                id="vm-ip-notes"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="notes…"
               />
             </div>
-          ) : null}
-
-          <div className="space-y-2">
-            <Label htmlFor="vm-ip-notes">Notes</Label>
-            <Input
-              id="vm-ip-notes"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="notes…"
-            />
           </div>
 
           {!editing && origin === 'moved' && sourceVmId ? (
-            <div className="space-y-2 rounded-md border border-border bg-muted/40 p-3">
-              <label className="flex items-start gap-2 text-sm">
+            // The two writes this move makes beyond the address itself, stated
+            // where they are agreed to. `Checkbox` + `Label htmlFor` rather than
+            // a wrapping `<label>`: the tick is a `button`, so the explicit
+            // association gives the text a hit target without the double-toggle
+            // an implicit label can cause.
+            <div className="space-y-3 rounded-md border border-border bg-muted/40 p-3">
+              <div className="flex items-start gap-2.5">
                 <TrackerCheckbox
+                  id="vm-ip-move-urls"
                   checked={moveUrls}
                   onCheckedChange={setMoveUrls}
                   label="Bring its URLs across"
                   className="mt-0.5"
                 />
-                <span>
-                  Bring its URLs across
-                  <span className="block text-xs text-muted-foreground">
+                <div className="grid gap-1">
+                  <Label htmlFor="vm-ip-move-urls">Bring its URLs across</Label>
+                  <p className="text-xs text-muted-foreground">
                     Its own rows and its projects&rsquo; records both. They keep their DNS and
                     tested ticks — only the machine under them changes.
-                  </span>
-                </span>
-              </label>
-              <label className="flex items-start gap-2 text-sm">
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-start gap-2.5">
                 <TrackerCheckbox
+                  id="vm-ip-trash-source"
                   checked={trashSource}
                   onCheckedChange={setTrashSource}
                   label="Send that VM to the trash"
                   className="mt-0.5"
                 />
-                <span>
-                  Send that VM to the trash
-                  <span className="block text-xs text-muted-foreground">
+                <div className="grid gap-1">
+                  <Label htmlFor="vm-ip-trash-source">Send that VM to the trash</Label>
+                  <p className="text-xs text-muted-foreground">
                     Trash, not permanent — it can be restored.
-                  </span>
-                </span>
-              </label>
+                  </p>
+                </div>
+              </div>
             </div>
           ) : null}
         </div>

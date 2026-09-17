@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/service';
 import type { VmRow } from '@/types/supabase/response/vms';
 import type { MigratedArchiveEntry } from '@/types/common/vm';
 
@@ -75,8 +76,22 @@ export const setVmsGroup = async (ids: string[], groupId: string | null): Promis
   return (data ?? []) as VmRow[];
 };
 
-export const deleteVm = async (id: string): Promise<void> => {
-  const supabase = await createClient();
-  const { error } = await supabase.from('vms').delete().eq('id', id);
+// Wipes the table so a backup can be restored over it. **The only delete of a
+// `vms` row anywhere in the app**, and the one place that needs the service-role
+// client, because `vms` has no delete policy at all — a signed-in session cannot
+// destroy a machine's record, admin or not (see
+// `…_vms_are_never_deleted_by_a_session.sql`).
+//
+// That makes the `requireAdmin` in `importTracker` the *only* thing standing in
+// front of this. Nothing else may call it. See docs/security.md § Service-role
+// paths are the load-bearing ones.
+//
+// One statement rather than a row-at-a-time loop: a half-wiped tracker is not a
+// state the import can recover from. `endpoints`, `vm_ips` and the Jenkins rows
+// cascade; a cascade is not subject to RLS on the referencing table.
+export const deleteAllVmsForImport = async (): Promise<void> => {
+  const supabase = createServiceClient();
+  // PostgREST refuses an unfiltered delete; this is the "match everything" form.
+  const { error } = await supabase.from('vms').delete().not('id', 'is', null);
   if (error) throw new Error(error.message);
 };
