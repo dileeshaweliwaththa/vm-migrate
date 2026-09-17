@@ -3,14 +3,15 @@
 import { ChevronDown, ChevronRight, X } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
-import { buildFullUrl, migratedSources } from '@/lib/vm-utils';
+import { buildFullUrl, endpointAddress, migratedSources } from '@/lib/vm-utils';
 import type { Vm, VmUrl } from '@/types/common/vm';
+import { VmAddressList, UrlAddressPicker } from './vm-addresses';
 import { VmJenkinsDialog } from './vm-jenkins-dialog';
 import {
   CellInput,
   StatusPill,
   UrlOwnerBadge,
-  VmSelectCheckbox,
+  TrackerCheckbox,
   type VmHandlers,
 } from './vm-fields';
 import { YesNoToggle } from './yes-no-toggle';
@@ -54,7 +55,7 @@ function UrlItem({
   canWrite: boolean;
 }) {
   const readOnly = !canWrite;
-  const full = buildFullUrl(url.proto, vm.newIp, url.port);
+  const full = buildFullUrl(url.proto, endpointAddress(vm, url), url.port);
 
   return (
     <li className="space-y-2 rounded-md border border-border bg-muted/30 p-2">
@@ -68,6 +69,17 @@ function UrlItem({
           className="w-16 shrink-0 text-center font-semibold text-ink-accent"
           readOnly={readOnly}
         />
+        {/* Only on a machine with more than one address — the picker renders
+            nothing but the address itself otherwise, same as the grid. */}
+        {vm.ips.length > 0 ? (
+          <UrlAddressPicker
+            vm={vm}
+            ipId={url.ipId}
+            onChange={(ipId) => h.onUrlCommit(vm.id, url.id, { ipId })}
+            canWrite={canWrite}
+            className="min-w-0 flex-1 rounded-md border border-input px-2"
+          />
+        ) : null}
         {/* VM-owned rows only — a project's record is deleted from its project
             (the badge below links there), same rule as the grid. */}
         {canWrite && !url.environmentId ? (
@@ -165,7 +177,7 @@ export function VmCard({
         <div className="flex items-start justify-between gap-2">
           {/* Ahead of the name, where the grid's tick also sits. */}
           {canWrite ? (
-            <VmSelectCheckbox
+            <TrackerCheckbox
               checked={selected}
               onCheckedChange={() => h.onToggleSelect(vm.id)}
               label={`Select ${vm.name || 'this VM'}`}
@@ -234,17 +246,43 @@ export function VmCard({
             />
           </Field>
           <Field label="New IP">
-            <CellInput
-              variant="field"
-              value={vm.newIp}
-              placeholder="0.0.0.0"
-              onChange={(v) => h.onVmLocalChange(vm.id, { newIp: v })}
-              onCommit={(v) => h.onVmCommit(vm.id, { newIp: v })}
-              className="text-ink-target"
-              readOnly={readOnly}
-            />
+            <div className="flex min-w-0 items-center gap-1">
+              <CellInput
+                variant="field"
+                value={vm.newIp}
+                placeholder="0.0.0.0"
+                onChange={(v) => h.onVmLocalChange(vm.id, { newIp: v })}
+                onCommit={(v) => h.onVmCommit(vm.id, { newIp: v })}
+                className="min-w-0 flex-1 text-ink-target"
+                readOnly={readOnly}
+              />
+              {/* Same collapsed-card signal as the grid's chip: this box answers
+                  on more than the one address showing. */}
+              {vm.ips.length > 0 ? (
+                <span
+                  title={`Also answers on ${vm.ips.map((ip) => ip.address).join(', ')}`}
+                  className="shrink-0 rounded-sm bg-ink-accent/10 px-1 text-[10px] font-bold text-ink-accent"
+                >
+                  +{vm.ips.length}
+                </span>
+              ) : null}
+            </div>
           </Field>
         </div>
+
+        {/* The addresses themselves, on the same expanded flag as the grid's band
+            — one `VmAddressList`, so the two views can't disagree about what a
+            machine answers on. */}
+        {vm.expanded && (canWrite || vm.ips.length > 0) ? (
+          <div className="rounded-md border border-border bg-muted/30 p-2">
+            <VmAddressList
+              vm={vm}
+              candidates={allVms.filter((v) => v.id !== vm.id)}
+              h={h}
+              canWrite={canWrite}
+            />
+          </div>
+        ) : null}
 
         <div className="grid grid-cols-3 gap-2">
           <Field label="Migrated">

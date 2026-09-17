@@ -104,6 +104,55 @@ RLS: read = any authenticated user; insert/update/delete = `editor`/`admin`.
 | `created_at` | `timestamptz` | default `now()`                            |
 | `updated_at` | `timestamptz` | kept fresh by the `set_updated_at` trigger |
 
+## `vm_ips`
+
+**A machine's additional public addresses.** `vms.old_ip` and `vms.new_ip`
+together say "this machine moved from A to B", which covers a migration where the
+workload moves. It cannot express the other thing that happens: a box is
+decommissioned and its **public IP is detached and reattached** to another
+machine, so every endpoint keeps resolving where it always did and no DNS record
+is touched. The destination then answers on two addresses.
+
+Only the **extras** live here. `vms.new_ip` stays the machine's primary address,
+so every existing read path works unchanged and there is no mirrored column for a
+trigger to keep in step; a single-address VM has no row here at all. That is also
+why `id` is nullable wherever the app talks about "which address" — null *is* the
+primary (see `VmAddress` in [lib/vm-utils.ts](../lib/vm-utils.ts)).
+
+Not many-to-many: a public IP answers on exactly one NIC at a time, and letting
+one address belong to two machines would make "which box serves this URL"
+unanswerable — the same reasoning that made [`vm_groups`](#vm_groups) one-to-many.
+
+`origin` is the `vm_ip_origin` enum (`assigned` | `moved`), mirroring
+`VM_IP_ORIGINS` in `types/common/vm.ts`. It is **not** the same question as
+"is `source_vm_id` set": an address moved off a machine that was never tracked
+here is still `moved`. `source_vm_name` is a snapshot because the FK is
+`on delete set null` — the provenance has to outlive the machine, since that is
+when it is the only record left.
+
+`(vm_id, address)` is unique: one machine can't hold the same address twice.
+Deliberately not unique on `address` alone — the same string legitimately appears
+as some other VM's historical `old_ip`. The primary is outside that index (it is
+a column on `vms`, not a row here), so `vmService.addVmIp` checks that half.
+
+RLS: read = any authenticated user (which addresses a machine answers on is
+tracker data, not a secret); insert/update/delete = `editor`/`admin`. Delete sits
+at editor+, following `vm_groups` rather than `vms`: removing an address loses a
+piece of configuration, not a machine, and its endpoints fall back to the primary.
+
+| column           | type            | notes                                          |
+| ---------------- | --------------- | ---------------------------------------------- |
+| `id`             | `uuid`          | primary key                                    |
+| `vm_id`          | `uuid`          | FK → `vms.id`, `on delete cascade`             |
+| `address`        | `text`          | the public IP                                  |
+| `label`          | `text`          | free text — what it serves                     |
+| `origin`         | `vm_ip_origin`  | `assigned` \| `moved`                          |
+| `source_vm_id`   | `uuid`          | FK → `vms.id`, `on delete set null`; the machine it came off |
+| `source_vm_name` | `text`          | name snapshot, so the provenance survives that machine's purge |
+| `moved_at`       | `date`          | when it was reattached                         |
+| `position` / `notes` | `integer` / `text` | display order, free text              |
+| `created_at` / `updated_at` | `timestamptz` | `set_updated_at` trigger          |
+
 ## `vm_jenkins` / `vm_jenkins_secrets`
 
 **A VM runs one Jenkins, so the server belongs to the machine.** `vm_jenkins`
@@ -362,6 +411,12 @@ second one — see
 no unique constraint behind it: one host legitimately serves several domains on
 one port, so uniqueness is a judgement the service makes, not a key.
 
+`ip_id` says **which of its VM's addresses** the row answers on. It is how the
+tracker builds a correct "Full New URL" for a machine that has adopted another's
+address, and `on delete set null` is deliberate: removing an address must not
+delete the endpoints that were on it — they fall back to the primary, which is
+visible and correctable, instead of silently disappearing.
+
 `source` records provenance: `manual` (typed by hand), `jenkins` (the Phase 2b
 sync, or "Use" in the browse-jobs dialog), or `docker` (imported from a pasted
 `docker ps` — see [docker-import.md](./docker-import.md)).
@@ -371,6 +426,7 @@ sync, or "Use" in the browse-jobs dialog), or `docker` (imported from a pasted
 | `id`             | `uuid`        | primary key                             |
 | `environment_id` | `uuid`        | FK → `environments.id`, `on delete cascade`; null on a VM-owned row |
 | `vm_id`          | `uuid`        | FK → `vms.id`, `on delete cascade`; null on a project record |
+| `ip_id`          | `uuid`        | FK → [`vm_ips.id`](#vm_ips), `on delete set null`; **null = the VM's primary address**, which is what every row meant before a machine could hold more than one |
 | `port`           | `text`        | e.g. `3000` — shown for port-bearing providers |
 | `branch`         | `text`        | e.g. `main` — the deployed branch, shown **instead of** `port` on `aws`/`azure`/`amplify` (`providerHasBranch`) |
 | `protocol`       | `net_protocol`| HTTP/HTTPS/TCP/UDP/WS/WSS               |
@@ -584,6 +640,12 @@ In `supabase/migrations/`, applied in timestamp order:
   user has full access" policies on `vms` and `vm_urls` with the standard role
   split, making the tracker **read-only for viewers**. See
   [`vms`](#vms) and [`endpoints`](#endpoints).
+- `…_vm_ips.sql` — the `vm_ip_origin` enum and the `vm_ips` table: the addresses
+  a machine answers on beyond `vms.new_ip`, with the provenance of each. See
+  [`vm_ips`](#vm_ips).
+- `…_endpoint_ip.sql` — `endpoints.ip_id`, naming which of its VM's addresses a
+  row answers on. Null (every pre-existing row) is the primary, so it is a pure
+  add with no backfill. See [`endpoints`](#endpoints).
 
 ## Deploying migrations
 

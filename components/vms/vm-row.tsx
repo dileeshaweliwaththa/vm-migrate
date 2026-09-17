@@ -4,14 +4,15 @@ import { Fragment } from 'react';
 import { ChevronDown, ChevronRight, Plus, X } from 'lucide-react';
 import { TableCell, TableRow } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
-import { buildFullUrl, migratedSources } from '@/lib/vm-utils';
+import { buildFullUrl, endpointAddress, migratedSources } from '@/lib/vm-utils';
 import type { Vm } from '@/types/common/vm';
+import { VmAddressBand, UrlAddressPicker } from './vm-addresses';
 import { VmJenkinsDialog } from './vm-jenkins-dialog';
 import {
   CellInput,
   StatusPill,
   UrlOwnerBadge,
-  VmSelectCheckbox,
+  TrackerCheckbox,
   type VmHandlers,
 } from './vm-fields';
 import { YesNoToggle } from './yes-no-toggle';
@@ -124,7 +125,7 @@ export function VmRow({
         <TableCell className="w-16 p-0">
           <div className="flex items-center justify-center gap-1">
             {canWrite ? (
-              <VmSelectCheckbox
+              <TrackerCheckbox
                 checked={selected}
                 onCheckedChange={() => h.onToggleSelect(vm.id)}
                 label={`Select ${vm.name || 'this VM'}`}
@@ -166,14 +167,27 @@ export function VmRow({
           />
         </TableCell>
         <TableCell className="py-1">
-          <CellInput
-            value={vm.newIp}
-            placeholder="0.0.0.0"
-            onChange={(v) => h.onVmLocalChange(vm.id, { newIp: v })}
-            onCommit={(v) => h.onVmCommit(vm.id, { newIp: v })}
-            className="text-ink-target"
-            readOnly={readOnly}
-          />
+          {/* The machine's own address, plus a count of the ones it has adopted.
+              The chip is the collapsed-row signal that this box answers on more
+              than one address; the band below names them. */}
+          <div className="flex min-w-0 items-center gap-1">
+            <CellInput
+              value={vm.newIp}
+              placeholder="0.0.0.0"
+              onChange={(v) => h.onVmLocalChange(vm.id, { newIp: v })}
+              onCommit={(v) => h.onVmCommit(vm.id, { newIp: v })}
+              className="min-w-0 flex-1 text-ink-target"
+              readOnly={readOnly}
+            />
+            {vm.ips.length > 0 ? (
+              <span
+                title={`Also answers on ${vm.ips.map((ip) => ip.address).join(', ')}`}
+                className="shrink-0 rounded-sm bg-ink-accent/10 px-1 text-[10px] font-bold text-ink-accent"
+              >
+                +{vm.ips.length} IP
+              </span>
+            ) : null}
+          </div>
         </TableCell>
         <TableCell className="text-center text-xs text-muted-foreground">
           {vm.urls.length} URL{vm.urls.length !== 1 ? 's' : ''}
@@ -265,6 +279,19 @@ export function VmRow({
         </TableCell>
       </TableRow>
 
+      {/* Addresses — above the URLs, because which addresses this box answers on
+          is what the rows underneath are read against. */}
+      {vm.expanded && (
+        <VmAddressBand
+          vm={vm}
+          // Any other active machine could be the one that handed an address over.
+          candidates={allVms.filter((v) => v.id !== vm.id)}
+          h={h}
+          canWrite={canWrite}
+          columns={TRACKER_COLUMNS}
+        />
+      )}
+
       {/* URL rows */}
       {vm.expanded &&
         vm.urls.map((u) => (
@@ -277,7 +304,17 @@ export function VmRow({
               </div>
             </TableCell>
             <TableCell className="text-xs text-ink-source">{vm.oldIp}</TableCell>
-            <TableCell className="text-xs text-ink-target">{vm.newIp}</TableCell>
+            {/* Which of the machine's addresses answers this endpoint. Plain text
+                on the ordinary one-address VM — the picker only appears where
+                there is actually a choice to make. */}
+            <TableCell className="py-0.5">
+              <UrlAddressPicker
+                vm={vm}
+                ipId={u.ipId}
+                onChange={(ipId) => h.onUrlCommit(vm.id, u.id, { ipId })}
+                canWrite={canWrite}
+              />
+            </TableCell>
             <TableCell className="py-0.5">
               <CellInput
                 value={u.port}
@@ -298,7 +335,9 @@ export function VmRow({
               />
             </TableCell>
             <TableCell className="truncate text-xs font-medium">
-              {buildFullUrl(u.proto, vm.newIp, u.port) || (
+              {/* Built from the address this endpoint actually answers on, which
+                  is the machine's own only until it adopts another. */}
+              {buildFullUrl(u.proto, endpointAddress(vm, u), u.port) || (
                 <span className="text-muted-foreground/60">auto-built</span>
               )}
             </TableCell>

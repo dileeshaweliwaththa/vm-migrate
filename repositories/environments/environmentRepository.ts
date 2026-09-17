@@ -57,6 +57,27 @@ export const findEnvironmentsByVmId = async (vmId: string): Promise<EnvironmentR
   return (data ?? []) as EnvironmentRow[];
 };
 
+// Moves every environment off one VM and onto another, in one statement.
+//
+// Used when a machine's public address is reattached to another box: the
+// environments deployed on it are now served by that box, and an environment left
+// pointing at a retired VM claims a host that no longer exists. One statement
+// rather than a loop, for the same reason `setVmsGroup` is one: it either all
+// lands or none of it does.
+export const setEnvironmentsVm = async (
+  fromVmId: string,
+  toVmId: string | null
+): Promise<EnvironmentRow[]> => {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('environments')
+    .update({ vm_id: toVmId })
+    .eq('vm_id', fromVmId)
+    .select('*');
+  if (error) throw new Error(error.message);
+  return (data ?? []) as EnvironmentRow[];
+};
+
 export const insertEnvironment = async (
   values: EnvironmentWriteColumns
 ): Promise<EnvironmentRow> => {

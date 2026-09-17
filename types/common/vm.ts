@@ -7,6 +7,37 @@ import type { VmJenkinsConfig } from '@/types/common/jenkins';
 export const PROTOCOLS = ['HTTP', 'HTTPS', 'TCP', 'UDP', 'WS', 'WSS'] as const;
 export type Protocol = (typeof PROTOCOLS)[number];
 
+// How an extra address ended up on a machine. `assigned` is one we allocated to
+// a live VM; `moved` is one detached from another machine and reattached here,
+// which is what happens when a box is retired without touching its DNS.
+//
+// Not the same question as "does it name a source VM": an address moved off a
+// machine that was never tracked here is still `moved`. Mirrors the `vm_ip_origin`
+// Postgres enum — same values, same order.
+export const VM_IP_ORIGINS = ['assigned', 'moved'] as const;
+export type VmIpOrigin = (typeof VM_IP_ORIGINS)[number];
+
+// One of the **additional** public addresses a VM answers on. The machine's own
+// address is `Vm.newIp`; this is everything beyond it, so a single-address VM has
+// an empty `ips` and behaves exactly as it always has.
+//
+// `sourceVmName` is a snapshot rather than something read through `sourceVmId`
+// because the FK is `on delete set null` — the name has to outlive the machine,
+// since the provenance matters most once that machine is gone.
+export interface VmIp {
+  id: string;
+  vmId: string;
+  address: string;
+  label: string;
+  origin: VmIpOrigin;
+  sourceVmId: string | null;
+  sourceVmName: string;
+  // ISO date (yyyy-mm-dd), or empty when it wasn't recorded.
+  movedAt: string;
+  position: number;
+  notes: string;
+}
+
 // An endpoint on a VM, as the tracker shows it. Backed by the single `endpoints`
 // table, which is also what the projects pages write — so a URL added to a
 // project environment appears here, under whichever VM that environment sits on,
@@ -23,6 +54,10 @@ export interface VmUrl {
   tested: boolean;
   notes: string;
   position: number;
+  // Which of the VM's addresses this endpoint answers on — a `VmIp.id`, or null
+  // for the VM's primary (`Vm.newIp`). Null is what every row meant before a VM
+  // could hold more than one address, so it stays the default.
+  ipId: string | null;
   // ---- ownership -----------------------------------------------------------
   // Null for a VM-owned row — one added from the tracker for a machine with no
   // project behind it. Otherwise this row belongs to a project environment: the
@@ -81,6 +116,10 @@ export interface Vm {
   // boolean. Set by the tracker payload; a VM built straight from a row (a
   // create, an import) has none until it is configured.
   jenkins: VmJenkinsConfig | null;
+  // Addresses this machine answers on **beyond** `newIp` — usually one adopted
+  // from a retired VM. Empty for the ordinary single-address machine, which is
+  // why nothing that predates this had to change.
+  ips: VmIp[];
   urls: VmUrl[];
 }
 
@@ -114,9 +153,39 @@ export type VmInput = Partial<
 // Fields a client may set when creating or renaming a group.
 export type VmGroupInput = Partial<Pick<VmGroup, 'name' | 'notes'>>;
 
-// Fields a client may set when creating or editing a URL row.
+// Fields a client may set when creating or editing a URL row. `ipId` is here so
+// a row can be pointed at whichever address serves it; null returns it to the
+// VM's primary.
 export type VmUrlInput = Partial<
-  Pick<VmUrl, 'port' | 'proto' | 'url' | 'dns' | 'tested' | 'notes'>
+  Pick<VmUrl, 'port' | 'proto' | 'url' | 'dns' | 'tested' | 'notes' | 'ipId'>
 >;
+
+// Fields a client may set when adding or editing one of a VM's extra addresses.
+export type VmIpInput = Partial<
+  Pick<VmIp, 'address' | 'label' | 'origin' | 'sourceVmId' | 'sourceVmName' | 'movedAt' | 'notes'>
+>;
+
+// Adding an address that came off another machine, as one action.
+//
+// Recording this by hand is three separate edits in three places — add the
+// address here, repoint the URLs, trash the source — and doing two of the three
+// leaves the tracker describing something that never happened. So it is one
+// call: the address lands with its provenance, the source's own endpoints move
+// onto it, and the source goes to the trash.
+export interface VmIpMoveInput {
+  // The VM the address is being taken from.
+  sourceVmId: string;
+  // The address itself. Defaults to the source's live address when omitted.
+  address?: string;
+  label?: string;
+  movedAt?: string;
+  notes?: string;
+  // Bring the source's VM-owned endpoints onto the new address. On by default —
+  // it is the reason the address moved at all.
+  moveUrls?: boolean;
+  // Send the source VM to the trash once its address has been taken. On by
+  // default; trash rather than purge, so the move is reversible.
+  trashSource?: boolean;
+}
 
 export type TrashType = 'upview' | 'client';

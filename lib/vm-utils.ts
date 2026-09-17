@@ -1,4 +1,4 @@
-import type { Vm, VmGroup, VmUrl, Protocol } from '@/types/common/vm';
+import type { Vm, VmGroup, VmIp, VmIpOrigin, VmUrl, Protocol } from '@/types/common/vm';
 
 // Presentation helpers for the VM tracker. Pure functions, no React, no data
 // access — shared by the tracker UI components.
@@ -12,6 +12,66 @@ export function buildFullUrl(proto: Protocol, newIp: string, port: string): stri
     return `${p}://${newIp}`;
   }
   return port ? `${p}://${newIp}:${port}` : `${p}://${newIp}`;
+}
+
+// ---- addresses -------------------------------------------------------------
+
+// One address a VM answers on, as anything that lists them wants it: the
+// machine's primary and its adopted extras in one shape, so a picker or a band
+// doesn't special-case the first entry.
+//
+// `id` is null for the primary, because the primary is a **column** on the VM
+// (`new_ip`), not a `vm_ips` row — the same null that `VmUrl.ipId` uses to mean
+// "the machine's own address".
+export interface VmAddress {
+  id: string | null;
+  address: string;
+  label: string;
+  origin: VmIpOrigin;
+  // The machine this address was reattached from, when it was reattached at all.
+  sourceName: string;
+  movedAt: string;
+  primary: boolean;
+}
+
+const primaryAddress = (vm: Pick<Vm, 'newIp'>): VmAddress => ({
+  id: null,
+  address: vm.newIp,
+  label: '',
+  origin: 'assigned',
+  sourceName: '',
+  movedAt: '',
+  primary: true,
+});
+
+const extraAddress = (ip: VmIp): VmAddress => ({
+  id: ip.id,
+  address: ip.address,
+  label: ip.label,
+  origin: ip.origin,
+  sourceName: ip.sourceVmName,
+  movedAt: ip.movedAt,
+  primary: false,
+});
+
+// Every address a VM answers on, primary first. A machine with no adopted
+// addresses yields exactly one entry, which is why nothing that predates `vm_ips`
+// needed to change.
+export function vmAddresses(vm: Pick<Vm, 'newIp' | 'ips'>): VmAddress[] {
+  return [primaryAddress(vm), ...(vm.ips ?? []).map(extraAddress)];
+}
+
+// The address a single endpoint answers on. `ipId` names one of the VM's adopted
+// addresses; null — and an id whose address has since been removed — means the
+// machine's own. Falling back rather than rendering nothing is deliberate: the
+// FK is `on delete set null`, so a removed address leaves live rows behind and
+// they have to keep resolving somewhere.
+export function endpointAddress(
+  vm: Pick<Vm, 'newIp' | 'ips'>,
+  url: Pick<VmUrl, 'ipId'>
+): string {
+  if (!url.ipId) return vm.newIp;
+  return (vm.ips ?? []).find((ip) => ip.id === url.ipId)?.address ?? vm.newIp;
 }
 
 export type StatusTone = 'success' | 'info' | 'warning' | 'danger';
@@ -67,6 +127,12 @@ export const STATUS_TONE_CLASS: Record<StatusTone, string> = {
 // Derived here rather than in a component because both tracker views render it,
 // and a second copy of the matching rule is a second answer to "what migrated
 // onto this box".
+//
+// An **adopted address** (`vm_ips`, origin `moved`) is deliberately not listed
+// here, even though it is also history. Its endpoints are live rows on this VM
+// rather than a snapshot of a machine that no longer serves them, so listing them
+// again below would render every one of them twice. Where that address came from
+// is shown once, in the Addresses band, next to the address itself.
 export type MigratedTag = 'IN TRASH' | 'ARCHIVED';
 
 export interface MigratedSource {

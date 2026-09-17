@@ -8,15 +8,15 @@ vertical slice through all five layers (see [architecture.md](./architecture.md)
 | Layer      | Files                                                                                          |
 | ---------- | ---------------------------------------------------------------------------------------------- |
 | Routing    | `app/(protected)/(app)/tracker/page.tsx` (resolves the role), `app/api/vms/**/route.ts`, `app/api/vm-groups/**/route.ts` |
-| UI         | `components/vms/vm-tracker.tsx`, `vm-row.tsx`, `vm-card.tsx`, `vm-fields.tsx`, `vm-groups.tsx`, `vm-view-toggle.tsx`, `vm-trash.tsx`, `yes-no-toggle.tsx` |
+| UI         | `components/vms/vm-tracker.tsx`, `vm-row.tsx`, `vm-card.tsx`, `vm-fields.tsx`, `vm-addresses.tsx`, `vm-groups.tsx`, `vm-view-toggle.tsx`, `vm-trash.tsx`, `yes-no-toggle.tsx` |
 | Hook       | `hooks/vms/useVmTracker.ts` (TanStack Query query + mutations), `hooks/vms/useVmGroups.ts` (group mutations) |
-| Service    | `services/vms/vmService.ts` (mapping, soft delete, purge-with-archive, import), `services/vms/vmGroupService.ts` (groups) |
-| Repository | `repositories/vms/vmRepository.ts`, `repositories/endpoints/endpointRepository.ts`, `repositories/vmGroups/vmGroupRepository.ts` |
+| Service    | `services/vms/vmService.ts` (mapping, soft delete, purge-with-archive, addresses, import), `services/vms/vmGroupService.ts` (groups) |
+| Repository | `repositories/vms/vmRepository.ts`, `repositories/endpoints/endpointRepository.ts`, `repositories/vmIps/vmIpRepository.ts`, `repositories/vmGroups/vmGroupRepository.ts` |
 
-Presentation helpers (`buildFullUrl`, `safeStatus`, `migratedSources`,
-`computeStats`, `groupVms`) live in `lib/vm-utils.ts`; shared domain types in
-`types/common/vm.ts`; raw row types in
-`types/supabase/response/{vms,endpoints,vmGroups}`.
+Presentation helpers (`buildFullUrl`, `vmAddresses`, `endpointAddress`,
+`safeStatus`, `migratedSources`, `computeStats`, `groupVms`) live in
+`lib/vm-utils.ts`; shared domain types in `types/common/vm.ts`; raw row types in
+`types/supabase/response/{vms,vmIps,endpoints,vmGroups}`.
 
 ## Two views over one VM
 
@@ -128,9 +128,105 @@ environment, so recreating them would duplicate every one as a VM-owned row. A
 backup written before the tables were unified has no ownership fields and
 imports exactly as it always did.
 
+The export also carries each VM's extra addresses and each URL's `ipId`.
+Recreating the addresses mints new ids, so the import remaps every `ipId` through
+them, exactly as it remaps `groupId` — an id that doesn't survive the remap lands
+on the primary rather than failing the import. `sourceVmId` is deliberately *not*
+remapped onto the freshly minted VM ids: the name snapshot is what the provenance
+is read from, and a dangling FK would be worse than a null one.
+
 **Purge-with-archive only archives VM-owned rows.** A project's records outlive
 the VM (the environment merely loses its `vm_id`), so archiving a copy would
 preserve nothing and duplicate rows that still exist.
+
+## A VM can hold several addresses
+
+`old_ip` and `new_ip` say *"this machine moved from A to B"*. That is one of the
+two things that happen. The other is that a box is **decommissioned and its public
+IP is reattached to another machine** — the endpoints keep resolving exactly where
+they always did, no DNS record is touched, and the destination now answers on two
+addresses. Recording that as `old_ip → new_ip` on the retired machine is a claim
+that its URLs were repointed, which they were not.
+
+So an address is a child of the machine ([`vm_ips`](./schema.md#vm_ips)), and an
+endpoint names the one it answers on ([`endpoints.ip_id`](./schema.md#endpoints)).
+
+**Only the extras are rows.** `vms.new_ip` is still the machine's own address and
+is still an ordinary field on the VM row. `vm_ips` holds what it has adopted
+beyond that, so a single-address VM has no rows, no band and no picker — it looks
+exactly as it always has. Everywhere the app says "which address", **null means
+the primary**: `VmUrl.ipId`, `VmAddress.id`, `endpoints.ip_id`. That is what makes
+this a pure add rather than a migration of every existing row.
+
+**Provenance is stored, not inferred.** "Migrated from" works by matching
+`s.newIp === vm.newIp && s.oldIp !== s.newIp` — a rule that can never see an
+address that moved *without changing*. `vm_ips.source_vm_id` (plus the
+`source_vm_name` snapshot, which survives that VM's purge) is the explicit link
+instead. An adopted address is deliberately **not** added to `migratedSources`:
+its endpoints are live rows on this VM, not a snapshot of a machine that no longer
+serves them, so listing them there would render every one of them twice. Where the
+address came from is shown once, on the address itself.
+
+**Rendering — a band, not a column.** The grid is 1800px of fixed columns, and a
+sixteenth would have to be threaded through every `colSpan` in the tracker. The
+addresses use the full-width band the group headers and the "Migrated from" rows
+already use, and both views render the same `VmAddressList`:
+
+```
+▾ CLIENT-SERVER-2        52.146.10.96  (+1 IP)              3 URLs
+  ADDRESSES  [52.146.10.96 PRIMARY 0 URLs]  [172.174.105.129 MOVED ← DATING APP 3 URLs ✎ ✕]  + Add IP
+```
+
+- The **`+1 IP` chip** in the New IP cell is the collapsed-row signal; the band
+  names them. Both views carry it.
+- Each chip counts the endpoints on that address, which is the question the band
+  exists to answer.
+- The **URL row's address picker** only renders on a machine with more than one
+  address. Elsewhere it is the address as plain text — no control to ignore.
+- A viewer on a single-address VM gets **no band at all**: it would be a label
+  over one value already visible in the row above. A viewer on a multi-address VM
+  gets the chips, read-only.
+
+**"Moved from another VM" is one action, not three.** Adding an address opens a
+dialog with two modes — newly assigned, or moved from another machine. Picking a
+tracked machine in the second mode submits as a *move*
+(`POST /api/vms/:id/ips/move`), which in one call takes the address with its
+provenance, brings that machine's **VM-owned** endpoints across with their ids,
+DNS ticks and notes intact, and sends it to the trash. Doing that by hand is three
+edits in three places, and a tracker with two of the three applied describes a
+migration that never happened — which is the state this was built to fix.
+
+**Both kinds of URL move, by different means.** They name their VM in different
+places, so bringing them across takes two writes:
+
+| | how it moves |
+| --- | --- |
+| VM-owned (`vm_id`) | the row is repointed: `vm_id` → the destination, `ip_id` → the new address |
+| project record (`environment_id`) | the **environment** is repointed (`environments.vm_id`), and the records follow it — plus `ip_id` on each, so they build the right URL |
+
+Repointing the environment is a write into the projects slice, and it is the
+right one: an environment left on a retired machine claims a host that no longer
+exists. Leaving those records behind would strand them under a trashed VM, which
+is worse than not moving them at all.
+
+Two more details worth knowing:
+
+- The address offered by default is the source's **`old_ip`**, not its `new_ip`.
+  A retired machine's `new_ip` is where its workload was *said* to be going, which
+  is precisely the claim being corrected.
+- Trashing the source also resets its `new_ip` to its `old_ip`. The machine did
+  not migrate anywhere, and left alone that stale value draws a phantom "Migrated
+  from" row on whichever VM's address it named.
+
+**Removing an address never removes a URL.** `endpoints.ip_id` is
+`on delete set null`, so its endpoints fall back to the primary — visible and
+correctable rather than silently gone. That is also why deleting an address is
+editor work rather than admin work.
+
+**The projects pages still resolve an address per environment**, from its VM
+(`vmLiveIp`) — which after a move is the destination machine's primary. A
+per-record address override there would be a change to the projects slice; the
+tracker is where `ip_id` is read.
 
 ## The grid's columns are fixed, and rows start open
 
@@ -226,11 +322,13 @@ The tracker is **read-only for viewers**. Three roles, enforced in three places
 | ------------------------------------------------- | ------------ |
 | View the grid and trash, expand/collapse, Export  | `viewer`     |
 | Add / edit a VM or URL, move to trash, restore    | `editor`     |
+| Add / edit / remove an address, move one between VMs | `editor`  |
 | Select VMs, create/rename/delete a group, group or ungroup VMs | `editor`     |
 | Permanent delete, empty trash, replace-all import | `admin`      |
 
 - **RLS** is authoritative — see [`vms`](./schema.md#vms),
-  [`vm_urls`](./schema.md#vm_urls) and [`vm_groups`](./schema.md#vm_groups).
+  [`endpoints`](./schema.md#endpoints), [`vm_ips`](./schema.md#vm_ips) and
+  [`vm_groups`](./schema.md#vm_groups).
 - **`vmService`** (and **`vmGroupService`**) re-checks the role on every mutation and throws
   `ForbiddenError` (`lib/errors.ts`), which the routes turn into a 403 via
   `isForbidden`. This is what produces a readable message instead of a raw
@@ -258,8 +356,12 @@ All routes require an authenticated session and return `{ data }` or
 | `POST /api/vms/:id/restore`         | restore from trash                   | `editor` |
 | `DELETE /api/vms/:id/purge`         | permanent delete (+ archive URLs)    | `admin`  |
 | `POST /api/vms/:id/urls`            | add a **VM-owned** URL row           | `editor` |
-| `PATCH  /api/vms/:id/urls/:urlId`   | update a URL row                     | `editor` |
+| `PATCH  /api/vms/:id/urls/:urlId`   | update a URL row (`ipId` moves it to another of the VM's addresses) | `editor` |
 | `DELETE /api/vms/:id/urls/:urlId`   | delete a URL row — **400** on a project's record (delete it from the project) | `editor` |
+| `POST /api/vms/:id/ips`             | give the VM another address          | `editor` |
+| `PATCH  /api/vms/:id/ips/:ipId`     | edit one of its extra addresses      | `editor` |
+| `DELETE /api/vms/:id/ips/:ipId`     | remove one — its URLs fall back to the primary | `editor` |
+| `POST /api/vms/:id/ips/move`        | take another VM's address: address + its URLs + trash the source, in one call | `editor` |
 | `DELETE /api/vms/trash?type=…`      | empty one trash list (`upview`/`client`) | `admin`  |
 | `POST /api/vms/import`              | replace-all from a backup (groups included) | `admin`  |
 | `GET  /api/vm-groups`               | every group (the grid reads them from the tracker payload instead) | `viewer` |
@@ -277,7 +379,12 @@ All routes require an authenticated session and return `{ data }` or
   (purge / clear-trash / import), so in-progress edits are never clobbered.
 - **Purge-with-archive.** Permanently deleting a VM whose URLs were migrated
   onto a destination copies those URLs into the destination's
-  `migrated_archive` (jsonb) first — mirrored in the "Migrated from" rows.
+  `migrated_archive` (jsonb) first — mirrored in the "Migrated from" rows. The
+  destination is looked up by the explicit `vm_ips.source_vm_id` link **before**
+  the IP-equality guess, because an address that moved without changing leaves the
+  two rows with no matching pair of `new_ip`s for that guess to find. A VM whose
+  URLs already moved with its address has nothing left to archive, which is
+  correct: those rows are live on the destination, not a snapshot.
 - **Migrated-from display** is derived on the client: a VM that is the
   "primary" destination for its IP (`old_ip === new_ip`) shows the active,
   trashed, and archived source VMs that migrated onto it.

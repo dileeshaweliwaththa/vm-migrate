@@ -34,10 +34,14 @@ import {
   useAddUrl,
   useUpdateUrl,
   useDeleteUrl,
+  useAddVmIp,
+  useUpdateVmIp,
+  useDeleteVmIp,
+  useMoveVmIp,
   useImportTracker,
 } from '@/hooks/vms/useVmTracker';
 import type { VmHandlers } from './vm-fields';
-import { VmSelectCheckbox } from './vm-fields';
+import { TrackerCheckbox } from './vm-fields';
 import { VmGroupHeaderRow, VmGroupHeading, VmSelectionBar } from './vm-groups';
 import { VmRow, TRACKER_COLUMNS } from './vm-row';
 import { VmCard } from './vm-card';
@@ -125,6 +129,10 @@ export function VmTracker({ role }: { role: UserRole }) {
   const addUrl = useAddUrl();
   const updateUrl = useUpdateUrl();
   const deleteUrl = useDeleteUrl();
+  const addVmIp = useAddVmIp();
+  const updateVmIp = useUpdateVmIp();
+  const deleteVmIp = useDeleteVmIp();
+  const moveVmIp = useMoveVmIp();
   const importTracker = useImportTracker();
   const createGroup = useCreateVmGroup();
   const updateGroup = useUpdateVmGroup();
@@ -324,6 +332,81 @@ export function VmTracker({ role }: { role: UserRole }) {
           : d
       );
       deleteUrl.mutate({ vmId, urlId });
+    },
+    // ---- addresses --------------------------------------------------------
+    // Adding waits for the response rather than guessing, for the same reason
+    // adding a URL does: the row's id is the server's to mint, and the picker on
+    // every URL row is keyed to it.
+    onAddIp: async (vmId, input) => {
+      try {
+        const ip = await addVmIp.mutateAsync({ vmId, input });
+        setData((d) =>
+          d
+            ? {
+                ...d,
+                vms: d.vms.map((v) =>
+                  v.id === vmId ? { ...v, expanded: true, ips: [...v.ips, ip] } : v
+                ),
+              }
+            : d
+        );
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to add the IP.');
+      }
+    },
+    onUpdateIp: (vmId, ipId, input) => {
+      setData((d) =>
+        d
+          ? {
+              ...d,
+              vms: d.vms.map((v) =>
+                v.id === vmId
+                  ? { ...v, ips: v.ips.map((ip) => (ip.id === ipId ? { ...ip, ...input } : ip)) }
+                  : v
+              ),
+            }
+          : d
+      );
+      updateVmIp.mutate({ vmId, ipId, input }, { onError: revert('Failed to update the IP.') });
+    },
+    // The endpoints that were on it fall back to the primary rather than being
+    // deleted with it (`endpoints.ip_id` is `on delete set null`), so local state
+    // has to clear their `ipId` too or the grid would keep resolving them against
+    // an address that no longer exists.
+    onDeleteIp: (vmId, ipId) => {
+      setData((d) =>
+        d
+          ? {
+              ...d,
+              vms: d.vms.map((v) =>
+                v.id === vmId
+                  ? {
+                      ...v,
+                      ips: v.ips.filter((ip) => ip.id !== ipId),
+                      urls: v.urls.map((u) => (u.ipId === ipId ? { ...u, ipId: null } : u)),
+                    }
+                  : v
+              ),
+            }
+          : d
+      );
+      deleteVmIp.mutate({ vmId, ipId }, { onError: revert('Failed to remove the IP.') });
+    },
+    // Unlike every other edit here, this one is *not* mirrored locally first: it
+    // adds an address, moves another VM's URLs onto it and trashes that VM, and a
+    // local copy of all three is a second implementation of the rule. One refetch
+    // is cheaper than keeping that copy honest.
+    onMoveIp: (vmId, input) => {
+      moveVmIp.mutate(
+        { vmId, input },
+        {
+          onSuccess: () => {
+            toast.success('The address moved, with everything that answered on it.');
+            refetch();
+          },
+          onError: (e) => toast.error(e instanceof Error ? e.message : 'Failed to move the IP.'),
+        }
+      );
     },
   };
 
@@ -604,7 +687,7 @@ export function VmTracker({ role }: { role: UserRole }) {
                         <TableHead className="w-16">
                           {canWrite ? (
                             <div className="flex justify-center">
-                              <VmSelectCheckbox
+                              <TrackerCheckbox
                                 checked={allSelected}
                                 onCheckedChange={(on) => setManySelected(sectionVms, on)}
                                 label={`Select all ${isClient ? 'client' : 'UPVIEW'} VMs`}

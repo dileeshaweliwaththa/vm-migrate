@@ -1,5 +1,15 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
-import type { Vm, VmUrl, VmInput, VmUrlInput, TrackerData, TrashType } from '@/types/common/vm';
+import type {
+  Vm,
+  VmIp,
+  VmUrl,
+  VmInput,
+  VmIpInput,
+  VmIpMoveInput,
+  VmUrlInput,
+  TrackerData,
+  TrashType,
+} from '@/types/common/vm';
 
 // Hook layer: bridges the tracker UI to the API/service layer via TanStack
 // Query. Components call these hooks — never services or repositories.
@@ -82,6 +92,46 @@ export const useDeleteUrl = () =>
   useMutation({
     mutationFn: ({ vmId, urlId }: { vmId: string; urlId: string }) =>
       apiFetch<{ id: string }>(`/api/vms/${vmId}/urls/${urlId}`, { method: 'DELETE' }),
+  });
+
+// ---- addresses -------------------------------------------------------------
+// A VM's extra public addresses. Its own address is a field on the VM and is
+// saved through `useUpdateVm` like any other field.
+
+export const useAddVmIp = () =>
+  useMutation({
+    mutationFn: ({ vmId, input }: { vmId: string; input: VmIpInput }) =>
+      apiFetch<VmIp>(`/api/vms/${vmId}/ips`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+  });
+
+export const useUpdateVmIp = () =>
+  useMutation({
+    mutationFn: ({ vmId, ipId, input }: { vmId: string; ipId: string; input: VmIpInput }) =>
+      apiFetch<VmIp>(`/api/vms/${vmId}/ips/${ipId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(input),
+      }),
+  });
+
+export const useDeleteVmIp = () =>
+  useMutation({
+    mutationFn: ({ vmId, ipId }: { vmId: string; ipId: string }) =>
+      apiFetch<{ id: string }>(`/api/vms/${vmId}/ips/${ipId}`, { method: 'DELETE' }),
+  });
+
+// Takes another VM's address onto this one. Touches three things server-side (the
+// address, that VM's URLs, that VM's trashed flag), so the tracker refetches
+// after it rather than trying to mirror all three locally.
+export const useMoveVmIp = () =>
+  useMutation({
+    mutationFn: ({ vmId, input }: { vmId: string; input: VmIpMoveInput }) =>
+      apiFetch<VmIp>(`/api/vms/${vmId}/ips/move`, {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
   });
 
 export const useImportTracker = () =>

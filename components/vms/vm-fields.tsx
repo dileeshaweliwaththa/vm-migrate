@@ -8,6 +8,9 @@ import { environmentTitle } from '@/lib/endpoints';
 import { cn } from '@/lib/utils';
 import { safeStatus, STATUS_PILL_CLASS, STATUS_TONE_CLASS } from '@/lib/vm-utils';
 import type { Vm, VmUrl } from '@/types/common/vm';
+// Type-only, so this doesn't become a runtime import cycle with a file that
+// imports `TrackerCheckbox` back from here.
+import type { VmAddressHandlers } from './vm-addresses';
 
 // The pieces both tracker views are built from — the field editor, the status
 // pill, and the handler contract. They live here rather than in `vm-row.tsx`
@@ -15,7 +18,10 @@ import type { Vm, VmUrl } from '@/types/common/vm';
 // a different arrangement of one VM, not a different feature. Anything that
 // forked would let the two views disagree about what a VM is.
 
-export interface VmHandlers {
+// The address callbacks are folded in rather than restated: both views render the
+// addresses band, so a contract that listed them twice could disagree with
+// itself. See `VmAddressHandlers` in vm-addresses.tsx.
+export interface VmHandlers extends VmAddressHandlers {
   onToggleExpand: (vm: Vm) => void;
   // Selection for the grouping actions. Both views take it for the same reason
   // they share everything else: a VM ticked in the grid is ticked in the cards.
@@ -89,7 +95,8 @@ export function CellInput({
   );
 }
 
-// The selection tick shared by the grid, the cards and the select-all header.
+// The tracker's tick box — the selection gutter, the select-all header, and the
+// options in the address dialog.
 //
 // `ui/checkbox.tsx` is one of the generated primitives written for Radix 2.x: its
 // checked styling is all `data-checked:*`, a boolean attribute 1.4.3 never emits,
@@ -98,7 +105,7 @@ export function CellInput({
 // groups, so tailwind-merge drops the dead ones. Kept here, in one place, rather
 // than copied into each view: a copy that drifts fails silently. See
 // docs/ui-guidelines.md § Generated primitives target Radix 2.x.
-export function VmSelectCheckbox({
+export function TrackerCheckbox({
   checked,
   onCheckedChange,
   label,

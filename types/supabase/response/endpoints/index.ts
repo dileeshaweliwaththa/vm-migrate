@@ -12,6 +12,10 @@ export interface EndpointRow {
   id: string;
   environment_id: string | null;
   vm_id: string | null;
+  // → `vm_ips.id`: which of the VM's addresses this endpoint answers on. Null is
+  // the VM's primary (`vms.new_ip`) and is what every row meant before a machine
+  // could hold more than one address.
+  ip_id: string | null;
   port: string;
   // The deployed branch, for managed-platform records that have no port.
   branch: string;

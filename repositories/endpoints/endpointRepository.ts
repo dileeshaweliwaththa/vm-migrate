@@ -8,6 +8,9 @@ import type { EndpointRow } from '@/types/supabase/response/endpoints';
 export type EndpointWriteColumns = Partial<{
   environment_id: string | null;
   vm_id: string | null;
+  // Which of the VM's addresses this endpoint answers on. Null = the VM's
+  // primary (`vms.new_ip`), which is what every row meant before `vm_ips`.
+  ip_id: string | null;
   port: string;
   branch: string;
   protocol: string;
@@ -101,6 +104,48 @@ export const updateEndpoint = async (
     .single();
   if (error) throw new Error(error.message);
   return data as EndpointRow;
+};
+
+// Moves every **VM-owned** endpoint of one VM onto another VM and address, in a
+// single statement. This is the reattach half of "the IP moved to that machine":
+// the URLs did not change, the box under them did.
+//
+// Project records are deliberately untouched — they hang off their environment's
+// `vm_id`, so moving them is a change to the project, not to the tracker (see
+// docs/tracker.md § URLs live in one table).
+export const moveEndpointsToVm = async (
+  fromVmId: string,
+  toVmId: string,
+  ipId: string | null
+): Promise<EndpointRow[]> => {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('endpoints')
+    .update({ vm_id: toVmId, ip_id: ipId })
+    .eq('vm_id', fromVmId)
+    .select('*');
+  if (error) throw new Error(error.message);
+  return (data ?? []) as EndpointRow[];
+};
+
+// Points a set of environments' records at one address. The companion to
+// `moveEndpointsToVm`: that one carries the VM-owned rows across, this one
+// catches the project records, whose VM comes from their environment and which
+// therefore move by the environment being repointed rather than by anything on
+// the row changing.
+export const setEndpointsIpForEnvironments = async (
+  environmentIds: string[],
+  ipId: string | null
+): Promise<EndpointRow[]> => {
+  if (environmentIds.length === 0) return [];
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('endpoints')
+    .update({ ip_id: ipId })
+    .in('environment_id', environmentIds)
+    .select('*');
+  if (error) throw new Error(error.message);
+  return (data ?? []) as EndpointRow[];
 };
 
 export const deleteEndpoint = async (id: string): Promise<void> => {
