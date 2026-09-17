@@ -6,6 +6,20 @@ import type { MigratedArchiveEntry } from '@/types/common/vm';
 // Repository layer: pure Supabase data access for the `vms` table. No business
 // rules — just queries returning raw rows to the service layer.
 
+// How every other table embeds a VM when it joins to one — the select that
+// produces `VmSummaryRow`. In one place because five selects across two
+// repositories use it, and a copy that forgets `vm_ips` silently resolves every
+// record to the machine's primary address instead of the one it answers on.
+//
+// **`!vm_id` is required, not decoration.** `vm_ips` has two foreign keys to
+// `vms` — `vm_id` (whose machine this address is on) and `source_vm_id` (which
+// machine it was taken from) — so an unqualified `vm_ips(...)` is ambiguous and
+// PostgREST rejects the whole query with "more than one relationship was found".
+// Naming the column rather than the constraint (`vm_ips_vm_id_fkey`) means a
+// constraint rename can't break it.
+export const VM_SUMMARY_EMBED =
+  'vms(name, old_ip, new_ip, migrated, vm_ips!vm_id(id, address))';
+
 // Columns a create/update may write (DB snake_case). Kept narrow so callers
 // can never touch id/timestamps by accident.
 export type VmWriteColumns = Partial<{

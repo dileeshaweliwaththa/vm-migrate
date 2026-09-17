@@ -48,6 +48,16 @@ export interface EnvironmentPort {
   source: PortSource;
   jenkinsJobUrl: string;
   position: number;
+  // The address on its VM that this record actually answers on, resolved from
+  // `endpoints.ip_id`. Empty means the machine's own address — which is what
+  // every record meant before a VM could hold more than one.
+  //
+  // It exists because an address can outlive the machine it was allocated to: a
+  // box is retired and its public IP is reattached elsewhere, so these records
+  // keep resolving where they always did while sitting on a different host. See
+  // [tracker.md § A VM can hold several addresses]. Read it through
+  // `recordAddress`, never on its own.
+  ipAddress: string;
 }
 
 export interface Environment {
@@ -78,9 +88,13 @@ export interface Environment {
   deployUrl: string;
   vmId: string | null;
   vmName: string | null;
-  // The linked VM's current address (see `vmLiveIp`), or null when no VM is
-  // linked or it has no IP yet. Joined onto the environment because a record's
-  // direct URL is that address plus the record's own port.
+  // The linked VM's own address (see `vmLiveIp`), or null when no VM is linked
+  // or it has no IP yet. Joined onto the environment because a record's direct
+  // URL is an address plus the record's own port.
+  //
+  // It is the **fallback**, not the answer: a machine can answer on more than one
+  // address (see the tracker's `vm_ips`), and a record that names one carries it
+  // in `EnvironmentPort.ipAddress`. Resolve the pair with `recordAddress`.
   vmIp: string | null;
   notes: string;
   position: number;

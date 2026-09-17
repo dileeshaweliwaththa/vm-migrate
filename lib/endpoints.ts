@@ -86,6 +86,37 @@ export const vmLiveIp = (vm: Pick<Vm, 'oldIp' | 'newIp' | 'migrated'>): string =
   return vm.migrated ? newIp || oldIp : oldIp || newIp;
 };
 
+// The address a single record answers on: the one it names, else its VM's own.
+//
+// A machine can hold several public addresses — typically one reattached from a
+// box that was retired without touching its DNS — and the records that came with
+// that address still answer on it. `ipAddress` is empty for every record that
+// sits on the machine's own address, which is all of them until one moves.
+//
+// One helper because three places ask the question (the record's link, the
+// environment header, the docs generator) and three answers would let a link
+// disagree with the address printed above it.
+export const recordAddress = (
+  record: Pick<EnvironmentPort, 'ipAddress'>,
+  vmIp: string | null
+): string | null => record.ipAddress || vmIp;
+
+// Every distinct address an environment's records answer on, for the header that
+// names the machine. Falls back to the VM's own address when it has no records —
+// or when none of them has moved, which is the same answer.
+export const environmentAddresses = (
+  ports: Pick<EnvironmentPort, 'ipAddress'>[],
+  vmIp: string | null
+): string[] => {
+  const addresses = new Set<string>();
+  for (const port of ports) {
+    const address = recordAddress(port, vmIp);
+    if (address) addresses.add(address);
+  }
+  if (addresses.size === 0 && vmIp) addresses.add(vmIp);
+  return [...addresses];
+};
+
 // The record's direct address on its VM — `http://10.0.0.5:3000`. The counterpart
 // to recordUrl: that one is the public, DNS-fronted address, this is the host and
 // port the app is actually bound to, which is what you need while a domain is

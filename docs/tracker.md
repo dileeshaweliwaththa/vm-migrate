@@ -219,10 +219,23 @@ Two more details worth knowing:
 correctable rather than silently gone. That is also why deleting an address is
 editor work rather than admin work.
 
-**The projects pages still resolve an address per environment**, from its VM
-(`vmLiveIp`) — which after a move is the destination machine's primary. A
-per-record address override there would be a change to the projects slice; the
-tracker is where `ip_id` is read.
+**The projects pages resolve it per record too.** A project page shows each
+record's direct address (`ip:port`), and after a move that address is the one that
+came with the record, not the machine's own — so the environment row would
+otherwise print a host those endpoints have never answered on.
+
+`ip_id` therefore travels into the projects slice: every select that embeds a VM
+uses `VM_SUMMARY_EMBED` (`repositories/vms/vmRepository.ts`), which pulls
+`vm_ips(id, address)` along with it, and `rowToPort` resolves each record's
+`ipAddress` from it. `Environment.vmIp` stays the *machine's* address and is the
+fallback; `recordAddress` in [lib/endpoints.ts](../lib/endpoints.ts) is the one
+place the pair is resolved, shared by the record's link, the environment header
+(which lists every address its records use) and the docs generator.
+
+Empty `ipAddress` means the machine's own address — what every record meant before
+this existed — so nothing that predates it changed. The one place still showing
+the machine's address alone is the **project list's hover summary**, which has no
+records loaded and is describing the machine rather than an endpoint.
 
 ## The grid's columns are fixed, and rows start open
 

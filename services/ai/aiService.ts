@@ -8,7 +8,7 @@ import { canEdit } from '@/lib/rbac';
 import { tiptapExtensions } from '@/lib/tiptap/extensions';
 import { interpretGeminiError } from '@/services/ai/errors';
 import type { ApiSingleResponse } from '@/types/common';
-import { environmentTitle, recordLiveUrl, recordUrl } from '@/lib/endpoints';
+import { environmentTitle, recordAddress, recordLiveUrl, recordUrl } from '@/lib/endpoints';
 import type {
   CicdProvider,
   EnvironmentPort,
@@ -90,8 +90,10 @@ const recordLine = (
   if (url) parts.push(`reachable at ${url}`);
 
   // The address on the VM itself, which exists whether or not a domain has been
-  // pointed at the record yet — often the only way in during a migration.
-  const liveUrl = recordLiveUrl(record, vmIp);
+  // pointed at the record yet — often the only way in during a migration. The
+  // record's own address when it names one: a machine can answer on several, and
+  // a made-up host here is worse than no host at all.
+  const liveUrl = recordLiveUrl(record, recordAddress(record, vmIp));
   if (liveUrl) parts.push(`directly reachable on the VM at ${liveUrl}`);
 
   parts.push(SOURCE_LABEL[record.source]);

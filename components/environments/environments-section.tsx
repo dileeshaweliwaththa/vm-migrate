@@ -25,7 +25,12 @@ import type {
 } from '@/types/common/project';
 import { ENVIRONMENT_NAMES, providerHasBranch, providerHasPorts } from '@/types/common/project';
 import type { Protocol } from '@/types/common/vm';
-import { environmentTitle, recordLiveUrl } from '@/lib/endpoints';
+import {
+  environmentAddresses,
+  environmentTitle,
+  recordAddress,
+  recordLiveUrl,
+} from '@/lib/endpoints';
 
 // What a hand-added record is created as. Shared by the Add row's handler and its
 // live-link preview so the preview can't promise a URL the record won't get.
@@ -233,7 +238,10 @@ function LiveUrlCell({
   vmIp: string | null;
   canEdit: boolean;
 }) {
-  const url = recordLiveUrl(port, vmIp);
+  // The record's own address when it names one — a machine can answer on more
+  // than one, and this row may be on an address that arrived with it from a
+  // retired box rather than on the machine's own.
+  const url = recordLiveUrl(port, recordAddress(port, vmIp));
 
   if (!url) {
     const missingPort = !port.port.trim();
@@ -611,6 +619,11 @@ function EnvironmentCard({
   // half is the environment's, and it's the VM chip in the header that says so.
   const showLiveUrl = showPort && Boolean(env.vmIp);
 
+  // Every address this environment's records answer on — normally just the
+  // machine's own, but a record that came with a reattached public IP keeps
+  // answering on that one. Shown in the header so it agrees with the Link column.
+  const addresses = environmentAddresses(env.ports, env.vmIp);
+
   // Name · Domain are always there; Port/Branch is one leading column either way.
   const leadingColumns = (showPort ? 1 : 0) + (showBranch ? 1 : 0) + (showLiveUrl ? 1 : 0) + 2;
   const columnCount = leadingColumns + (showBuildColumns ? 2 : 0) + (showActions ? 1 : 0);
@@ -702,8 +715,13 @@ function EnvironmentCard({
               >
                 <Server className="h-3.5 w-3.5 shrink-0" /> {env.vmName}
                 {/* Where the Link column's addresses come from — shown here once
-                    rather than repeated down the column. */}
-                {env.vmIp ? <span className="text-ink-source">· {env.vmIp}</span> : null}
+                    rather than repeated down the column. Every address its
+                    records answer on, not just the machine's own: after a public
+                    IP is reattached here the two differ, and the header has to
+                    agree with the links underneath it. */}
+                {addresses.length ? (
+                  <span className="text-ink-source">· {addresses.join(' · ')}</span>
+                ) : null}
               </Link>
             </>
           ) : null}

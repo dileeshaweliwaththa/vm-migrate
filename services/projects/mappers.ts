@@ -88,7 +88,22 @@ export const rowToProject = (row: ProjectRow): Project => ({
 // moment the server moves. Re-mounting it here fixes every consumer at once (the
 // row's link, the ▶ Run payload, and the job-list match behind Status / Last
 // build) without a migration, and keeps working if the address changes again.
-export const rowToPort = (row: EndpointRow, jenkinsBase = ''): EnvironmentPort => ({
+// The VM's extra addresses, keyed by id, so each of its records can be resolved
+// to the one it answers on. Empty for a VM with no adopted addresses — and for a
+// select written before `vm_ips` existed — which resolves every record to the
+// machine's own address, exactly as before.
+const vmAddressById = (vm?: VmSummaryRow | null): Map<string, string> =>
+  new Map((vm?.vm_ips ?? []).map((ip) => [ip.id, ip.address]));
+
+// `addressById` comes from the environment's VM. Omitted by the single-record
+// write paths in `environmentService`, which have no VM embed to hand: a record
+// they just created carries no `ip_id`, so the machine's own address is the right
+// answer, and an adopted row picks its address up on the next load.
+export const rowToPort = (
+  row: EndpointRow,
+  jenkinsBase = '',
+  addressById?: Map<string, string>
+): EnvironmentPort => ({
   id: row.id,
   // Non-null for every row that reaches this mapper: it only ever maps a
   // project's own records, which are the rows that carry an environment.
@@ -106,12 +121,16 @@ export const rowToPort = (row: EndpointRow, jenkinsBase = ''): EnvironmentPort =
     : 'manual',
   jenkinsJobUrl: rebaseOnJenkinsServer(row.jenkins_job_url ?? '', jenkinsBase),
   position: row.position,
+  ipAddress: (row.ip_id && addressById?.get(row.ip_id)) || '',
 });
 
 export const rowToEnvironment = (row: EnvironmentRow): Environment => {
   // Derived once per environment, and passed down so a record always resolves
   // against the server root of the environment it belongs to.
   const jenkinsBase = deriveJenkinsBase(row.jenkins_url ?? '');
+  // Resolved once per environment and passed down, so every record answers the
+  // "which address" question from the same lookup.
+  const addressById = vmAddressById(row.vms);
   return {
     id: row.id,
     projectId: row.project_id,
@@ -140,7 +159,7 @@ export const rowToEnvironment = (row: EnvironmentRow): Environment => {
     notes: row.notes,
     position: row.position,
     ports: (row.endpoints ?? [])
-      .map((port) => rowToPort(port, jenkinsBase))
+      .map((port) => rowToPort(port, jenkinsBase, addressById))
       .sort((a, b) => a.position - b.position),
   };
 };

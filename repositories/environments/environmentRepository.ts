@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { VM_SUMMARY_EMBED } from '@/repositories/vms/vmRepository';
 import type { EnvironmentRow } from '@/types/supabase/response/environments';
 
 // Repository layer: pure Supabase data access for `environments`.
@@ -24,7 +25,7 @@ export const findAllEnvironments = async (): Promise<EnvironmentRow[]> => {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from('environments')
-    .select('*, endpoints(*), vms(name, old_ip, new_ip, migrated)')
+    .select(`*, endpoints(*), ${VM_SUMMARY_EMBED}`)
     .order('project_id', { ascending: true })
     .order('position', { ascending: true });
   if (error) throw new Error(error.message);
@@ -85,7 +86,7 @@ export const insertEnvironment = async (
   const { data, error } = await supabase
     .from('environments')
     .insert(values)
-    .select('*, endpoints(*), vms(name, old_ip, new_ip, migrated)')
+    .select(`*, endpoints(*), ${VM_SUMMARY_EMBED}`)
     .single();
   if (error) throw new Error(error.message);
   return data as EnvironmentRow;
@@ -100,7 +101,7 @@ export const updateEnvironment = async (
     .from('environments')
     .update(values)
     .eq('id', id)
-    .select('*, endpoints(*), vms(name, old_ip, new_ip, migrated)')
+    .select(`*, endpoints(*), ${VM_SUMMARY_EMBED}`)
     .single();
   if (error) throw new Error(error.message);
   return data as EnvironmentRow;

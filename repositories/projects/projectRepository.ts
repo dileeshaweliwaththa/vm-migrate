@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { VM_SUMMARY_EMBED } from '@/repositories/vms/vmRepository';
 import type { ProjectRow } from '@/types/supabase/response/projects';
 import type { EnvironmentRow } from '@/types/supabase/response/environments';
 
@@ -23,7 +24,7 @@ export const findAllProjects = async (): Promise<ProjectRow[]> => {
     // row per environment carries both that and the tally
     // (`environments.length`).
     .select(
-      '*, environments(id, name, label, vm_id, vms(name, old_ip, new_ip, migrated)), project_tags(tags(name))'
+      `*, environments(id, name, label, vm_id, ${VM_SUMMARY_EMBED}), project_tags(tags(name))`
     )
     .order('created_at', { ascending: true });
   if (error) throw new Error(error.message);
@@ -45,7 +46,7 @@ export const findProjectEnvironments = async (projectId: string): Promise<Enviro
   const supabase = await createClient();
   const { data, error } = await supabase
     .from('environments')
-    .select('*, endpoints(*), vms(name, old_ip, new_ip, migrated)')
+    .select(`*, endpoints(*), ${VM_SUMMARY_EMBED}`)
     .eq('project_id', projectId)
     .order('position', { ascending: true });
   if (error) throw new Error(error.message);
