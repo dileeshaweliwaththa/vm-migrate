@@ -459,14 +459,14 @@ sync says so rather than failing silently (see phase-2-plan.md §10).
   ports.
 - Untested against a live Jenkins instance in this build — validate on a real
   server before relying on it.
-- **Credentials are per environment, and cannot be shared.**
-  `environment_secrets` is keyed by `environment_id` (primary key), so ten
-  environments on the same Jenkins server mean the same URL, username and token
-  entered ten times — and rotating that token means editing all ten, with no way
-  to list which they are. Tracked in **#80** with a proposed `jenkins_servers`
-  table; the fix also removes `deriveJenkinsBase()`, which only exists because
-  `environments.jenkins_url` means the server root *or* the job URL depending on
-  how it was set.
+- ~~**Credentials are per environment, and cannot be shared.**~~ **Resolved**
+  by `vm_jenkins` / `vm_jenkins_secrets` (#80): the server, its user and its
+  token belong to the machine, so ten environments on one Jenkins are configured
+  once and a token is rotated in one place. What remains is the cleanup — the
+  per-environment columns and `environment_secrets` are still there as a read
+  fallback for an environment with no linked VM, and `deriveJenkinsBase()` still
+  exists because `environments.jenkins_url` means the server root *or* the job
+  URL depending on how it was set. Tracked in **#84**.
 - **A wrong Jenkins URL setting is worked around, not repaired.** Re-mounting keeps
   this app working, but Jenkins itself still emails links and renders absolute URLs
   pointing at the stale host. Fixing Jenkins Location on the server is still worth

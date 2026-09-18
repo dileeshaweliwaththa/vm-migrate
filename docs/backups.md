@@ -172,7 +172,7 @@ Supabase Postgres is which binary produces the SQL.
 | List the databases | `mysql -N -B -e 'SHOW DATABASES'` | `psql -A -t -q -c 'select datname from pg_database …'` |
 | Dump one | `mysqldump --single-transaction --routines --triggers --events` | `pg_dump` |
 | Credential | `MYSQL_PWD` | `PGPASSWORD` |
-| Connect timeout | `--connect-timeout=10` | `PGCONNECT_TIMEOUT=10` |
+| Connect timeout | `--connect-timeout=10` on `mysql`, a no-first-byte kill on `mysqldump` | `PGCONNECT_TIMEOUT=10`, both binaries |
 | Default port | 3306 | 5432 |
 | Repository | `repositories/mysql/mysqlDumpRepository.ts` | `repositories/postgres/pgDumpRepository.ts` |
 | Alpine package | `mysql-client` | `postgresql17-client` |
@@ -184,7 +184,7 @@ runner asked which one it was. That is not a hypothetical tidiness argument —
 client directly, so "back up all databases" on a Postgres target ran `mysql`
 against Postgres.
 
-**Both clients cap the connection phase**, which is what made that bug
+**Both engines cap the connection phase**, which is what made that bug
 disappointing rather than catastrophic. Pointed at a listening port that is not
 its own protocol, the MySQL client does not fail — it *hangs*: MySQL's handshake
 has the server send the first packet while Postgres waits for the client, so both
@@ -193,6 +193,32 @@ waiting when killed at 25s; with `--connect-timeout=10` it exits after 10s with
 *"Lost connection to MySQL server at 'waiting for initial communication
 packet'"*. A hung dump call hangs the HTTP request behind it, which reaches the
 browser as a bodiless gateway error with no message to show.
+
+**But that flag belongs to the `mysql` client alone.** `--connect-timeout` is
+not a `mysqldump` option, and MariaDB's `mariadb-dump` — which is what
+`mysqldump` resolves to in this image — rejects it before connecting to
+anything:
+
+```
+mysqldump: unknown variable 'connect-timeout=10'
+```
+
+Putting it in the arguments *both* binaries share therefore cost this
+deployment a night of MySQL backups: 0/19 databases on 18 Sept 2026, each run
+dead in about 200ms. The shape of that failure is the lesson. Listing the
+databases still worked, because the client it uses does take the flag — so the
+target read **Ready**, the live check showed all 19 databases, the schedule
+fired on time and the batch enumerated every one of them, and only the dumps
+failed. *Anything shared between the listing path and the dump path has to be
+valid for both binaries, and the listing path succeeding says nothing about the
+dump path.*
+
+The dump keeps the same bound by other means: if `mysqldump` has produced **no
+output at all** after ten seconds it is killed, since a dump that has not begun
+by then is waiting on a handshake that is not coming. Those bytes are watched
+through a `Transform` in the pipe rather than by a `data` listener on the
+child's stdout, which would put that stream into flowing mode before the runner
+attaches its own pipe and silently drop the opening chunks of the dump.
 
 ### What each dump contains, and why
 

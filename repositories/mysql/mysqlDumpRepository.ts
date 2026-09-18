@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { Transform } from 'node:stream';
 import type { Readable } from 'node:stream';
 
 // Repository layer: the MySQL client binaries.
@@ -41,7 +42,7 @@ const credentialEnv = (connection: MysqlConnection): NodeJS.ProcessEnv => ({
 
 // Ten seconds to get connected, then give up.
 //
-// Without this the client waits forever, because MySQL's handshake has the
+// Without a bound the client waits forever, because MySQL's handshake has the
 // *server* speak first: pointed at a port that is listening but is not MySQL —
 // a Postgres one, say — the client blocks reading an initial packet that never
 // arrives while the other end blocks waiting for a request. Nothing times out,
@@ -52,11 +53,20 @@ const credentialEnv = (connection: MysqlConnection): NodeJS.ProcessEnv => ({
 // takes.
 const CONNECT_TIMEOUT_SECONDS = 10;
 
+// **Only the two flags both binaries understand.** `--connect-timeout` is *not*
+// one of them: it is an option of the `mysql` client, and MariaDB's
+// `mariadb-dump` — which is what `mysqldump` is in this image — rejects it
+// outright with `unknown variable 'connect-timeout=10'` before it connects to
+// anything. Passing it to both is what broke every dump on this server for a
+// night: listing the databases still worked, so the target read *Ready* and the
+// batch still enumerated 19 databases, and then all 19 died in 200ms each.
+//
+// So the timeout goes on the client that has it (below), and the dump gets the
+// equivalent bound from the no-first-byte timer in `openDumpStream` instead.
 const connectionArgs = (connection: MysqlConnection): string[] => [
   `--host=${connection.host}`,
   `--port=${String(connection.port)}`,
   `--user=${connection.user}`,
-  `--connect-timeout=${String(CONNECT_TIMEOUT_SECONDS)}`,
 ];
 
 // A password can still reach stderr by way of a URL or a config echo, so every
@@ -78,7 +88,14 @@ export const listDatabases = async (
   new Promise((resolve) => {
     const child = spawn(
       'mysql',
-      [...connectionArgs(connection), '-N', '-B', '-e', 'SHOW DATABASES'],
+      [
+        ...connectionArgs(connection),
+        `--connect-timeout=${String(CONNECT_TIMEOUT_SECONDS)}`,
+        '-N',
+        '-B',
+        '-e',
+        'SHOW DATABASES',
+      ],
       { env: credentialEnv(connection) }
     );
 
@@ -158,15 +175,51 @@ export const openDumpStream = (
     err += String(chunk);
   });
 
+  // The dump's own bound on the connection phase, standing in for the
+  // `--connect-timeout` this binary will not accept: a dump that has produced
+  // no output at all by now is still waiting on a handshake that is not coming,
+  // so it is killed rather than left to hang the request behind it. Once the
+  // first byte arrives the dump may take as long as it takes.
+  //
+  // The bytes are counted through a relay rather than by listening on the
+  // child's stdout, because a `data` listener there would put that stream into
+  // flowing mode before the caller attaches its own pipe and the opening chunks
+  // of the dump would be dropped. A Transform sees every chunk on its way past
+  // and preserves backpressure.
+  let timedOut = false;
+  const connectTimer = setTimeout(() => {
+    timedOut = true;
+    child.kill('SIGKILL');
+  }, CONNECT_TIMEOUT_SECONDS * 1000);
+
+  const relay = new Transform({
+    transform(chunk, _encoding, done) {
+      clearTimeout(connectTimer);
+      done(null, chunk);
+    },
+  });
+  child.stdout.pipe(relay);
+
   const completed = new Promise<void>((resolve, reject) => {
-    child.on('error', (error) =>
+    child.on('error', (error) => {
+      clearTimeout(connectTimer);
       reject(
         new Error(
           `Could not run mysqldump (${sanitize(error.message)}). Is mysql-client in the image?`
         )
-      )
-    );
+      );
+    });
     child.on('close', (code) => {
+      clearTimeout(connectTimer);
+      if (timedOut) {
+        reject(
+          new Error(
+            `mysqldump produced nothing within ${String(CONNECT_TIMEOUT_SECONDS)}s — ` +
+              `is ${connection.host}:${String(connection.port)} a MySQL server?`
+          )
+        );
+        return;
+      }
       if (code === 0) {
         resolve();
         return;
@@ -178,8 +231,11 @@ export const openDumpStream = (
   });
 
   return {
-    stream: child.stdout,
+    stream: relay,
     completed,
-    cancel: () => child.kill('SIGKILL'),
+    cancel: () => {
+      clearTimeout(connectTimer);
+      child.kill('SIGKILL');
+    },
   };
 };
