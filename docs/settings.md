@@ -16,18 +16,38 @@ Admin-only end to end (defense-in-depth):
 - **UI** — the Settings nav item and `/admin/settings` page are admin-gated
   (the page redirects non-admins to `/dashboard`).
 
+## Layout
+
+One category at a time: a menu down the left (shadcn `Item`s — `ui/tabs` renders
+empty on Radix 1.4.3, see [ui-guidelines.md](./ui-guidelines.md)), the chosen
+section on the right, stacked on narrow screens. Each section owns its own
+buttons — the AI section its **Save**, GitHub its **Connect / Test / Disconnect** —
+so there is no page-level Save.
+
+The categories are `SETTINGS_SECTIONS` in
+[types/common/settings.ts](../types/common/settings.ts), and the choice is
+mirrored into `?section=` (`/admin/settings?section=github`), validated by the
+page with `isSettingsSection` and falling back to the first. **To add a
+category:** append its key to `SETTINGS_SECTIONS`, then add its entry (title,
+description, icon, render) to `SECTIONS` in `settings-manager.tsx` — a
+`Record<SettingsSection, …>`, so forgetting the second step is a type error.
+
 ## Layers
 
 | Layer      | File                                                        |
 | ---------- | ----------------------------------------------------------- |
 | Routing    | `app/api/settings/route.ts`, `app/(protected)/(app)/admin/settings/page.tsx` |
-| UI         | `components/settings/settings-manager.tsx`                  |
+| UI         | `components/settings/settings-manager.tsx` (page + section menu, AI section), `components/settings/github-settings.tsx` |
 | Hook       | `hooks/settings/useAppSettings.ts`                          |
 | Service    | `services/settings/settingsService.ts`                      |
 | Repository | `repositories/appSettings/appSettingsRepository.ts`         |
 
-> Jenkins is **not** configured here — it is per-environment. See
+> Jenkins is **not** configured here — it is per-VM. See
 > [jenkins-sync.md](./jenkins-sync.md).
+>
+> The page's **GitHub** section is its own slice with its own buttons and its own
+> service-role table (`github_secrets`), not part of `app_settings` — see
+> [github.md](./github.md).
 
 ## Secrets handling
 

@@ -19,11 +19,15 @@ export interface EndpointRow {
   port: string;
   // The deployed branch, for managed-platform records that have no port.
   branch: string;
+  // The source repository (hand-entered; Jenkins records read theirs live).
+  repo_url: string;
   protocol: string;
   // The record's label — surfaced as the projects table's "Name" column.
   description: string;
   // Where it answers. Was `vm_urls.url` on the tracker side.
   domain: string;
+  // The platform-assigned hostname on a managed platform (`*.azurewebsites.net`).
+  default_domain: string;
   source: string;
   jenkins_job_url: string;
   // The tracker's migration checklist.

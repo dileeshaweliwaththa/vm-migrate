@@ -42,3 +42,13 @@ export interface GeminiConfig {
   model: string;
   stylePrompt: string;
 }
+
+// The Settings page's categories, in the order its menu lists them. The one
+// source of truth for what `?section=` may be — add a category here, then give
+// it an entry in the page's section list (components/settings/settings-manager).
+export const SETTINGS_SECTIONS = ['ai', 'github'] as const;
+export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
+export const DEFAULT_SETTINGS_SECTION: SettingsSection = SETTINGS_SECTIONS[0];
+
+export const isSettingsSection = (value: unknown): value is SettingsSection =>
+  typeof value === 'string' && (SETTINGS_SECTIONS as readonly string[]).includes(value);

@@ -64,16 +64,35 @@ export const bareHost = (value: string): string =>
 // The record's reachable URL, or null when it can't be formed (no domain yet, or
 // a non-web protocol). Computed rather than left to the AI to guess — a made-up
 // endpoint in deployment docs is worse than no endpoint.
+//
+// The custom domain wins; a managed-platform record with only its platform
+// hostname (`defaultDomain`) is reachable at that instead — it's a real public
+// address, just not a branded one.
 export const recordUrl = (
-  record: Pick<EnvironmentPort, 'domain' | 'port' | 'protocol'>
+  record: Pick<EnvironmentPort, 'domain' | 'port' | 'protocol'> &
+    Partial<Pick<EnvironmentPort, 'defaultDomain'>>
 ): string | null => {
   const scheme = URL_SCHEME[record.protocol];
-  const host = bareHost(record.domain);
+  const host = bareHost(record.domain) || bareHost(record.defaultDomain ?? '');
   if (!scheme || !host) return null;
 
   const port = record.port.trim();
   if (!port || port === DEFAULT_PORTS[record.protocol]) return `${scheme}://${host}`;
   return `${scheme}://${host}:${port}`;
+};
+
+// A record's domain as something to open in a browser — the Domain column's link.
+// Unlike recordUrl it ignores the record's port: a domain is fronted by its own
+// proxy/platform on the default port, and `admin.example.com:3300` would point at
+// the VM's bound port instead. HTTPS unless the stored value explicitly says
+// `http://`. The scheme is always one of those two literals, never the stored
+// prefix, so a `javascript:` typed into the field lands in the host position —
+// same rule as recordLiveUrl (docs/security.md § Stored HTML and XSS).
+export const domainUrl = (domain: string): string | null => {
+  const host = bareHost(domain);
+  if (!host) return null;
+  const scheme = /^http:\/\//i.test(domain.trim()) ? 'http' : 'https';
+  return `${scheme}://${host}`;
 };
 
 // The address a VM answers on *today*: the new IP once it has been migrated onto

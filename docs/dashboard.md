@@ -34,7 +34,8 @@ later needs client-side refetching or filters.
 
 **Four headline tiles** — Projects, Environments, Deployed records, Builds this
 week. Each carries a sub-line of context (clients, Jenkins/VM wiring, reachable
-URLs, pass/fail split) and the first two link onward to `/projects`.
+URLs — a record with a domain, or on a managed platform with only its platform
+default domain — pass/fail split) and the first two link onward to `/projects`.
 
 **Migration progress** — VMs migrated, DNS updated, URLs tested, each as a
 ratio + bar, computed with the tracker's own `computeStats`

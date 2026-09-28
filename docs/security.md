@@ -20,6 +20,7 @@ credentials that can *trigger deployments*. So the assets, in order of value:
 | Backup DB passwords (MySQL and Postgres alike) + Azure connection strings | `backup_target_secrets` | **nobody** via any client; server code only |
 | Scheduled-backup bearer token | `BACKUP_CRON_SECRET` (env) + Supabase Vault | server code only; pg_cron reads its copy from Vault |
 | Gemini API key | `app_settings.gemini_api_key` | admins (write-only), server code (read) |
+| GitHub access token (read-only metadata) | `github_secrets` | **nobody** via any client; admins write it, server code uses it |
 | Supabase service-role key | server env var | server process only |
 | Ability to trigger a deploy | Jenkins, via the app | every signed-in role |
 | Infrastructure inventory | `vms`, `vm_groups`, `vm_jenkins`, `backup_targets`, `projects`, `environments`, `endpoints` | every signed-in user (read) |
@@ -61,13 +62,14 @@ Verified in this review:
   `public.current_user_role()`. `profiles` has **no self-update policy**, so a
   viewer cannot promote themselves — role changes are admin-only, in Postgres, not
   just in the app.
-- `environment_secrets`, `vm_jenkins_secrets` and `backup_target_secrets` have RLS
+- `environment_secrets`, `vm_jenkins_secrets`, `backup_target_secrets` and
+  `github_secrets` have RLS
   on with **no policies at all**: unreachable by any
   authenticated client, by construction rather than by policy logic.
 
 ### Service-role paths are the load-bearing ones
 
-Ten repositories use the service-role client and therefore **bypass RLS**. For
+Eleven repositories use the service-role client and therefore **bypass RLS**. For
 these the service-layer check is the *only* enforcement:
 
 | Repository | Gate that must hold |
@@ -81,6 +83,7 @@ these the service-layer check is the *only* enforcement:
 | `backupStorageRepository` (the connection string) | `requireAdmin` in `backupStorageService`; `getStorageForWrite` is server-internal |
 | `backupRunRepository` (the writes) | called only by `backupRunner`, reachable via `runBackup` (`admin`, or the token-authenticated cron route). Reads use the request client, so the history is RLS-governed |
 | `vmRepository.deleteAllVmsForImport` | `requireAdmin` in `importTracker`. Service-role because `vms` has **no delete policy** — no session may destroy a VM row (see [tracker.md](./tracker.md#the-archive-is-permanent)) — yet restoring a backup has to clear the table first. It is the only delete of a VM anywhere in the app |
+| `githubSecretRepository` | `isAdmin` to write (`saveGithubToken`, `testGithubConnection`), `canEdit` to use (`listGithubRepos`, `listGithubBranches`), in `githubService`. The token is only ever used to sign a request to api.github.com |
 | `backupCronRepository` | `requireAdmin` in `backupCronService`. Its three RPCs are `security definer` with execute granted to `service_role` only, so they are unreachable even with a stolen session |
 
 Adding a function to any of those without a preceding role check silently
@@ -134,6 +137,8 @@ is the audit — it should return exactly the rows above.
 
   `jenkinsInherited` on the environment payload is a UI affordance only; the
   resolver re-derives the donor server-side, so a forged value grants nothing.
+- The GitHub token is reduced to `configured` + the account login, and is
+  verified against GitHub before it's stored ([github.md](./github.md)).
 - The Gemini key is likewise reduced to `hasGeminiKey`. Provider errors are
   translated by `interpretGeminiError` rather than passed through raw.
 - `SUPABASE_SERVICE_ROLE_KEY` is read inside `createServiceClient()` at request
@@ -188,6 +193,12 @@ back to them is not the response body, but it is not nothing: distinct messages 
 and `extractPorts` returns port-like numbers found in whatever document was
 fetched. See [A1](#a1) for why this is accepted rather than fixed.
 
+**GitHub** reaches outward too, and is not part of that surface either:
+`githubRepository` builds every request on the constant origin
+`https://api.github.com` from validated path segments, and follows pagination
+links only while they stay on it — no user-supplied address is ever fetched, so
+the token has nowhere else to go ([github.md](./github.md#security)).
+
 One more request leaves the estate, and it is not part of that surface:
 `backup_cron_ping()` makes **Postgres** post to the app. The URL comes from the
 `backup_cron_url` Vault secret, which only an operator with SQL access can set —
@@ -226,16 +237,21 @@ attributes (image, iframe, HTML-passthrough), customizes Link's `protocols` /
 `isAllowedUri`, or starts persisting client-supplied HTML. Treat any change to
 [lib/tiptap/extensions.ts](../lib/tiptap/extensions.ts) as a security change.
 
-Elsewhere, user-controlled strings reach `href` (`env.deployUrl`,
-`env.jenkinsUrl`). React 19 neutralizes `javascript:` URLs in `href`/`src` by
+Elsewhere, user-controlled strings reach `href` (`env.jenkinsUrl`). React 19 neutralizes `javascript:` URLs in `href`/`src` by
 replacing them with a throwing URL (verified in the installed `react-dom`), and
 browsers block top-level `data:` navigation, so these are not injection sinks —
 but they are only safe because the framework says so, which is worth knowing if the
 rendering ever moves outside React.
 
 The records table's **Link** column ([jenkins-sync.md § The Link
-column](./jenkins-sync.md#the-link-column)) is the one `href` that does **not**
-depend on that guarantee. `recordLiveUrl` never passes a stored string through: it
+column](./jenkins-sync.md#the-link-column)) and the Domain column's link
+(`domainUrl`, which picks `https`/`http` itself and puts the stored value only in
+the host position) are the repository link in a record's source popover (`repoWebUrl`, always
+`https://` + a validated host) are the `href`s that do **not** depend on that
+guarantee. Repository URLs also have their userinfo stripped
+(`stripRepoCredentials`) both before they're stored and before a Jenkins job's
+clone URL is returned to the browser — a `https://user:token@…` remote would
+otherwise put a Git token in front of every viewer. `recordLiveUrl` never passes a stored string through: it
 picks the scheme from a fixed `Protocol`-keyed table and interpolates the VM's IP
 and the record's port *after* it, so a `javascript:` typed into either field can
 only ever land in the host position of an `http://` URL. Keep it that way — a

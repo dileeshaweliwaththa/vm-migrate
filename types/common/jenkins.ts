@@ -182,3 +182,18 @@ export interface EnvironmentJenkinsInput {
   jenkinsUsername: string;
   jenkinsApiToken?: string;
 }
+
+// Where a Jenkins-linked record builds from, read live from its job's config.xml
+// (see `extractScm`). Not stored: Jenkins is the source of truth for a job's
+// repository and branch, and a copy here would silently go stale the day someone
+// edits the job. Empty strings mean "not found in the config".
+export interface JenkinsRecordSource {
+  // Credentials stripped (`stripRepoCredentials`) before this leaves the server.
+  repoUrl: string;
+  branch: string;
+  // Set when the branch came from a job parameter's default value, so the UI can
+  // say a build may be run against a different one.
+  branchParameter: string;
+  // The Jenkinsfile path, for "Pipeline script from SCM" jobs.
+  scriptPath: string;
+}

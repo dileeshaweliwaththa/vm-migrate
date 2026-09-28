@@ -16,9 +16,22 @@ export const PORTLESS_PROVIDERS: readonly CicdProvider[] = ['aws', 'azure', 'amp
 export const providerHasPorts = (provider: CicdProvider): boolean =>
   !PORTLESS_PROVIDERS.includes(provider);
 
-// The flip side: what a managed-platform record *does* identify itself by. Port
-// and branch are alternatives per provider, never both — one switch, two columns.
+// Only a port-bearing provider runs on a machine of ours, so only those link a VM
+// — a managed platform hosts the deployment itself. Same set as providerHasPorts,
+// named for the question the environment form asks.
+export const providerHasVm = (provider: CicdProvider): boolean => providerHasPorts(provider);
+
+// The flip side: a managed-platform record has no port, so its branch is what
+// identifies the deployment. No longer a table column — every record's branch
+// now sits with its repository in the source popover — but the docs generator
+// still describes a managed record by its branch rather than a missing port.
 export const providerHasBranch = (provider: CicdProvider): boolean =>
+  PORTLESS_PROVIDERS.includes(provider);
+
+// A managed platform gives each deployment an address of its own before any
+// custom domain points at it — its counterpart to a VM record's `ip:port` link.
+// So it's the portless providers that get a Default domain column.
+export const providerHasDefaultDomain = (provider: CicdProvider): boolean =>
   PORTLESS_PROVIDERS.includes(provider);
 
 // Provenance of a port row (mirrors the `port_source` DB enum — same values, same
@@ -35,16 +48,24 @@ export interface EnvironmentPort {
   id: string;
   environmentId: string;
   port: string;
-  // The deployed branch — what identifies a record on a managed platform, where
-  // there is no host port. Empty on port-bearing providers. See
-  // providerHasBranch.
+  // The deployed branch, set with `repoUrl` in the row's source popover — picked
+  // from GitHub when the app has a token, typed otherwise. Any provider.
   branch: string;
+  // The repository this record is built from (credentials stripped). Set for
+  // every record that doesn't link a Jenkins job; one that does
+  // reads its repository and branch live from the job instead — see
+  // `JenkinsRecordSource`. Displayed through `repoWebUrl`/`repoLabel`.
+  repoUrl: string;
   protocol: Protocol;
   // The record's label — a Jenkins job name for jenkins-linked records, or a
   // hand-typed name for manual ones. Surfaced as the "Name" column.
   description: string;
   // The domain/host this record is served on, e.g. `dev.imaui.upview.tech`.
   domain: string;
+  // The platform-assigned hostname on a managed platform — Azure's
+  // `….azurewebsites.net`, Amplify's `….amplifyapp.com`. There, `domain` is the
+  // *custom* domain in front of it. Shown only where providerHasDefaultDomain.
+  defaultDomain: string;
   source: PortSource;
   jenkinsJobUrl: string;
   position: number;
@@ -173,9 +194,11 @@ export type EnvironmentPortInput = Partial<
     EnvironmentPort,
     | 'port'
     | 'branch'
+    | 'repoUrl'
     | 'protocol'
     | 'description'
     | 'domain'
+    | 'defaultDomain'
     | 'position'
     | 'jenkinsJobUrl'
     | 'source'

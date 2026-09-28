@@ -9,6 +9,7 @@ import type {
   EnvironmentJenkinsConfig,
   EnvironmentJenkinsInput,
   JenkinsJobSummary,
+  JenkinsRecordSource,
   JenkinsRunState,
   TriggerBuildResult,
 } from '@/types/common/jenkins';
@@ -269,3 +270,29 @@ export const useLinkJenkinsJob = (projectId: string, envId: string) => {
     },
   });
 };
+
+// How long a record's repository/branch is trusted before a reopen asks Jenkins
+// again. Job SCM settings change rarely, and each read is a config.xml fetch.
+const RECORD_SOURCE_STALE_MS = 5 * 60 * 1_000;
+
+// The repository and branch a Jenkins-linked record's job builds from. Only
+// fetched while `enabled` — the row's popover is open — so a page of records
+// doesn't read every job's config on load.
+export const useJenkinsRecordSource = (
+  projectId: string,
+  envId: string,
+  portId: string,
+  enabled: boolean
+) =>
+  useQuery({
+    queryKey: ['env-jenkins-source', projectId, envId, portId],
+    enabled,
+    retry: false,
+    staleTime: RECORD_SOURCE_STALE_MS,
+    queryFn: async (): Promise<JenkinsRecordSource> => {
+      const res = await fetch(`${base(projectId, envId)}/ports/${portId}/jenkins-source`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error ?? 'Failed to read the job config.');
+      return json.data as JenkinsRecordSource;
+    },
+  });

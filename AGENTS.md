@@ -19,12 +19,14 @@ migrated-URL archiving, and JSON import/export. Data lives in the `vms` and
 is the one URL table, shared with the projects pages). Access is
 gated by the passwordless email sign-in flow shipped in the auth slice.
 
-Three repositories talk to something other than Supabase — the documented
+Four repositories talk to something other than Supabase — the documented
 exceptions to the repository rule:
 
 - `repositories/jenkins/jenkinsRepository.ts` — HTTP to a Jenkins server
 - `repositories/azure/azureBlobRepository.ts` — the Azure Blob SDK
 - `repositories/mysql/mysqlDumpRepository.ts` — spawns `mysqldump` / `mysql`
+- `repositories/github/githubRepository.ts` — HTTP to the GitHub REST API
+  (fixed origin, api.github.com only)
 
 Anything that fetches a **URL** shares the outbound rules in
 [lib/outbound-url.ts](lib/outbound-url.ts).
@@ -61,6 +63,8 @@ Before implementing any feature, request, or fix, read and follow:
   port sync, and how a triggered build is followed to completion.
 - [docs/docker-import.md](docs/docker-import.md) — importing environment records
   from pasted `docker ps` output.
+- [docs/github.md](docs/github.md) — the app's GitHub token (Settings → GitHub)
+  and the repository/branch pickers it powers on every non-Jenkins record.
 - [docs/backups.md](docs/backups.md) — the **Backups** tab: MySQL dumps performed
   by this app and streamed into Azure Blob (nothing on disk), scheduled by
   pg_cron, with the credentials in a service-role-only table.

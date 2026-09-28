@@ -1,5 +1,5 @@
 import type { Protocol } from '@/types/common/vm';
-import type { ExtractedPort } from '@/types/common/jenkins';
+import type { ExtractedPort, JenkinsRecordSource } from '@/types/common/jenkins';
 
 // Best-effort extraction from Jenkins job config (D3). Jenkins jobs don't expose
 // "deployed ports" natively — they live in Dockerfiles / deploy scripts / build
@@ -53,4 +53,102 @@ export const extractPorts = (xml: string): ExtractedPort[] => {
   }
 
   return Array.from(seen.values());
+};
+
+// ── Repository and branch ────────────────────────────────────────────────────
+//
+// Where a job builds from, read out of its config.xml. Unlike ports this *is*
+// structured data in most jobs, just in one of several shapes depending on the
+// job type. Tried in order, first hit wins per field:
+//
+//   1. Git SCM block — freestyle jobs, "Pipeline script from SCM", and the
+//      per-branch jobs inside a multibranch project all carry
+//      `<userRemoteConfigs>…<url>` and `<hudson.plugins.git.BranchSpec><name>`.
+//   2. Multibranch branch property — the branch a multibranch child job is for.
+//   3. Branch sources — `<remote>` (plain Git source) or GitHub's
+//      `<repoOwner>` + `<repository>`.
+//   4. An inline pipeline script — `git url: '…', branch: '…'` or a
+//      `checkout([$class: 'GitSCM', branches: [[name: '…']], …])` step.
+//
+// A branch given as a job parameter (`${BRANCH}`) resolves to that parameter's
+// default value, which is what a plain "Build" runs.
+
+// config.xml is XML, so values arrive entity-encoded (`&amp;` in a URL query).
+const decodeXml = (value: string): string =>
+  value
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, n: string) => String.fromCharCode(Number(n)))
+    .replace(/&amp;/g, '&')
+    .trim();
+
+const firstGroup = (text: string, ...patterns: RegExp[]): string => {
+  for (const pattern of patterns) {
+    const value = pattern.exec(text)?.[1];
+    if (value && decodeXml(value)) return decodeXml(value);
+  }
+  return '';
+};
+
+// `*/main`, `origin/main`, `refs/heads/main` all mean `main`.
+const normaliseBranch = (spec: string): string =>
+  spec
+    .trim()
+    .replace(/^\*\//, '')
+    .replace(/^refs\/heads\//, '')
+    .replace(/^origin\//, '');
+
+export const extractScm = (xml: string): JenkinsRecordSource => {
+  const empty: JenkinsRecordSource = { repoUrl: '', branch: '', branchParameter: '', scriptPath: '' };
+  if (!xml) return empty;
+
+  // The inline pipeline, decoded once — its quotes are entity-encoded in the XML.
+  const script = decodeXml(/<script>([\s\S]*?)<\/script>/.exec(xml)?.[1] ?? '');
+
+  const githubOwner = firstGroup(xml, /<repoOwner>([^<]+)<\/repoOwner>/);
+  const githubRepo = firstGroup(xml, /<repository>([^<]+)<\/repository>/);
+
+  const repoUrl =
+    firstGroup(
+      xml,
+      /<userRemoteConfigs>[\s\S]*?<url>([^<]+)<\/url>/,
+      /<remote>([^<]+)<\/remote>/
+    ) ||
+    (githubOwner && githubRepo ? `https://github.com/${githubOwner}/${githubRepo}` : '') ||
+    firstGroup(script, /\burl\s*:\s*['"]([^'"]+)['"]/, /\bgit\s+['"]([^'"]+)['"]/);
+
+  let branch = normaliseBranch(
+    firstGroup(
+      xml,
+      /<hudson\.plugins\.git\.BranchSpec>\s*<name>([^<]+)<\/name>/,
+      /<org\.jenkinsci\.plugins\.workflow\.multibranch\.BranchJobProperty>[\s\S]*?<name>([^<]+)<\/name>/
+    ) ||
+      firstGroup(
+        script,
+        /\bbranch\s*:\s*['"]([^'"]+)['"]/,
+        /branches\s*:\s*\[\s*\[\s*name\s*:\s*['"]([^'"]+)['"]/
+      )
+  );
+
+  // `${BRANCH}` / `$BRANCH` / `${params.BRANCH}` → the parameter's default.
+  let branchParameter = '';
+  const param = /^\$\{?(?:params\.)?(\w+)\}?$/.exec(branch)?.[1];
+  if (param) {
+    branchParameter = param;
+    const definition = new RegExp(
+      `<name>${param}</name>[\s\S]*?<defaultValue>([^<]*)</defaultValue>`
+    );
+    branch = normaliseBranch(firstGroup(xml, definition));
+  }
+
+  // A wildcard spec (`**`, `*/release-*`) builds whatever matches — a pattern,
+  // not a branch. Shown as written rather than guessed at.
+  return {
+    repoUrl,
+    branch,
+    branchParameter,
+    scriptPath: firstGroup(xml, /<scriptPath>([^<]+)<\/scriptPath>/),
+  };
 };

@@ -34,6 +34,15 @@ Tailwind when a shadcn equivalent exists.
 7. **Override a responsive utility at the same breakpoint it was set.** See
    below — this one silently doesn't work if you get it wrong.
 
+**Check what the CLI wrote.** `npx shadcn@latest add item` (September 2026)
+emitted `import { cn } from "cn"` instead of the configured `@/lib/utils`, and
+installed an unrelated npm package named `cn` to satisfy it. `components.json`
+was correct, so the fault is in the registry item. After any `add`, check the new
+file's `cn` import and `git diff package.json`. Fixing a broken generated import
+is allowed; rule 3 is about feature logic. Also answer **no** when the CLI offers to
+overwrite an existing primitive it depends on (it asked about `separator.tsx`):
+the existing files carry the Radix 1.4.3 notes below.
+
 ## Overriding widths on a primitive (a real trap)
 
 `components/ui/dialog.tsx` sets **`sm:max-w-sm`** on `DialogContent`. Passing an

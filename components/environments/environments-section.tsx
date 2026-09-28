@@ -23,9 +23,15 @@ import type {
   EnvironmentPort,
   ProjectDetail,
 } from '@/types/common/project';
-import { ENVIRONMENT_NAMES, providerHasBranch, providerHasPorts } from '@/types/common/project';
+import {
+  ENVIRONMENT_NAMES,
+  providerHasDefaultDomain,
+  providerHasPorts,
+} from '@/types/common/project';
 import type { Protocol } from '@/types/common/vm';
 import {
+  bareHost,
+  domainUrl,
   environmentAddresses,
   environmentTitle,
   recordAddress,
@@ -77,6 +83,7 @@ import { JenkinsConfigDialog } from '@/components/environments/jenkins-config-di
 import { JenkinsJobsDialog } from '@/components/environments/jenkins-jobs-dialog';
 import { JenkinsHistoryDialog } from '@/components/environments/jenkins-history-dialog';
 import { DockerImportDialog } from '@/components/environments/docker-import-dialog';
+import { RecordSource } from '@/components/environments/record-source';
 
 // The switcher's "show everything" value. Not an environment name, so it can
 // never collide with one.
@@ -289,6 +296,66 @@ function LiveUrlCell({
   );
 }
 
+// A hostname cell — the custom Domain column everywhere, and Default domain on
+// a managed platform. Editable for every record, Jenkins-linked or not (Jenkins
+// knows the job, not where it's published). Once saved it's also a link, so the
+// host is one click away rather than something to copy out of an input — built
+// from the *saved* value, so the link never points at a half-typed host.
+function DomainCell({
+  value,
+  canEdit,
+  placeholder,
+  label,
+  onSave,
+}: {
+  value: string;
+  canEdit: boolean;
+  placeholder: string;
+  // What the open-link button is for, for its accessible name.
+  label: string;
+  onSave: (value: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  const href = domainUrl(value);
+
+  if (!canEdit) {
+    return href ? (
+      <a
+        href={href}
+        target="_blank"
+        rel="noreferrer"
+        title={`Open ${href}`}
+        className="inline-flex items-center gap-1 break-all font-mono text-label-mono text-ink-accent hover:underline"
+      >
+        {bareHost(value)}
+        <ExternalLink className="h-3 w-3 shrink-0" />
+      </a>
+    ) : (
+      <span className="font-mono text-label-mono text-muted-foreground">—</span>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-0.5">
+      <Input
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => draft !== value && onSave(draft)}
+        onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+        placeholder={placeholder}
+        className="h-8"
+      />
+      {href ? (
+        <Button variant="ghost" size="icon-sm" asChild>
+          <a href={href} target="_blank" rel="noreferrer" aria-label={`Open ${label}`} title={`Open ${href}`}>
+            <ExternalLink className="h-3.5 w-3.5 text-ink-accent" />
+          </a>
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
 // A single record row: Port · Name · Link · Domain · Status · Last build (+ Run/Delete).
 // Status and last build come live from Jenkins (matched by job URL); port, name,
 // and domain are editable inline so they can be filled in later.
@@ -305,8 +372,8 @@ function PortRow({
   showActions,
   showBuildColumns,
   showPort,
-  showBranch,
   showLiveUrl,
+  showDefaultDomain,
   job,
 }: {
   projectId: string;
@@ -320,16 +387,14 @@ function PortRow({
   // address for Link.
   showBuildColumns: boolean;
   showPort: boolean;
-  showBranch: boolean;
   showLiveUrl: boolean;
+  showDefaultDomain: boolean;
   job?: JenkinsJobSummary;
 }) {
   const { updatePort, removePort } = useEnvironmentMutations(projectId);
   const trigger = useTriggerJenkinsBuild(projectId, env.id);
   const [portVal, setPortVal] = useState(port.port);
-  const [branchVal, setBranchVal] = useState(port.branch);
   const [descVal, setDescVal] = useState(port.description);
-  const [domainVal, setDomainVal] = useState(port.domain);
   // Set when this row triggers a build; drives the run poll below.
   const [queueUrl, setQueueUrl] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -406,21 +471,6 @@ function PortRow({
     <span className="text-body-sm font-medium">{port.description || '—'}</span>
   );
 
-  // Domain cell: the host this record is served on. Editable for every record,
-  // Jenkins-linked or not — Jenkins knows the job, not where it's published.
-  const domainCell = canEdit ? (
-    <Input
-      value={domainVal}
-      onChange={(e) => setDomainVal(e.target.value)}
-      onBlur={() => domainVal !== port.domain && save({ domain: domainVal })}
-      onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-      placeholder="dev.example.com"
-      className="h-8"
-    />
-  ) : (
-    <span className="font-mono text-label-mono text-muted-foreground">{port.domain || '—'}</span>
-  );
-
   return (
     <TableRow>
       {showPort ? (
@@ -439,25 +489,19 @@ function PortRow({
           )}
         </TableCell>
       ) : null}
-      {/* Takes Port's place on a managed platform: what identifies the record
-          there is the branch that gets deployed. */}
-      {showBranch ? (
-        <TableCell>
-          {canEdit ? (
-            <Input
-              value={branchVal}
-              onChange={(e) => setBranchVal(e.target.value)}
-              onBlur={() => branchVal !== port.branch && save({ branch: branchVal })}
-              onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-              placeholder="main"
-              className="h-8 font-mono text-label-mono md:text-label-mono"
-            />
-          ) : (
-            <span className="font-mono text-label-mono text-ink-target">{port.branch || '—'}</span>
-          )}
-        </TableCell>
-      ) : null}
-      <TableCell>{nameCell}</TableCell>
+      {/* The source icon sits with the name: it answers "what is this record?"
+          (which repository, which branch), the same question the name does. */}
+      <TableCell>
+        <div className="flex items-center gap-1">
+          <div className="min-w-0 flex-1">{nameCell}</div>
+          <RecordSource
+            projectId={projectId}
+            env={env}
+            port={port}
+            canEdit={canEdit}
+          />
+        </div>
+      </TableCell>
       {/* Ahead of Domain: it's the address that works first — the port is live on
           the VM the moment the record exists, while the domain still has to be
           pointed at it. */}
@@ -466,7 +510,28 @@ function PortRow({
           <LiveUrlCell port={port} vmIp={env.vmIp} canEdit={canEdit} />
         </TableCell>
       ) : null}
-      <TableCell>{domainCell}</TableCell>
+      {/* In Link's place on a managed platform: the platform's own hostname is
+          the address that works first, before a custom domain points at it. */}
+      {showDefaultDomain ? (
+        <TableCell>
+          <DomainCell
+            value={port.defaultDomain}
+            canEdit={canEdit}
+            placeholder="app.azurewebsites.net"
+            label="default domain"
+            onSave={(defaultDomain) => save({ defaultDomain })}
+          />
+        </TableCell>
+      ) : null}
+      <TableCell>
+        <DomainCell
+          value={port.domain}
+          canEdit={canEdit}
+          placeholder={showDefaultDomain ? 'app.example.com' : 'dev.example.com'}
+          label="domain"
+          onSave={(domain) => save({ domain })}
+        />
+      </TableCell>
       {showBuildColumns ? (
         <>
           <TableCell>{status}</TableCell>
@@ -554,9 +619,9 @@ function EnvironmentCard({
 }) {
   const { removeEnvironment, addPort, syncFromJenkins } = useEnvironmentMutations(projectId);
   const [port, setPort] = useState('');
-  const [branch, setBranch] = useState('');
   const [description, setDescription] = useState('');
   const [domain, setDomain] = useState('');
+  const [defaultDomain, setDefaultDomain] = useState('');
   const [jenkinsOpen, setJenkinsOpen] = useState(false);
   const [jobsOpen, setJobsOpen] = useState(false);
   const [dockerOpen, setDockerOpen] = useState(false);
@@ -603,15 +668,20 @@ function EnvironmentCard({
   //
   // - Status / Last build are Jenkins concepts, read from a job's colour and its
   //   last build. Nothing else has a job to read them from.
-  // - Port where the provider deploys onto a host port, Branch where it deploys a
-  //   *branch* instead (Amplify/AWS/Azure). Exactly one of the two, never both —
-  //   see providerHasPorts / providerHasBranch.
+  // - Port only where the provider deploys onto a host port (providerHasPorts).
+  //   A managed platform (Amplify/AWS/Azure) has no port column at all. Its
+  //   branch used to take Port's place; it now lives with the repository in each
+  //   row's source popover, picked from GitHub (see RecordSource).
+  // - Default domain only on those managed platforms: the hostname the platform
+  //   assigns (`….azurewebsites.net`) is their counterpart to Link — the address
+  //   that works before a custom domain points at it. Domain is then the custom
+  //   one. Exactly one of Port and Default domain, never both.
   //
-  // All three are column-count inputs, so they're computed once here and passed
+  // All of these are column-count inputs, so they're computed once here and passed
   // down rather than re-derived per row, where header and body could drift apart.
   const showBuildColumns = isJenkins;
   const showPort = providerHasPorts(env.cicdProvider);
-  const showBranch = providerHasBranch(env.cicdProvider);
+  const showDefaultDomain = providerHasDefaultDomain(env.cicdProvider);
 
   // Link needs both halves of `ip:port` to be *possible*: an address on the linked
   // VM, and a provider that deploys onto a host port at all. Without a VM the
@@ -624,18 +694,22 @@ function EnvironmentCard({
   // answering on that one. Shown in the header so it agrees with the Link column.
   const addresses = environmentAddresses(env.ports, env.vmIp);
 
-  // Name · Domain are always there; Port/Branch is one leading column either way.
-  const leadingColumns = (showPort ? 1 : 0) + (showBranch ? 1 : 0) + (showLiveUrl ? 1 : 0) + 2;
+  // Name · Domain are always there; Port and Link on port-bearing providers,
+  // Default domain on managed ones.
+  const leadingColumns =
+    (showPort ? 1 : 0) + (showLiveUrl ? 1 : 0) + (showDefaultDomain ? 1 : 0) + 2;
   const columnCount = leadingColumns + (showBuildColumns ? 2 : 0) + (showActions ? 1 : 0);
 
   // Tailwind only sees literal class names, so the floor is picked rather than
   // computed. Link adds roughly another 12rem of content to whichever shape the
   // provider already had.
+  // Default domain is the same width again as Link, on a table with no build
+  // columns — hence the same floor.
   const tableMinWidth = showBuildColumns
     ? showLiveUrl
       ? 'min-w-[60rem]'
       : 'min-w-[48rem]'
-    : showLiveUrl
+    : showLiveUrl || showDefaultDomain
       ? 'min-w-[44rem]'
       : 'min-w-[32rem]';
 
@@ -646,9 +720,12 @@ function EnvironmentCard({
     });
   };
 
-  // A new record needs its identifying field filled in — the same leading column
-  // the table shows: a port where there are ports, a branch where there aren't.
-  const canAddRecord = showPort ? Boolean(port.trim()) : Boolean(branch.trim());
+  // A new record needs something to identify it by: its port where there are
+  // ports; on a managed platform, a name or either domain. The repository and
+  // branch are set afterwards, from the row's source popover.
+  const canAddRecord = showPort
+    ? Boolean(port.trim())
+    : Boolean(description.trim() || defaultDomain.trim() || domain.trim());
 
   // What the Link column will hold once this row is added, previewed as the port
   // is typed. Built through the same helper as the saved rows, so the preview and
@@ -665,19 +742,19 @@ function EnvironmentCard({
         envId: env.id,
         input: {
           port: showPort ? port : '',
-          branch: showBranch ? branch : '',
           protocol: NEW_RECORD_PROTOCOL,
           description,
           domain,
+          defaultDomain: showDefaultDomain ? defaultDomain : '',
           position: env.ports.length,
         },
       },
       {
         onSuccess: () => {
           setPort('');
-          setBranch('');
           setDescription('');
           setDomain('');
+          setDefaultDomain('');
         },
         onError: (e) => toast.error(e instanceof Error ? e.message : 'Failed to add port.'),
       }
@@ -735,21 +812,6 @@ function EnvironmentCard({
               className="inline-flex items-center gap-1 text-body-sm text-muted-foreground transition-colors hover:text-foreground"
             >
               Jenkins <ExternalLink className="h-3 w-3" />
-            </a>
-          ) : null}
-          {/* Not on a Jenkins environment: its address is the Jenkins wiring and its
-              records' own domains, so the Add/Edit form doesn't ask for a
-              deployed URL. Gating on the provider rather than on the value hides
-              it for environments configured before that too, without touching
-              their stored value. */}
-          {env.deployUrl && !isJenkins ? (
-            <a
-              href={env.deployUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1 text-body-sm text-muted-foreground transition-colors hover:text-foreground"
-            >
-              Live <ExternalLink className="h-3 w-3" />
             </a>
           ) : null}
           {canEdit ? (
@@ -911,14 +973,20 @@ function EnvironmentCard({
           <TableHeader>
             <TableRow>
               {showPort ? <TableHead className="w-24">Port</TableHead> : null}
-              {showBranch ? <TableHead className="w-40">Branch</TableHead> : null}
               <TableHead className="w-[22%]">Name</TableHead>
               {showLiveUrl ? (
                 <TableHead className="w-48" title={`Direct address on ${env.vmName || 'the VM'}`}>
                   Link
                 </TableHead>
               ) : null}
-              <TableHead>Domain</TableHead>
+              {showDefaultDomain ? (
+                <TableHead title="The hostname the platform assigns, e.g. ….azurewebsites.net">
+                  Default domain
+                </TableHead>
+              ) : null}
+              {/* Beside a default domain, this one is the custom domain in front
+                  of it — so the header says which. */}
+              <TableHead>{showDefaultDomain ? 'Custom domain' : 'Domain'}</TableHead>
               {showBuildColumns ? (
                 <>
                   <TableHead className="w-28">Status</TableHead>
@@ -941,8 +1009,8 @@ function EnvironmentCard({
                 showActions={showActions}
                 showBuildColumns={showBuildColumns}
                 showPort={showPort}
-                showBranch={showBranch}
                 showLiveUrl={showLiveUrl}
+                showDefaultDomain={showDefaultDomain}
                 job={p.jenkinsJobUrl ? jobByUrl.get(p.jenkinsJobUrl) : undefined}
               />
             ))}
@@ -970,17 +1038,6 @@ function EnvironmentCard({
                     />
                   </TableCell>
                 ) : null}
-                {showBranch ? (
-                  <TableCell>
-                    <Input
-                      value={branch}
-                      onChange={(e) => setBranch(e.target.value)}
-                      placeholder="main"
-                      className="h-8 font-mono text-label-mono md:text-label-mono"
-                      onKeyDown={(e) => e.key === 'Enter' && handleAddPort()}
-                    />
-                  </TableCell>
-                ) : null}
                 <TableCell>
                   <Input
                     value={description}
@@ -1000,11 +1057,22 @@ function EnvironmentCard({
                     </span>
                   </TableCell>
                 ) : null}
+                {showDefaultDomain ? (
+                  <TableCell>
+                    <Input
+                      value={defaultDomain}
+                      onChange={(e) => setDefaultDomain(e.target.value)}
+                      placeholder="app.azurewebsites.net"
+                      className="h-8"
+                      onKeyDown={(e) => e.key === 'Enter' && handleAddPort()}
+                    />
+                  </TableCell>
+                ) : null}
                 <TableCell>
                   <Input
                     value={domain}
                     onChange={(e) => setDomain(e.target.value)}
-                    placeholder="dev.example.com"
+                    placeholder={showDefaultDomain ? 'app.example.com' : 'dev.example.com'}
                     className="h-8"
                     onKeyDown={(e) => e.key === 'Enter' && handleAddPort()}
                   />

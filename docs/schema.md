@@ -380,7 +380,7 @@ role-based RLS as `projects` (writes = `editor`/`admin`).
 | `cicd_provider` | `text`        | overrides the project default                    |
 | `jenkins_url`   | `text`        | Jenkins job URL (secret token lives in `environment_secrets`) |
 | `jenkins_username` | `text`     | Jenkins Basic-auth username (non-secret)         |
-| `deploy_url`    | `text`        | live/deployed URL. Asked for (and the card's **Live** link shown) only on **non-Jenkins** providers: a Jenkins environment's address comes from its Jenkins wiring and its records' own domains |
+| `deploy_url`    | `text`        | legacy live/deployed URL. **No longer asked for or shown** for any provider — every record's own domain is linked from the Domain column, and a Jenkins environment's address is its Jenkins wiring. Kept (untouched by the form) so existing values aren't lost |
 | `vm_id`         | `uuid`        | FK → `vms.id`, `on delete set null` (optional); its IPs are what the records table's Link column is built from |
 | `notes`         | `text`        | free text                                        |
 | `position`      | `integer`     | display order within the project                 |
@@ -439,10 +439,12 @@ sync, or "Use" in the browse-jobs dialog), or `docker` (imported from a pasted
 | `vm_id`          | `uuid`        | FK → `vms.id`, `on delete cascade`; null on a project record |
 | `ip_id`          | `uuid`        | FK → [`vm_ips.id`](#vm_ips), `on delete set null`; **null = the VM's primary address**, which is what every row meant before a machine could hold more than one |
 | `port`           | `text`        | e.g. `3000` — shown for port-bearing providers |
-| `branch`         | `text`        | e.g. `main` — the deployed branch, shown **instead of** `port` on `aws`/`azure`/`amplify` (`providerHasBranch`) |
+| `branch`         | `text`        | e.g. `main` — the deployed branch, any provider. Set in the row's source popover (picked from GitHub when connected — [github.md](./github.md)); no longer a table column. Unused for a record linking a Jenkins job |
+| `repo_url`       | `text`        | the source repository, e.g. `https://github.com/org/repo` — entered in the row's source popover; credentials in a clone URL are stripped before it's written. Unused for a record linking a Jenkins job, whose repository and branch are read live from the job (`…_endpoint_repo_url.sql`) |
 | `protocol`       | `net_protocol`| HTTP/HTTPS/TCP/UDP/WS/WSS               |
 | `description`    | `text`        | the record's label — surfaced as the projects table's **Name** column |
-| `domain`         | `text`        | where it answers, e.g. `dev.imaui.upview.tech` (was `vm_urls.url`) |
+| `domain`         | `text`        | where it answers, e.g. `dev.imaui.upview.tech` (was `vm_urls.url`). On `aws`/`azure`/`amplify` this is the **custom** domain, shown beside `default_domain` |
+| `default_domain` | `text`        | the platform-assigned hostname on a managed platform, e.g. `app-….azurewebsites.net` — its own column only on `aws`/`azure`/`amplify` (`providerHasDefaultDomain`). `recordUrl` falls back to it when `domain` is blank (`…_endpoint_default_domain.sql`) |
 | `dns`            | `boolean`     | DNS updated? — the tracker's migration checklist |
 | `tested`         | `boolean`     | endpoint tested?                        |
 | `notes`          | `text`        | free text (distinct from `description`, which is the name) |
@@ -453,6 +455,22 @@ sync, or "Use" in the browse-jobs dialog), or `docker` (imported from a pasted
 
 RLS: read = any authenticated user; insert/update/delete = `editor`/`admin` —
 adding or removing a URL row is ordinary editing work in either view.
+
+## `github_secrets`
+
+The app's GitHub access token ([github.md](./github.md)). A **singleton**: `id` is
+a boolean pinned to `true` by a CHECK, so there is one row and the upsert has a
+fixed conflict target. RLS **on with no policies** — unreachable by any
+authenticated client; only `githubSecretRepository` (service role) touches it,
+behind `isAdmin` to write and `canEdit` to use in `githubService`.
+
+| column          | type          | notes |
+| --------------- | ------------- | ----- |
+| `id`            | `boolean`     | primary key, always `true` |
+| `access_token`  | `text`        | the token; `''` = not connected. **Secret** — never returned |
+| `account_login` | `text`        | the GitHub user it authenticates as, captured on verify |
+| `verified_at`   | `timestamptz` | last successful save / Test |
+| `created_at` / `updated_at` | `timestamptz` | `set_updated_at` trigger |
 
 ## `environment_build_runs`
 

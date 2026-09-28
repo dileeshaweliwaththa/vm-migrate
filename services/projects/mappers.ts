@@ -110,9 +110,11 @@ export const rowToPort = (
   environmentId: row.environment_id ?? '',
   port: row.port,
   branch: row.branch ?? '',
+  repoUrl: row.repo_url ?? '',
   protocol: row.protocol as Protocol,
   description: row.description,
   domain: row.domain ?? '',
+  defaultDomain: row.default_domain ?? '',
   // Validate against the enum rather than testing for 'jenkins' alone — an
   // explicit two-way check silently relabelled every `docker` row as `manual`,
   // which hid imported records from any by-source count.

@@ -9,13 +9,14 @@ import { tiptapExtensions } from '@/lib/tiptap/extensions';
 import { interpretGeminiError } from '@/services/ai/errors';
 import type { ApiSingleResponse } from '@/types/common';
 import { environmentTitle, recordAddress, recordLiveUrl, recordUrl } from '@/lib/endpoints';
+import { repoLabel } from '@/lib/repo';
 import type {
   CicdProvider,
   EnvironmentPort,
   PortSource,
   ProjectDetail,
 } from '@/types/common/project';
-import { providerHasBranch } from '@/types/common/project';
+import { providerHasBranch, providerHasDefaultDomain } from '@/types/common/project';
 import type { GeminiStatus } from '@/types/common/ai';
 
 // Service layer: AI documentation generation (Gemini). Reads the key server-side
@@ -83,8 +84,22 @@ const recordLine = (
     parts.push(record.port ? `port ${record.port}` : 'port NOT RECORDED YET');
   }
   parts.push(`protocol ${record.protocol}`);
-  parts.push(record.domain ? `domain ${record.domain}` : 'domain NOT RECORDED YET');
+  if (providerHasDefaultDomain(provider)) {
+    // Two addresses on a managed platform: the one the platform assigned, and
+    // the custom domain (if any) in front of it. Neither is "missing" while the
+    // other exists.
+    if (record.defaultDomain) parts.push(`platform default domain ${record.defaultDomain}`);
+    if (record.domain) parts.push(`custom domain ${record.domain}`);
+    if (!record.defaultDomain && !record.domain) parts.push('domain NOT RECORDED YET');
+  } else {
+    parts.push(record.domain ? `domain ${record.domain}` : 'domain NOT RECORDED YET');
+  }
   if (record.description) parts.push(`name "${record.description}"`);
+  // Hand-entered source only. A Jenkins record's repository lives in its job
+  // config and isn't read here — one config.xml fetch per record per generation
+  // is a lot of Jenkins traffic for a line of prose.
+  if (record.repoUrl) parts.push(`repository ${repoLabel(record.repoUrl)}`);
+  if (record.branch && !providerHasBranch(provider)) parts.push(`branch ${record.branch}`);
 
   const url = recordUrl(record);
   if (url) parts.push(`reachable at ${url}`);

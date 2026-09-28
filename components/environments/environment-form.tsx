@@ -10,6 +10,7 @@ import {
   type Environment,
   type EnvironmentInput,
   type EnvironmentName,
+  providerHasVm,
 } from '@/types/common/project';
 import { useEnvironmentMutations } from '@/hooks/environments/useEnvironments';
 import { Button } from '@/components/ui/button';
@@ -55,17 +56,21 @@ export function EnvironmentForm({
   const [name, setName] = useState<EnvironmentName>(environment?.name ?? 'DEV');
   const [label, setLabel] = useState(environment?.label ?? '');
   const [cicdProvider, setCicdProvider] = useState<CicdProvider>(environment?.cicdProvider ?? 'jenkins');
-  const [deployUrl, setDeployUrl] = useState(environment?.deployUrl ?? '');
   const [notes, setNotes] = useState(environment?.notes ?? '');
   const [vm, setVm] = useState<VmSelection>(
     environment?.vmId ? { mode: 'existing', vmId: environment.vmId } : { mode: 'none' }
   );
 
   const pending = addEnvironment.isPending || updateEnvironment.isPending;
+  const hasVm = providerHasVm(cicdProvider);
 
   const handleSave = () => {
-    const input: EnvironmentInput = { name, label, cicdProvider, deployUrl, notes };
-    if (vm.mode === 'existing') input.vmId = vm.vmId || null;
+    const input: EnvironmentInput = { name, label, cicdProvider, notes };
+    // A provider without a VM section can't keep one linked: switching an
+    // environment to a managed platform unlinks it, rather than leaving a VM
+    // attached that the form no longer shows.
+    if (!hasVm) input.vmId = null;
+    else if (vm.mode === 'existing') input.vmId = vm.vmId || null;
     else if (vm.mode === 'none') input.vmId = null;
     else input.newVm = vm.newVm;
 
@@ -162,19 +167,13 @@ export function EnvironmentForm({
               environment card{environment ? '' : ', once this environment exists'}.
             </p>
           ) : null}
-          {/* Jenkins environments don't carry a hand-typed deployed URL: their
-              address comes from the Jenkins configuration (the server is the
-              VM's, the job is the environment's) and each record has its own
-              domain. A second box for it was one more field to keep in sync with
-              nothing reading it. Every other provider still needs it — that is
-              the only place its live address is recorded. */}
-          {cicdProvider === 'jenkins' ? null : (
-            <div className="space-y-2">
-              <Label htmlFor="e-deploy">Deployed URL</Label>
-              <Input id="e-deploy" value={deployUrl} onChange={(e) => setDeployUrl(e.target.value)} placeholder="https://api.example.com" />
-            </div>
-          )}
-          <VmField value={vm} onChange={setVm} />
+          {/* No deployed URL for any provider: every record carries its own
+              domain (a link in the Domain column), and a Jenkins environment's
+              address is its Jenkins wiring. One environment-wide URL was a
+              second, drifting copy of what the records already say. */}
+          {/* Managed platforms (AWS/Azure/Amplify) host the deployment
+              themselves, so there's no machine of ours to link. */}
+          {hasVm ? <VmField value={vm} onChange={setVm} /> : null}
           <div className="space-y-2">
             <Label htmlFor="e-notes">Notes</Label>
             <Textarea id="e-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />

@@ -13,6 +13,7 @@ import {
   type EndpointWriteColumns,
 } from '@/repositories/endpoints/endpointRepository';
 import { bareHost } from '@/lib/endpoints';
+import { stripRepoCredentials } from '@/lib/repo';
 import { createVm } from '@/services/vms/vmService';
 import { rowToEnvironment, rowToPort } from '@/services/projects/mappers';
 import type {
@@ -90,11 +91,15 @@ const portInputToColumns = (input: EnvironmentPortInput): EndpointWriteColumns =
   // Branch names can't contain whitespace, so a trailing space is always a typo
   // (or a paste artefact) rather than part of the name.
   if (input.branch !== undefined) cols.branch = input.branch.trim();
+  // Credentials pasted along with a clone URL are dropped before they're stored —
+  // this column is readable by every signed-in user.
+  if (input.repoUrl !== undefined) cols.repo_url = stripRepoCredentials(input.repoUrl);
   if (input.protocol !== undefined) cols.protocol = input.protocol;
   if (input.description !== undefined) cols.description = input.description;
   // Domains are pasted as often as typed — trim so a stray space doesn't become
   // part of the host.
   if (input.domain !== undefined) cols.domain = input.domain.trim();
+  if (input.defaultDomain !== undefined) cols.default_domain = input.defaultDomain.trim();
   if (input.jenkinsJobUrl !== undefined) cols.jenkins_job_url = input.jenkinsJobUrl;
   if (input.position !== undefined) cols.position = input.position;
   return cols;

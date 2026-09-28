@@ -13,9 +13,11 @@ export type EndpointWriteColumns = Partial<{
   ip_id: string | null;
   port: string;
   branch: string;
+  repo_url: string;
   protocol: string;
   description: string;
   domain: string;
+  default_domain: string;
   source: string;
   jenkins_job_url: string;
   dns: boolean;

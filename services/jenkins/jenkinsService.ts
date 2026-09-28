@@ -1,6 +1,6 @@
 import { getCurrentActor, getCurrentRole, type CurrentActor } from '@/services/auth/authService';
 import { getProject } from '@/services/projects/projectService';
-import { extractPorts } from '@/services/jenkins/extraction';
+import { extractPorts, extractScm } from '@/services/jenkins/extraction';
 import {
   fetchBuild,
   fetchJobConfigXml,
@@ -39,6 +39,7 @@ import {
   rebaseOnJenkinsServer,
 } from '@/lib/jenkins-url';
 import { canEdit, canRunBuild } from '@/lib/rbac';
+import { stripRepoCredentials } from '@/lib/repo';
 import type { ApiSingleResponse } from '@/types/common';
 import type {
   EnvironmentBuildRun,
@@ -49,6 +50,7 @@ import type {
   JenkinsBuildStatus,
   JenkinsJobSummary,
   JenkinsRawJob,
+  JenkinsRecordSource,
   JenkinsRunState,
   TriggerBuildResult,
 } from '@/types/common/jenkins';
@@ -433,6 +435,59 @@ export const syncEnvironmentPorts = async (
     };
   } catch (error) {
     return { success: false, message: asMsg(error, 'Jenkins sync failed.'), data: null };
+  }
+};
+
+// The repository and branch a Jenkins-linked record builds from, read live from
+// that record's own job config (any signed-in role — the same read-only job
+// information the Status column already shows viewers).
+//
+// Per *record*, not per environment: each row links its own job, and two jobs on
+// one environment routinely build two repositories. Server-level resolution, for
+// the same reason — the record's job is what's read, not the environment's.
+export const getJenkinsRecordSource = async (
+  projectId: string,
+  envId: string,
+  portId: string
+): Promise<ApiSingleResponse<JenkinsRecordSource>> => {
+  const role = await getCurrentRole();
+  if (!canRunBuild(role)) return { success: false, message: SIGN_IN_REQUIRED, data: null };
+
+  try {
+    const resolved = await resolveEnvJenkinsServer(projectId, envId);
+    if (!resolved.ok) return { success: false, message: resolved.message, data: null };
+    const { env, auth, base } = resolved.value;
+
+    // Scoped to this environment's own records, so a portId from elsewhere can't
+    // be used to read another project's job through this route.
+    const port = env.ports.find((p) => p.id === portId);
+    if (!port) return { success: false, message: 'Record not found.', data: null };
+    if (!port.jenkinsJobUrl) {
+      return { success: false, message: 'This record isn’t linked to a Jenkins job.', data: null };
+    }
+
+    // Stored URLs are client-influenced, so the same guard as a build trigger:
+    // re-mounted on this environment's server and refused if it isn't on it.
+    const target = rebaseOnJenkinsServer(port.jenkinsJobUrl, base);
+    if (!isSameJenkinsServer(target, base)) {
+      return { success: false, message: 'That job URL doesn’t belong to this Jenkins server.', data: null };
+    }
+
+    const result = await fetchJobConfigXml(auth, target);
+    if (!result.ok || result.xml === null) {
+      return {
+        success: false,
+        message: configErrorMessage(result.status, result.error, auth.username),
+        data: null,
+      };
+    }
+
+    const scm = extractScm(result.xml);
+    // A job that clones with a token in its URL must not hand that token to
+    // every viewer who opens the popover.
+    return { success: true, message: 'OK', data: { ...scm, repoUrl: stripRepoCredentials(scm.repoUrl) } };
+  } catch (error) {
+    return { success: false, message: asMsg(error, 'Failed to read the job config.'), data: null };
   }
 };
 

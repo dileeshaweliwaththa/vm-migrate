@@ -281,24 +281,35 @@ provider, so the columns follow the provider:
 | --------------------- | ---------------------------------------------------- | ------------- |
 | `jenkins`             | Port · Name · *Link* · Domain · Status · Last build  | yes           |
 | `other` / `none`      | Port · Name · *Link* · Domain                        | yes           |
-| `aws` / `azure` / `amplify` | **Branch** · Name · Domain                     | no            |
+| `aws` / `azure` / `amplify` | Name · **Default domain** · Custom domain    | no            |
 
 *Link* is conditional on top of the provider — see
 [The Link column](#the-link-column) below.
 
-**Port and Branch are alternatives, never both.** A managed platform doesn't
-deploy a port on a host — an Amplify deployment is a *branch*, AWS/Azure ones are
-services behind their own endpoints — so the leading column there is the branch
-that gets deployed (`endpoints.branch`), and `docker ps`, which is nothing
-but host-port mappings, has nothing to import into it. `other`/`none` keep ports:
+**No Port on a managed platform.** It doesn't deploy a port on a host — an
+Amplify deployment is a *branch*, AWS/Azure ones are services behind their own
+endpoints — and `docker ps`, which is nothing but host-port mappings, has nothing
+to import into it. The branch that gets deployed used to be the leading column
+there; it now lives with the repository in every row's source popover, picked
+from GitHub ([github.md](./github.md)), so all providers show it the same way. `other`/`none` keep ports:
 those are the hand-tracked, VM-hosted records the docker import was built for.
 
+**Default domain takes Link's place on a managed platform.** Every AWS / Azure /
+Amplify deployment gets a hostname from the platform before any DNS points at it
+(`matrimony-fe-….azurewebsites.net`, `main.d1abc.amplifyapp.com`) — the address
+that works first, which is exactly what `ip:port` is for a VM record. It's stored
+in `endpoints.default_domain` and shown, with an open-link button, as its own
+column; the **Domain** column beside it is then labelled **Custom domain**. Both
+are one `DomainCell`, linked through `domainUrl`. A managed record with only a
+default domain still counts as reachable: `recordUrl` falls back to it when the
+custom domain is blank.
+
 The set lives in one place — `PORTLESS_PROVIDERS`, with `providerHasPorts` /
-`providerHasBranch`, in [`types/common/project.ts`](../types/common/project.ts)
+`providerHasBranch` / `providerHasDefaultDomain`, in [`types/common/project.ts`](../types/common/project.ts)
 beside `CICD_PROVIDERS` — so no component re-lists provider names (AGENTS.md
 §types). Both the record rows and the Add row follow it, including what makes
-**Add** clickable: the leading column is the record's identity, so it's the port
-where there are ports and the branch where there aren't.
+**Add** clickable: the port where there are ports, and a name or either domain
+where there aren't (the source is set afterwards, from the popover).
 
 The AI docs generator reads the same rule, so a generated doc describes a
 managed-platform record by its branch instead of reporting a `port NOT RECORDED
@@ -341,9 +352,52 @@ The two halves resolve like this, both in
   domain, so `https://` on a bare IP is only ever a certificate error. This is why
   the visible label is the bare `ip:port` — the scheme carries no information.
 
-`recordUrl` (the public, DNS-fronted address behind the Domain column) is
-unchanged and still the one the dashboard's "reachable" count uses. The generated
-docs now carry both, labelled apart.
+`recordUrl` (the public, DNS-fronted address) is unchanged and still the one the
+dashboard's "reachable" count uses. The generated docs now carry both, labelled
+apart.
+
+The Domain column's own link is `domainUrl(domain)` — `https://host` (or `http://`
+when the stored value explicitly says so), **without** the record's port: a domain
+is fronted by its proxy/platform on the default port. Like `recordLiveUrl` it
+picks the scheme itself, so the stored string never lands in the scheme position.
+Editors get an open-link button beside the input (built from the *saved* value);
+viewers get the domain as a link.
+
+## Repository and branch
+
+Every record row has a **source** icon (a branch glyph beside its name) that opens
+a popover with the repository and branch it's built from. One display, two ways
+of filling it in:
+
+- **A record linking a Jenkins job** reads both live, when the popover opens,
+  from that record's own job `config.xml` —
+  `GET …/environments/:envId/ports/:portId/jenkins-source` →
+  `getJenkinsRecordSource` → `extractScm`
+  ([services/jenkins/extraction.ts](../services/jenkins/extraction.ts)). Nothing
+  is stored, so nothing drifts when the job is edited. Open to every signed-in
+  role, like the Status column; cached client-side for five minutes.
+- **Every other record** (manual, docker, any managed platform) has them chosen
+  in the popover by an editor and stored on the row (`endpoints.repo_url`,
+  `endpoints.branch`) — from searchable GitHub dropdowns when the app has a
+  GitHub token, typed when it doesn't. See [github.md](./github.md).
+
+`extractScm` tries, first hit per field: the Git SCM block
+(`<userRemoteConfigs>…<url>` + `<hudson.plugins.git.BranchSpec>` — freestyle,
+"Pipeline script from SCM", and multibranch child jobs), the multibranch
+`BranchJobProperty`, branch sources (`<remote>`, or GitHub's `<repoOwner>` +
+`<repository>`), then an inline pipeline's `git url:/branch:` or
+`checkout([... branches: [[name: ...]]])`. `*/main`, `origin/main` and
+`refs/heads/main` all normalise to `main`; a branch given as `${PARAM}` resolves
+to that parameter's default value and the popover says so. It reads the job the
+record links, resolved at **server** level and guarded like a build trigger
+(re-mounted on the environment's server, refused if it isn't on it).
+
+**Credentials:** a job that clones `https://user:token@github.com/…` would hand
+that token to every viewer. `stripRepoCredentials`
+([lib/repo.ts](../lib/repo.ts)) drops the userinfo before the value leaves the
+server, and before a hand-entered URL is stored. The link itself is built by
+`repoWebUrl` — always `https://` + a validated host, accepting HTTPS, `ssh://`,
+SCP-style `git@host:org/repo` and bare `org/repo` (taken as GitHub).
 
 ## Build history
 
