@@ -786,8 +786,10 @@ function EnvironmentCard({
               {/* `w-px` because ui/separator.tsx can't supply it on Radix 1.4.3 —
                   see docs/ui-guidelines.md § Known casualties. */}
               <Separator orientation="vertical" className="mx-1 h-4 w-px" />
+              {/* To the machine's own page: its other endpoints, what else runs
+                  on it, and whether it answers. */}
               <Link
-                href="/tracker"
+                href={env.vmId ? `/vms/${env.vmId}` : '/vms'}
                 className="inline-flex items-center gap-1.5 font-mono text-label-mono text-muted-foreground transition-colors hover:text-foreground"
               >
                 <Server className="h-3.5 w-3.5 shrink-0" /> {env.vmName}

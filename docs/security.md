@@ -199,6 +199,24 @@ fetched. See [A1](#a1) for why this is accepted rather than fixed.
 links only while they stay on it — no user-supplied address is ever fetched, so
 the token has nowhere else to go ([github.md](./github.md#security)).
 
+**Endpoint health probes** ([vms.md § Endpoint health](./vms.md#endpoint-health))
+are the second fetch of addresses users typed in. The VM page's health check
+probes each stored endpoint over HTTP (`recordLiveUrl`'s `http://ip:port`, and
+`domainUrl`'s `https://host`) or with a TCP connect. The targets come from
+`endpoints` and `vm_ips`, which only editors can write. The probe
+(`endpointProbeRepository`):
+
+- **refuses** denied targets (`isDeniedOutboundTarget`: link-local and metadata);
+- **sends no credentials** (a fixed `User-Agent` only);
+- uses **`redirect: 'manual'`**, so a 3xx is reported rather than followed;
+  verified that a 302 to `169.254.169.254` comes back as `302` with no second
+  request;
+- **never reads the body**, so only a status code, a timing and a short reason
+  reach the caller;
+- is **bounded** to 4 s per probe, 6 at a time, and 40 targets per check.
+
+Anyone signed in can trigger it; see [A9](#a9) for why that's accepted.
+
 One more request leaves the estate, and it is not part of that surface:
 `backup_cron_ping()` makes **Postgres** post to the app. The URL comes from the
 `backup_cron_url` Vault secret, which only an operator with SQL access can set —
@@ -243,20 +261,28 @@ browsers block top-level `data:` navigation, so these are not injection sinks �
 but they are only safe because the framework says so, which is worth knowing if the
 rendering ever moves outside React.
 
-The records table's **Link** column ([jenkins-sync.md § The Link
-column](./jenkins-sync.md#the-link-column)) and the Domain column's link
-(`domainUrl`, which picks `https`/`http` itself and puts the stored value only in
-the host position) are the repository link in a record's source popover (`repoWebUrl`, always
-`https://` + a validated host) are the `href`s that do **not** depend on that
-guarantee. Repository URLs also have their userinfo stripped
-(`stripRepoCredentials`) both before they're stored and before a Jenkins job's
-clone URL is returned to the browser — a `https://user:token@…` remote would
-otherwise put a Git token in front of every viewer. `recordLiveUrl` never passes a stored string through: it
-picks the scheme from a fixed `Protocol`-keyed table and interpolates the VM's IP
-and the record's port *after* it, so a `javascript:` typed into either field can
-only ever land in the host position of an `http://` URL. Keep it that way — a
-future version that returns a stored value verbatim when it "already looks like a
-URL" would put this back under A2.
+A few `href`s do **not** depend on that guarantee, because they're built so a
+stored string can never supply the scheme:
+
+- the records table's **Link** column
+  ([jenkins-sync.md § The Link column](./jenkins-sync.md#the-link-column)), also
+  used for the direct links on the VM page;
+- the **Domain** columns' links (`domainUrl`, which picks `https`/`http` itself
+  and puts the stored value only in the host position);
+- the repository link in a record's source popover (`repoWebUrl`, always
+  `https://` plus a validated host).
+
+`recordLiveUrl` never passes a stored string through. It picks the scheme from a
+fixed `Protocol`-keyed table and adds the VM's IP and the record's port *after*
+it, so a `javascript:` typed into either field can only ever land in the host
+position of an `http://` URL. Keep it that way: a future version that returns a
+stored value unchanged when it "already looks like a URL" would put this back
+under A2.
+
+Repository URLs also have their userinfo stripped (`stripRepoCredentials`),
+both before they're stored and before a Jenkins job's clone URL is returned to
+the browser. Otherwise a `https://user:token@…` remote would put a Git token in
+front of every viewer.
 
 ## Browser hardening
 
@@ -384,6 +410,26 @@ proves the pattern; the destructive actions are the ones that would most benefit
 from it. VM deletion is no longer on that list — the app cannot do it at all (see
 [tracker.md § The archive is permanent](./tracker.md#the-archive-is-permanent)),
 which removes the risk rather than logging it.
+
+<a id="a9"></a>
+**A9 — Any signed-in user can make the server probe stored endpoints.** The VM
+page's health check ([vms.md](./vms.md#endpoint-health)) is open to viewers,
+because monitoring is a read. What it probes is chosen by whoever *stored* the
+endpoint, and that's an editor, so an editor can point an endpoint at an internal
+host and learn from the page whether it answers. That's the same class as [A1](#a1),
+reached one step later.
+
+Compensating controls: the probe never sends credentials and never follows
+redirects; no response body reaches the caller; link-local and metadata targets
+are refused; and each check is bounded (40 targets, 4 s each, 6 at a time).
+
+**Not covered:** the denylist checks the host *as written*, so a domain that
+*resolves* to a link-local address is still probed, just as with Jenkins. The
+answer that comes back is only up/down, a status code and a timing.
+
+A stricter version would resolve the name and check the resulting IP before
+connecting. If viewers ever shouldn't be able to trigger outbound traffic at
+all, gate `canCheckHealth` to editors.
 
 ## Checklist for new code
 

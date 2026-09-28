@@ -12,7 +12,8 @@ import {
   deleteVmGroup,
 } from '@/repositories/vmGroups/vmGroupRepository';
 import { rowToVmGroup } from '@/services/vms/vmGroupService';
-import { listVmJenkinsConfigs } from '@/services/jenkins/vmJenkinsService';
+import { getVmJenkinsConfig, listVmJenkinsConfigs } from '@/services/jenkins/vmJenkinsService';
+import { listBackupTargets } from '@/services/backups/backupService';
 import {
   findEndpointById,
   findEndpointsForVms,
@@ -24,7 +25,10 @@ import {
   countEndpointsForVm,
   type EndpointWriteColumns,
 } from '@/repositories/endpoints/endpointRepository';
-import { setEnvironmentsVm } from '@/repositories/environments/environmentRepository';
+import {
+  findEnvironmentsWithProjectForVm,
+  setEnvironmentsVm,
+} from '@/repositories/environments/environmentRepository';
 import {
   findVmIpsForVms,
   insertVmIp,
@@ -35,6 +39,7 @@ import {
 } from '@/repositories/vmIps/vmIpRepository';
 import { getCurrentRole } from '@/services/auth/authService';
 import { canEdit, isAdmin } from '@/lib/rbac';
+import { bareHost } from '@/lib/endpoints';
 import { ForbiddenError } from '@/lib/errors';
 import type { VmRow } from '@/types/supabase/response/vms';
 import type { EndpointRow } from '@/types/supabase/response/endpoints';
@@ -51,6 +56,7 @@ import type {
   VmUrlInput,
   TrackerData,
   Protocol,
+  VmDetail,
 } from '@/types/common/vm';
 
 // Service layer: business logic and orchestration for the VM tracker. Calls
@@ -235,6 +241,60 @@ export const getTrackerData = async (): Promise<TrackerData> => {
     vms: vms.filter((vm) => !vm.deleted),
     deleted: vms.filter((vm) => vm.deleted),
     groups: groupRows.map(rowToVmGroup),
+  };
+};
+
+// One machine and everything tied to it, for the VM page (docs/vms.md). Null
+// for an unknown id *and* for a trashed VM: the trash is the tracker's, and a
+// machine page for something that isn't in service would read as live.
+//
+// Readable by every signed-in role, like the tracker — every table read here is
+// select-open under RLS, and Jenkins is the secret-free config.
+export const getVmDetail = async (id: string): Promise<VmDetail | null> => {
+  const row = await findVmById(id);
+  if (!row || row.deleted) return null;
+
+  const [endpointRows, ipRows, jenkins, groupRows, environmentRows, backupTargets] =
+    await Promise.all([
+      findEndpointsForVms([id]),
+      findVmIpsForVms([id]),
+      getVmJenkinsConfig(id),
+      findAllVmGroups(),
+      findEnvironmentsWithProjectForVm(id),
+      listBackupTargets(),
+    ]);
+
+  const urls = groupUrlsByVm(endpointRows).get(id) ?? [];
+  const vm = rowToVm(row, urls, jenkins, groupIpsByVm(ipRows).get(id) ?? []);
+
+  // Every address the machine answers on — its old and new IP and any adopted
+  // ones — compared bare and case-folded, the way a typed host would be.
+  const addresses = new Set(
+    [vm.oldIp, vm.newIp, ...vm.ips.map((ip) => ip.address)]
+      .map((a) => bareHost(a).toLowerCase())
+      .filter(Boolean)
+  );
+
+  const groupRow = vm.groupId ? groupRows.find((g) => g.id === vm.groupId) : undefined;
+
+  return {
+    vm,
+    group: groupRow ? rowToVmGroup(groupRow) : null,
+    environments: environmentRows.map((env) => ({
+      id: env.id,
+      name: env.name,
+      label: env.label ?? '',
+      cicdProvider: env.cicd_provider,
+      projectId: env.project_id,
+      projectName: env.projects?.name ?? '',
+      projectArchived: env.projects?.archived ?? false,
+      recordCount: urls.filter((u) => u.environmentId === env.id).length,
+    })),
+    // Matched by host: `backup_targets` has no `vm_id` (a target is a database
+    // server, which may not be a machine we track).
+    backupTargets: backupTargets
+      .filter((t) => addresses.has(bareHost(t.dbHost).toLowerCase()))
+      .map((t) => ({ id: t.id, name: t.name, engine: t.engine, dbHost: t.dbHost, dbPort: t.dbPort })),
   };
 };
 

@@ -1,15 +1,20 @@
-# Phase 3 — Dashboard, theming & hardening
+# Phase 2 (continued) — Dashboard, theming & hardening
+
+> **Renamed from `phase-3-plan.md`.** This work shipped on the `phase-2` branch
+> and is part of **v2.0.0**; it was planned under a "Phase 3" name before the
+> `phase-3` branch existed, and its issues (#66–#84) were relabelled `phase-2`.
+> The real Phase 3 plan is [phase-3-plan.md](./phase-3-plan.md).
 
 Phase 2 delivered the deployment platform: projects, environments, records,
 per-project docs with AI generation, Jenkins config/sync/build-and-follow, and
-RBAC. Phase 3 is about making it **legible and solid** rather than adding a new
-domain:
+RBAC. This second stage of Phase 2 is about making it **legible and solid**
+rather than adding a new domain:
 
 1. a real **dashboard** that summarises the platform instead of placeholder stats,
 2. a **professional theme** — the app was near-white throughout,
 3. **security & consistency hardening** found by auditing the auth flows.
 
-> Like [phase-2-plan.md](./phase-2-plan.md), this plan is binding on Phase 3
+> Like [phase-2-plan.md](./phase-2-plan.md), this plan is binding on this
 > work: follow [../AGENTS.md](../AGENTS.md) and the docs it points to.
 
 ---
@@ -115,8 +120,8 @@ sign-in.
 
 ## 5. Milestones & GitHub issues
 
-Labels: `phase-3`, `epic:dashboard`, `epic:theme`, `epic:hardening`, `ui`,
-`backend`, `security`, `migration`, `tech-debt`.
+Labels: `phase-2` (originally `phase-3`), `epic:dashboard`, `epic:theme`,
+`epic:hardening`, `ui`, `backend`, `security`, `migration`, `tech-debt`.
 
 ### Milestone M4 — Dashboard & theme
 
@@ -152,7 +157,7 @@ Labels: `phase-3`, `epic:dashboard`, `epic:theme`, `epic:hardening`, `ui`,
 ## 6. Rules & conventions
 
 Unchanged from [phase-2-plan.md § 9](./phase-2-plan.md#9-rules--conventions-must-follow).
-The two that bit most often in Phase 3:
+The two that bit most often in this stage:
 
 - **Check a primitive's classes before using it** — see the Radix 1.4.3 trap in
   [ui-guidelines.md](./ui-guidelines.md). `Progress` is safe (inline `style`);

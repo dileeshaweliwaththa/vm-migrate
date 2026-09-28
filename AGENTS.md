@@ -11,7 +11,14 @@ their endpoints (URLs) as infrastructure is migrated from old IPs to new ones.
 It is built on a Next.js + Supabase foundation with a strict layered
 architecture.
 
-The main feature is the tracker at `/tracker` (protected): a spreadsheet-style
+Machines are browsed at `/vms` (protected, [docs/vms.md](docs/vms.md)): every VM
+as a card, filtered All / UPVIEW / Client, and a page per machine at
+`/vms/[id]` with everything tied to it (addresses, endpoints, the projects
+hosted, Jenkins, backups) plus a live endpoint health check. Phase 3 starts here
+([docs/phase-3-plan.md](docs/phase-3-plan.md)).
+
+The migration workhorse is the tracker at `/tracker` (protected, reached from
+the VMs page): a spreadsheet-style
 grid of VMs split into UPVIEW (our servers) and Client sections, each with
 per-endpoint rows, live migration stats, soft-delete trash with restore/purge,
 migrated-URL archiving, and JSON import/export. Data lives in the `vms` and
@@ -19,14 +26,19 @@ migrated-URL archiving, and JSON import/export. Data lives in the `vms` and
 is the one URL table, shared with the projects pages). Access is
 gated by the passwordless email sign-in flow shipped in the auth slice.
 
-Four repositories talk to something other than Supabase — the documented
+Six repositories talk to something other than Supabase — the documented
 exceptions to the repository rule:
 
 - `repositories/jenkins/jenkinsRepository.ts` — HTTP to a Jenkins server
 - `repositories/azure/azureBlobRepository.ts` — the Azure Blob SDK
 - `repositories/mysql/mysqlDumpRepository.ts` — spawns `mysqldump` / `mysql`
+- `repositories/postgres/pgDumpRepository.ts` — spawns `pg_dump` / `pg_dumpall`
+  / `psql`
 - `repositories/github/githubRepository.ts` — HTTP to the GitHub REST API
   (fixed origin, api.github.com only)
+- `repositories/health/endpointProbeRepository.ts` — outbound HTTP / TCP
+  liveness probes for the VM page's health check (no credentials, no
+  redirects, body never read)
 
 Anything that fetches a **URL** shares the outbound rules in
 [lib/outbound-url.ts](lib/outbound-url.ts).
@@ -52,6 +64,11 @@ Before implementing any feature, request, or fix, read and follow:
 - [docs/security.md](docs/security.md) — the threat model, the secrets inventory,
   the SSRF and stored-HTML rules, the **accepted** risks, and the checklist every
   new route/table/outbound fetch has to pass.
+- [docs/vms.md](docs/vms.md) — the VMs list and the per-machine page, and the
+  live endpoint health check with its outbound rules.
+- [docs/phase-3-plan.md](docs/phase-3-plan.md) — what Phase 3 is, its locked
+  decisions and its issues. (Phase 2's hardening stage is
+  [docs/phase-2-hardening-plan.md](docs/phase-2-hardening-plan.md).)
 - [docs/tracker.md](docs/tracker.md) — the VM tracker feature, its layers, its
   API, and its per-role permissions.
 - [docs/dashboard.md](docs/dashboard.md) — the `/dashboard` summary and its

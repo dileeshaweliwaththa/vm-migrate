@@ -194,3 +194,84 @@ export interface VmIpMoveInput {
   trashSource?: boolean;
 }
 
+
+// ---- the VM page (docs/vms.md) ---------------------------------------------
+
+// An environment deployed on this machine, with the project it belongs to — the
+// VM page's "what runs here" list.
+export interface VmHostedEnvironment {
+  id: string;
+  name: string;
+  label: string;
+  cicdProvider: string;
+  projectId: string;
+  projectName: string;
+  projectArchived: boolean;
+  // How many of the VM's endpoints are this environment's records.
+  recordCount: number;
+}
+
+// A backup target whose database host is one of this machine's addresses.
+// Matched by host because `backup_targets` has no `vm_id`: a target is a
+// database server, which may or may not be a VM we track.
+export interface VmBackupTarget {
+  id: string;
+  name: string;
+  engine: string;
+  dbHost: string;
+  dbPort: number;
+}
+
+// Everything the VM page shows, in one payload. Secret-free: Jenkins arrives as
+// `VmJenkinsConfig` (`hasToken`, never the token).
+export interface VmDetail {
+  vm: Vm;
+  group: VmGroup | null;
+  environments: VmHostedEnvironment[];
+  backupTargets: VmBackupTarget[];
+}
+
+// ---- endpoint health -------------------------------------------------------
+
+// The result of probing one target. `skipped` covers what can't or mustn't be
+// probed: UDP, a denied (link-local / metadata) address, or a record with nothing
+// to reach yet. Stated as a set so the badge can't be handed a value it has no
+// colour for.
+export const HEALTH_STATES = ['up', 'down', 'skipped'] as const;
+export type HealthState = (typeof HEALTH_STATES)[number];
+
+// Which address of an endpoint was probed: the machine's `ip:port` directly, or
+// the public domain in front of it. Checked separately because they fail
+// separately — DNS not yet pointed, a proxy down, a certificate expired.
+export const HEALTH_TARGET_KINDS = ['direct', 'domain'] as const;
+export type HealthTargetKind = (typeof HEALTH_TARGET_KINDS)[number];
+
+export interface EndpointHealth {
+  urlId: string;
+  kind: HealthTargetKind;
+  // What was probed, as shown: `http://1.2.3.4:3000`, `https://app.example.com`,
+  // or `tcp://1.2.3.4:5432`.
+  target: string;
+  state: HealthState;
+  // The HTTP status, when an HTTP probe got a response. Null for TCP and for
+  // anything that never answered.
+  status: number | null;
+  // Round-trip time of the probe, when it completed.
+  ms: number | null;
+  // Why it's down or skipped ("timed out", "connection refused", …). Empty when up.
+  message: string;
+}
+
+export interface VmHealthReport {
+  vmId: string;
+  checkedAt: string;
+  results: EndpointHealth[];
+  // Set when the machine has more targets than one check probes; the rest are
+  // not listed rather than silently dropped.
+  truncated: number;
+}
+
+// The VMs list's ownership filter: every machine, ours (UPVIEW), or a client's —
+// the same `isClient` split the tracker renders as two sections.
+export const VM_OWNERSHIP_FILTERS = ['all', 'upview', 'client'] as const;
+export type VmOwnershipFilter = (typeof VM_OWNERSHIP_FILTERS)[number];

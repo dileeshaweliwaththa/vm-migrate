@@ -25,4 +25,6 @@ export interface EnvironmentRow {
   // The IPs come along with the name because a record's direct URL is built from
   // the VM's address plus the record's port — see `vmLiveIp` in lib/endpoints.ts.
   vms?: VmSummaryRow | null;
+  // The owning project, embedded by the VM page's "what runs here" query.
+  projects?: { id: string; name: string; archived: boolean } | null;
 }

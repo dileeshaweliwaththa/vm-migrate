@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useProject } from '@/hooks/projects/useProjects';
 import { useBackupTarget } from '@/hooks/backups/useBackups';
+import { useVmDetail } from '@/hooks/vms/useVmDetail';
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -22,6 +23,7 @@ import {
 const SECTION_LABEL: Record<string, string> = {
   dashboard: 'Dashboard',
   projects: 'Projects',
+  vms: 'VMs',
   tracker: 'VM Tracker',
   backups: 'Backups',
   users: 'Users',
@@ -45,17 +47,23 @@ export function Breadcrumbs() {
   const { data: project } = useProject(projectId);
   const backupTargetId = segments[0] === 'backups' && segments[1] ? segments[1] : '';
   const { data: backupTarget } = useBackupTarget(backupTargetId);
+  const vmId = segments[0] === 'vms' && segments[1] ? segments[1] : '';
+  const { data: vmDetail } = useVmDetail(vmId);
 
   const crumbs: Crumb[] = [];
   for (const segment of segments) {
     if (segment === 'admin') continue;
     const label = SECTION_LABEL[segment];
+    // The tracker lives under VMs in the sidebar, so the trail says so — its URL
+    // stayed `/tracker` so existing links keep working.
+    if (segment === 'tracker') crumbs.push({ label: SECTION_LABEL.vms, href: '/vms' });
     if (label) {
       crumbs.push({ label, href: `/${segment === 'users' || segment === 'settings' ? 'admin/' : ''}${segment}` });
       continue;
     }
     // An unmapped segment is a record id.
     if (segment === projectId) crumbs.push({ label: project?.name ?? '…' });
+    if (segment === vmId) crumbs.push({ label: vmDetail?.vm.name || '…' });
     if (segment === backupTargetId) {
       crumbs.push({ label: backupTarget?.target.name || backupTarget?.target.dbHost || '…' });
     }

@@ -18,3 +18,10 @@ export const canEdit = (role: UserRole | null | undefined): boolean =>
 // configuration* (Jenkins credentials, records, ports) still needs canEdit.
 export const canRunBuild = (role: UserRole | null | undefined): boolean =>
   USER_ROLES.includes(role as UserRole);
+
+// Probing a VM's endpoints for liveness (the VM page's health check) is open to
+// every signed-in role. It only reaches addresses already stored — which only
+// editors can set — so it gives a viewer no reach of their own; see
+// docs/security.md (A9) and docs/vms.md.
+export const canCheckHealth = (role: UserRole | null | undefined): boolean =>
+  USER_ROLES.includes(role as UserRole);

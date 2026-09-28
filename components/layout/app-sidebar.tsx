@@ -6,8 +6,8 @@ import {
   DatabaseBackup,
   LayoutGrid,
   Layers,
+  Server,
   SlidersHorizontal,
-  Terminal,
   Users,
   type LucideIcon,
 } from 'lucide-react';
@@ -33,6 +33,9 @@ interface NavItem {
   label: string;
   icon: LucideIcon;
   adminOnly?: boolean;
+  // Other routes that belong to this item, so it stays highlighted there — the
+  // VM Tracker lives under VMs but kept its `/tracker` URL.
+  alsoActiveOn?: string[];
 }
 
 // Two groups, because the design separates them: the working set at the top, and
@@ -40,7 +43,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutGrid },
   { href: '/projects', label: 'Projects', icon: Layers },
-  { href: '/tracker', label: 'VM Tracker', icon: Terminal },
+  { href: '/vms', label: 'VMs', icon: Server, alsoActiveOn: ['/tracker'] },
   { href: '/backups', label: 'Backups', icon: DatabaseBackup },
   { href: '/admin/users', label: 'Users', icon: Users, adminOnly: true },
 ];
@@ -88,7 +91,9 @@ export function AppSidebar({
   const visible = (items: NavItem[]) =>
     items.filter((item) => !item.adminOnly || isAdmin(role));
 
-  const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+  const matches = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+  const isActive = (item: NavItem) =>
+    matches(item.href) || (item.alsoActiveOn ?? []).some(matches);
 
   const items = visible(NAV);
   const utility = visible(UTILITY_NAV);
@@ -148,9 +153,9 @@ export function AppSidebar({
                 <SidebarMenuItem key={item.href}>
                   <SidebarMenuButton
                     asChild
-                    isActive={isActive(item.href)}
+                    isActive={isActive(item)}
                     tooltip={item.label}
-                    className={navItemClass(isActive(item.href))}
+                    className={navItemClass(isActive(item))}
                   >
                     <Link href={item.href}>
                       <item.icon />
@@ -171,9 +176,9 @@ export function AppSidebar({
               <SidebarMenuItem key={item.href}>
                 <SidebarMenuButton
                   asChild
-                  isActive={isActive(item.href)}
+                  isActive={isActive(item)}
                   tooltip={item.label}
-                  className={navItemClass(isActive(item.href))}
+                  className={navItemClass(isActive(item))}
                 >
                   <Link href={item.href}>
                     <item.icon />

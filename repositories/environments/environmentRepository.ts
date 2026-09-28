@@ -58,6 +58,24 @@ export const findEnvironmentsByVmId = async (vmId: string): Promise<EnvironmentR
   return (data ?? []) as EnvironmentRow[];
 };
 
+// Every environment deployed on one VM, with the project it belongs to, in
+// deployment order — the VM page's "what runs here" list. A separate query from
+// `findEnvironmentsByVmId` because that one serves Jenkins inheritance, which
+// wants newest-first and no embed.
+export const findEnvironmentsWithProjectForVm = async (
+  vmId: string
+): Promise<EnvironmentRow[]> => {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('environments')
+    .select('*, projects(id, name, archived)')
+    .eq('vm_id', vmId)
+    .order('project_id', { ascending: true })
+    .order('position', { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as EnvironmentRow[];
+};
+
 // Moves every environment off one VM and onto another, in one statement.
 //
 // Used when a machine's public address is reattached to another box: the

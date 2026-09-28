@@ -1,6 +1,6 @@
 # Dashboard
 
-The landing page at `/dashboard` (Phase 3). It answers three questions at a
+The landing page at `/dashboard` (Phase 2, v2.0.0). It answers three questions at a
 glance — **how much is there**, **how far along is the migration**, and **what
 has been deployed lately** — and links out to the pages that can change any of
 it. Readable by every signed-in role.

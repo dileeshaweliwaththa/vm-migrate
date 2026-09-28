@@ -1,7 +1,16 @@
 # VM Migration Tracker
 
-The tracker is the app's main feature and the reference example of a full
-vertical slice through all five layers (see [architecture.md](./architecture.md)).
+The tracker is the reference example of a full vertical slice through all five
+layers (see [architecture.md](./architecture.md)).
+
+**Where it sits.** Since Phase 3 the sidebar item is **VMs** (`/vms`). The
+tracker is reached from the VMs page's **VM Tracker** button, and it kept its
+`/tracker` URL. The sidebar item stays active here, and the breadcrumb reads
+**VMs › VM Tracker**. It's still where machines are created, edited, grouped,
+trashed and migrated. A single machine's read-only view (its resources and live
+endpoint health) is its page at `/vms/[id]`: see [vms.md](./vms.md). That page
+reads the same `vms` / `vm_ips` / `endpoints` rows, and the list at `/vms`
+shares the tracker's `useTrackerData` cache.
 
 ## Layers
 
