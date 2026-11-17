@@ -99,10 +99,10 @@ re-derives them from role strings.
 
 | Layer      | File                                                        |
 | ---------- | ----------------------------------------------------------- |
-| Routing    | `app/api/projects/[id]/environments/[envId]/jenkins-config/route.ts` (GET/PUT), `.../jenkins-sync/route.ts` (POST), `.../jenkins-jobs/route.ts` (GET), `.../jenkins-build/route.ts` (POST), `.../jenkins-link/route.ts` (POST), `.../jenkins-run/route.ts` (GET — build progress), `.../jenkins-runs/route.ts` (GET — build history, `?portId=` for one record) |
-| UI         | `components/environments/jenkins-config-dialog.tsx` (modal), `jenkins-jobs-dialog.tsx` (browse), `jenkins-history-dialog.tsx` (per-record build history), `jenkins-status.tsx` (status + run pills), per-env buttons + record rows in `components/environments/environments-section.tsx` |
-| Hook       | `hooks/environments/useEnvironmentJenkins.ts` (config, job list, trigger, run progress, history), `hooks/environments/useEnvironments.ts` (`syncFromJenkins`) |
-| Service    | `services/jenkins/jenkinsService.ts`, `services/jenkins/extraction.ts` |
+| Routing    | `app/api/projects/[id]/environments/[envId]/jenkins-config/route.ts` (GET/PUT), `.../jenkins-sync/route.ts` (GET preview, POST apply), `.../jenkins-jobs/route.ts` (GET), `.../jenkins-build/route.ts` (POST), `.../jenkins-link/route.ts` (POST), `.../jenkins-run/route.ts` (GET — build progress), `.../jenkins-runs/route.ts` (GET — build history, `?portId=` for one record) |
+| UI         | `components/environments/jenkins-config-dialog.tsx` (modal), `jenkins-jobs-dialog.tsx` (browse), `jenkins-history-dialog.tsx` (per-record build history), `jenkins-sync-dialog.tsx` (sync preview + apply), `jenkins-status.tsx` (status + run pills), per-env buttons + record rows in `components/environments/environments-section.tsx` |
+| Hook       | `hooks/environments/useEnvironmentJenkins.ts` (config, job list, trigger, run progress, history), `hooks/environments/useEnvironments.ts` (`previewJenkinsSync`, `syncFromJenkins`) |
+| Service    | `services/jenkins/jenkinsService.ts`, `services/jenkins/extraction.ts`, `services/jenkins/portSyncPlan.ts` (what a sync would change; pure) |
 | Repository | `repositories/jenkins/jenkinsRepository.ts` (external HTTP), `repositories/environmentSecrets/environmentSecretRepository.ts` (service-role), `repositories/environmentBuildRuns/environmentBuildRunRepository.ts` (build history) |
 | Shared     | [`lib/jenkins-url.ts`](../lib/jenkins-url.ts) — deriving a server root, the same-server guard, and re-mounting reported URLs (see [below](#the-urls-jenkins-reports-are-not-the-address-you-reach-it-on)) |
 
@@ -167,8 +167,23 @@ On a project page, each environment whose CI/CD provider is **Jenkins** shows
    - **Use** — adds the job as a **record in the environment's ports table**
      (`source='jenkins'`, description from the job, job URL stored on the row,
      port left blank). The dialog stays open so several jobs can be added.
-3. **Sync from Jenkins** (⟳) — reads the job's `config.xml` and refreshes only
-   the `jenkins`-sourced ports (manual entries preserved). Shown only once the
+3. **Sync from Jenkins** (⟳) — reads the job's `config.xml` and shows a
+   **preview** of what syncing would change before anything is written (#33):
+
+   | Section | Meaning | On apply |
+   | --- | --- | --- |
+   | To remove | `jenkins`-sourced records the config no longer yields | deleted |
+   | To add | ports found in the config with no record yet | inserted |
+   | Unchanged | `jenkins`-sourced records the config still yields | left alone |
+   | Not touched | records added by hand or imported from `docker ps` | never touched |
+   | Couldn't be mapped | port-like items extraction saw and rejected (#28) | — |
+
+   Records are matched on port + protocol, so a protocol change is a removal
+   plus an addition. **Apply** writes only the difference, which makes a second
+   apply with the same job config a no-op. The preview carries a `fingerprint`
+   of its plan; apply recomputes the plan server-side, never trusting one sent
+   by the browser, and refuses with **409** if the fingerprint no longer
+   matches, meaning the job changed since the preview. Shown only once the
    environment has a job URL of its own: it parses *that* job, and there is no
    sibling's job it could sensibly fall back to.
 4. **Records** — each row in the ports table is editable inline (fill in the
@@ -513,10 +528,10 @@ sync says so rather than failing silently (see phase-2-plan.md §10).
 
 Each item carries the number, the pattern or hint that saw it, and about a
 line of the config around it. A `no_pattern` hint whose number a pattern
-already mapped isn't reported. A sync that skipped anything opens a result
-dialog listing what was written and, collapsibly, what couldn't be mapped; a
-clean sync is a toast. The summary line distinguishes "nothing found" from
-"found port-like items, mapped none", which a bare count couldn't.
+already mapped isn't reported. The sync preview lists them in a collapsible
+"N items couldn't be mapped" section, open by default when nothing was mapped.
+The summary line distinguishes "nothing found" from "found port-like items,
+mapped none", which a bare count couldn't.
 
 `docker -p single` doesn't match the host half of a mapping: `-p 8080:3000`
 yields 3000 only. (It used to yield 8080 too.)

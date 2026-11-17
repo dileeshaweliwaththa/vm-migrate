@@ -8,7 +8,7 @@ import type {
   EnvironmentPort,
   EnvironmentPortInput,
 } from '@/types/common/project';
-import type { EnvironmentSyncResult } from '@/types/common/jenkins';
+import type { EnvironmentSyncResult, PortSyncPreview } from '@/types/common/jenkins';
 
 // Hook layer for environments + ports. All mutations invalidate the parent
 // project-detail query so the page re-renders with fresh data.
@@ -88,20 +88,37 @@ export const useEnvironmentMutations = (projectId: string) => {
     onSuccess: invalidate,
   });
 
-  // Pull this environment's Jenkins job config and refresh its jenkins-sourced
-  // ports (global credentials, per-environment target). Returns the summary line
-  // plus what was written and what was skipped, so the UI can show both.
+  // What a sync of this environment's Jenkins-sourced ports would change. Reads
+  // the job config, writes nothing, so it invalidates nothing. A mutation rather
+  // than a query because it runs on a click and must never be served from cache:
+  // the preview's fingerprint is only good for the config it was computed from.
+  const previewJenkinsSync = useMutation({
+    mutationFn: async (envId: string): Promise<PortSyncPreview & { message: string }> => {
+      const res = await fetch(`${base}/${envId}/jenkins-sync`);
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? 'Jenkins sync preview failed.');
+      return { ...(body.data as PortSyncPreview), message: body.message ?? '' };
+    },
+  });
+
+  // Apply a previewed sync. The server recomputes the plan and refuses (409) if
+  // it no longer matches the preview's fingerprint.
   const syncFromJenkins = useMutation({
-    mutationFn: async (envId: string): Promise<EnvironmentSyncResult & { message: string }> => {
-      const res = await fetch(`${base}/${envId}/jenkins-sync`, { method: 'POST' });
+    mutationFn: async ({
+      envId,
+      fingerprint,
+    }: {
+      envId: string;
+      fingerprint: string;
+    }): Promise<EnvironmentSyncResult & { message: string }> => {
+      const res = await fetch(`${base}/${envId}/jenkins-sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fingerprint }),
+      });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? 'Jenkins sync failed.');
-      return {
-        ports: body.data?.ports ?? [],
-        skipped: body.data?.skipped ?? [],
-        written: body.data?.written ?? 0,
-        message: body.message ?? 'Synced.',
-      };
+      return { ...(body.data as EnvironmentSyncResult), message: body.message ?? 'Synced.' };
     },
     onSuccess: invalidate,
   });
@@ -113,6 +130,7 @@ export const useEnvironmentMutations = (projectId: string) => {
     addPort,
     updatePort,
     removePort,
+    previewJenkinsSync,
     syncFromJenkins,
   };
 };

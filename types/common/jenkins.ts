@@ -1,4 +1,5 @@
 import type { Protocol } from '@/types/common/vm';
+import type { EnvironmentPort } from '@/types/common/project';
 
 // Domain types for the per-environment Jenkins integration (Phase 2b · M3). The
 // non-secret parts (job URL, username) live on the environment; the secret token
@@ -151,11 +152,33 @@ export interface PortExtraction {
   skipped: SkippedPortCandidate[];
 }
 
-// Result of syncing one environment from its Jenkins job.
-export interface EnvironmentSyncResult {
-  ports: ExtractedPort[];
+// What a port sync *would* do, worked out before it writes anything (#33).
+// Records are matched on port + protocol.
+export interface PortSyncPlan {
+  // Found in the job config, not yet a record: inserted on apply.
+  added: ExtractedPort[];
+  // Jenkins-sourced records the config still yields: left alone.
+  unchanged: EnvironmentPort[];
+  // Jenkins-sourced records the config no longer yields: **deleted** on apply.
+  // The lossy part, so the preview calls them out.
+  removed: EnvironmentPort[];
+  // Records a sync never touches: typed by hand or imported from `docker ps`.
+  kept: EnvironmentPort[];
+  // Identifies this exact plan. Apply recomputes the plan and refuses if the
+  // fingerprint changed, so it never writes something other than what was shown.
+  fingerprint: string;
+}
+
+// The preview: the plan, plus what the config held that couldn't be mapped.
+export interface PortSyncPreview extends PortSyncPlan {
   skipped: SkippedPortCandidate[];
-  written: number;
+}
+
+// Result of applying a sync.
+export interface EnvironmentSyncResult {
+  added: number;
+  removed: number;
+  unchanged: number;
 }
 
 // Public (secret-free) per-environment Jenkins config for the modal. The token

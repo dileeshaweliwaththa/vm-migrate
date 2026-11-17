@@ -1,6 +1,7 @@
 import { getCurrentActor, getCurrentRole, type CurrentActor } from '@/services/auth/authService';
 import { getProject } from '@/services/projects/projectService';
 import { extractPorts, extractScm } from '@/services/jenkins/extraction';
+import { planPortSync } from '@/services/jenkins/portSyncPlan';
 import {
   fetchBuild,
   fetchJobConfigXml,
@@ -52,6 +53,7 @@ import type {
   JenkinsRawJob,
   JenkinsRecordSource,
   JenkinsRunState,
+  PortSyncPreview,
   TriggerBuildResult,
 } from '@/types/common/jenkins';
 import { isTerminalRunPhase } from '@/types/common/jenkins';
@@ -378,69 +380,123 @@ export const saveEnvironmentJenkinsConfig = async (
   }
 };
 
-// The one-line summary of a sync. Four distinct outcomes, because "connected,
-// found nothing" and "found port-like things, mapped none of them" call for
-// different next steps, and a count alone can't tell them apart (#28).
-const syncMessage = (written: number, skipped: number): string => {
-  const unmapped = `${skipped} port-like item${skipped === 1 ? '' : 's'} couldn't be mapped`;
-  if (written && skipped) return `Synced ${written} port(s) from Jenkins. ${unmapped}.`;
-  if (written) return `Synced ${written} port(s) from Jenkins.`;
-  if (skipped) return `No ports synced: ${unmapped}.`;
+// Returned by apply when the job config no longer yields the plan the preview
+// showed. The route maps it to 409.
+export const SYNC_PLAN_CHANGED =
+  "The job's config changed since the preview. Preview the sync again before applying.";
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+// The one-line summary of a preview. "Connected, found nothing" and "found
+// port-like things, mapped none of them" call for different next steps, so they
+// read differently (#28).
+const previewMessage = (preview: PortSyncPreview): string => {
+  const { added, removed, unchanged, skipped } = preview;
+  const unmapped = skipped.length ? ` ${plural(skipped.length, 'port-like item')} couldn't be mapped.` : '';
+  if (added.length || removed.length) {
+    return `${added.length} to add, ${removed.length} to remove, ${unchanged.length} unchanged.${unmapped}`;
+  }
+  if (unchanged.length) return `Already up to date: ${plural(unchanged.length, 'port')} unchanged.${unmapped}`;
+  if (skipped.length) return `No ports found that could be mapped.${unmapped}`;
   return 'Connected, but no ports were detected in the job config.';
 };
 
-// Per-environment sync (editor+). Reads the environment's own Jenkins job URL +
-// username, and the token from the server-only secrets store, pulls the job
-// config, extracts ports best-effort, and replaces only the `jenkins`-sourced
-// ports (manual entries preserved). The token is never exposed to the client.
-export const syncEnvironmentPorts = async (
+// Reads this environment's job config and works out what a sync would change.
+// Preview and apply both go through here, so they see the same plan from the
+// same rules (`planPortSync`).
+//
+// Job-level: the sync parses *this* environment's own `config.xml`, so its job
+// URL is required and never inherited — but the credentials behind it are, which
+// is the case that matters right after an inheriting environment links its first
+// job through the browse dialog. Resolving here rather than re-deriving the token
+// inline is what keeps that working.
+const planEnvironmentSync = async (
   projectId: string,
   envId: string
+): Promise<
+  { ok: true; preview: PortSyncPreview; ports: Environment['ports'] } | { ok: false; message: string }
+> => {
+  const resolved = await resolveEnvJenkins(projectId, envId);
+  if (!resolved.ok) return { ok: false, message: resolved.message };
+  const { env, auth } = resolved.value;
+
+  const result = await fetchJobConfigXml(auth, env.jenkinsUrl);
+  if (!result.ok || result.xml === null) {
+    return { ok: false, message: configErrorMessage(result.status, result.error, auth.username) };
+  }
+
+  const { ports, skipped } = extractPorts(result.xml);
+  return { ok: true, preview: { ...planPortSync(env.ports, ports), skipped }, ports: env.ports };
+};
+
+// What a sync would do, with no writes (editor+, #33). Safe to run repeatedly.
+// The token is used server-side only and never reaches the client.
+export const previewEnvironmentPortSync = async (
+  projectId: string,
+  envId: string
+): Promise<ApiSingleResponse<PortSyncPreview>> => {
+  const role = await getCurrentRole();
+  if (!canEdit(role)) return { success: false, message: EDITOR_REQUIRED, data: null };
+
+  try {
+    const planned = await planEnvironmentSync(projectId, envId);
+    if (!planned.ok) return { success: false, message: planned.message, data: null };
+    return { success: true, message: previewMessage(planned.preview), data: planned.preview };
+  } catch (error) {
+    return { success: false, message: asMsg(error, 'Jenkins sync preview failed.'), data: null };
+  }
+};
+
+// Applies a previewed sync (editor+). The plan is recomputed here, never taken
+// from the client, and it's applied only if its fingerprint still matches the
+// preview's, so what gets written is what was shown.
+//
+// Writes only the difference: deletes `removed`, inserts `added`, leaves
+// unchanged and manual/docker records alone. Applying twice against the same
+// job config is therefore a no-op the second time.
+export const syncEnvironmentPorts = async (
+  projectId: string,
+  envId: string,
+  fingerprint: string
 ): Promise<ApiSingleResponse<EnvironmentSyncResult>> => {
   const role = await getCurrentRole();
   if (!canEdit(role)) return { success: false, message: EDITOR_REQUIRED, data: null };
 
-  // Job-level: the sync parses *this* environment's own `config.xml`, so its job
-  // URL is required and never inherited — but the credentials behind it are, which
-  // is the case that matters right after an inheriting environment links its first
-  // job through the browse dialog. Resolving here rather than re-deriving the token
-  // inline is what keeps that working; the inline version required a token on this
-  // row and failed for exactly that environment.
-  const resolved = await resolveEnvJenkins(projectId, envId);
-  if (!resolved.ok) return { success: false, message: resolved.message, data: null };
-  const { env, auth } = resolved.value;
-
   try {
-    const result = await fetchJobConfigXml(auth, env.jenkinsUrl);
-    if (!result.ok || result.xml === null) {
-      return {
-        success: false,
-        message: configErrorMessage(result.status, result.error, auth.username),
-        data: null,
-      };
+    const planned = await planEnvironmentSync(projectId, envId);
+    if (!planned.ok) return { success: false, message: planned.message, data: null };
+    const { preview, ports } = planned;
+    if (preview.fingerprint !== fingerprint) {
+      return { success: false, message: SYNC_PLAN_CHANGED, data: null };
     }
 
-    const { ports, skipped } = extractPorts(result.xml);
-
-    // Replace only the jenkins-sourced ports; keep manual ones.
-    for (const p of env.ports.filter((p) => p.source === 'jenkins')) {
-      await deleteEndpoint(p.id);
+    for (const record of preview.removed) {
+      await deleteEndpoint(record.id);
     }
-    let position = env.ports.filter((p) => p.source !== 'jenkins').length;
-    for (const p of ports) {
+    // After every record already there, so the existing order isn't disturbed.
+    let position = ports.reduce((max, record) => Math.max(max, record.position + 1), 0);
+    for (const port of preview.added) {
       await addPort(envId, {
-        port: p.port,
-        protocol: p.protocol,
-        description: p.description,
+        port: port.port,
+        protocol: port.protocol,
+        description: port.description,
         source: 'jenkins',
         position: position++,
       });
     }
 
+    const counts = {
+      added: preview.added.length,
+      removed: preview.removed.length,
+      unchanged: preview.unchanged.length,
+    };
     return {
       success: true,
-      message: syncMessage(ports.length, skipped.length),
-      data: { ports, skipped, written: ports.length },
+      message:
+        counts.added || counts.removed
+          ? `Synced from Jenkins: ${counts.added} added, ${counts.removed} removed.`
+          : 'Already up to date. Nothing was changed.',
+      data: counts,
     };
   } catch (error) {
     return { success: false, message: asMsg(error, 'Jenkins sync failed.'), data: null };

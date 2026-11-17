@@ -45,7 +45,7 @@ const NEW_RECORD_PROTOCOL: Protocol = 'HTTPS';
 // The scheme on a link is always implied (see recordLiveUrl), so what's shown is
 // the `ip:port` people actually recognise.
 const hostAndPort = (url: string): string => url.replace(/^\w+:\/\//, '');
-import type { EnvironmentSyncResult, JenkinsJobSummary } from '@/types/common/jenkins';
+import type { JenkinsJobSummary, PortSyncPreview } from '@/types/common/jenkins';
 import { useEnvironmentMutations } from '@/hooks/environments/useEnvironments';
 import {
   useTriggerJenkinsBuild,
@@ -81,7 +81,7 @@ import {
 import { EnvironmentForm } from '@/components/environments/environment-form';
 import { JenkinsConfigDialog } from '@/components/environments/jenkins-config-dialog';
 import { JenkinsJobsDialog } from '@/components/environments/jenkins-jobs-dialog';
-import { JenkinsSyncResultDialog } from '@/components/environments/jenkins-sync-result-dialog';
+import { JenkinsSyncDialog } from '@/components/environments/jenkins-sync-dialog';
 import { DialogBoundary } from '@/components/errors/dialog-boundary';
 import { JenkinsHistoryDialog } from '@/components/environments/jenkins-history-dialog';
 import { DockerImportDialog } from '@/components/environments/docker-import-dialog';
@@ -619,7 +619,8 @@ function EnvironmentCard({
   canEdit: boolean;
   canBuild: boolean;
 }) {
-  const { removeEnvironment, addPort, syncFromJenkins } = useEnvironmentMutations(projectId);
+  const { removeEnvironment, addPort, previewJenkinsSync, syncFromJenkins } =
+    useEnvironmentMutations(projectId);
   const [port, setPort] = useState('');
   const [description, setDescription] = useState('');
   const [domain, setDomain] = useState('');
@@ -627,10 +628,9 @@ function EnvironmentCard({
   const [jenkinsOpen, setJenkinsOpen] = useState(false);
   const [jobsOpen, setJobsOpen] = useState(false);
   const [dockerOpen, setDockerOpen] = useState(false);
-  // The last sync's result, while its dialog is open. Only set when something
-  // was skipped; a clean sync is a toast.
-  const [syncResult, setSyncResult] = useState<
-    (EnvironmentSyncResult & { message: string }) | null
+  // The sync preview, while its dialog is open (#33).
+  const [syncPreview, setSyncPreview] = useState<
+    (PortSyncPreview & { message: string }) | null
   >(null);
   const isJenkins = env.cicdProvider === 'jenkins';
 
@@ -720,13 +720,29 @@ function EnvironmentCard({
       ? 'min-w-[44rem]'
       : 'min-w-[32rem]';
 
-  // A clean sync is a toast. One that skipped anything opens the result dialog,
-  // because "Synced 2 ports" alone would read as everything having been covered.
+  // A sync is two steps: preview what it would change (no writes), then apply
+  // exactly that. The button only ever previews.
   const handleSyncJenkins = () => {
-    syncFromJenkins.mutate(env.id, {
-      onSuccess: (r) => (r.skipped.length ? setSyncResult(r) : toast.success(r.message)),
-      onError: (e) => toast.error(e instanceof Error ? e.message : 'Jenkins sync failed.'),
+    previewJenkinsSync.mutate(env.id, {
+      onSuccess: setSyncPreview,
+      onError: (e) => toast.error(e instanceof Error ? e.message : 'Jenkins sync preview failed.'),
     });
+  };
+
+  const handleApplySync = () => {
+    if (!syncPreview) return;
+    syncFromJenkins.mutate(
+      { envId: env.id, fingerprint: syncPreview.fingerprint },
+      {
+        onSuccess: (r) => {
+          toast.success(r.message);
+          setSyncPreview(null);
+        },
+        // Includes the 409 when the job changed since the preview; the dialog
+        // stays open so the reader can cancel and preview again.
+        onError: (e) => toast.error(e instanceof Error ? e.message : 'Jenkins sync failed.'),
+      }
+    );
   };
 
   // A new record needs something to identify it by: its port where there are
@@ -860,12 +876,12 @@ function EnvironmentCard({
                       variant="ghost"
                       size="icon-sm"
                       aria-label="Sync ports from Jenkins"
-                      title="Sync ports from Jenkins"
+                      title="Sync ports from Jenkins (shows a preview first)"
                       onClick={handleSyncJenkins}
-                      disabled={syncFromJenkins.isPending}
+                      disabled={previewJenkinsSync.isPending || syncFromJenkins.isPending}
                     >
                       <RefreshCw
-                        className={`h-4 w-4 ${syncFromJenkins.isPending ? 'animate-spin' : ''}`}
+                        className={`h-4 w-4 ${previewJenkinsSync.isPending ? 'animate-spin' : ''}`}
                       />
                     </Button>
                   ) : null}
@@ -890,11 +906,13 @@ function EnvironmentCard({
                       />
                     </DialogBoundary>
                   ) : null}
-                  <DialogBoundary what="Jenkins sync" onClose={() => setSyncResult(null)}>
-                    <JenkinsSyncResultDialog
+                  <DialogBoundary what="Jenkins sync" onClose={() => setSyncPreview(null)}>
+                    <JenkinsSyncDialog
                       envName={environmentTitle(env.name, env.label)}
-                      result={syncResult}
-                      onClose={() => setSyncResult(null)}
+                      preview={syncPreview}
+                      applying={syncFromJenkins.isPending}
+                      onApply={handleApplySync}
+                      onClose={() => setSyncPreview(null)}
                     />
                   </DialogBoundary>
                 </>
