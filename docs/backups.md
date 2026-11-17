@@ -30,13 +30,26 @@ dump takes. Once that was clear the worker was pure cost: a second deployment, a
 second copy of the credentials, an HTTP hop that could be unreachable, and a
 local file written before every upload.
 
-What the worker left behind:
+**The worker outlived the switch.** Until 2026-11-17 it kept running as the
+`mysql-backup-manager` container on dev-vm (`20.197.41.68`), with its own cron
+dumping every database a second time at 02:00 into the old flat
+`<database>/<file>` layout, and an unauthenticated API open on port 2999 (#92,
+#93). It is now stopped and set not to restart, and the flat dumps it left are
+cleared by retention (see [The runner](#the-runner)). Its Jenkins job
+(`Backup-MySQL Server`, manual only) and workspace still exist, with a copy of
+its credentials in the workspace `.env`. Remove them, or at least disable the
+job, so nobody redeploys it by accident.
+
+What the worker left behind in this app:
 
 - `backup_targets.worker_url` is **legacy**. Nothing writes it, no form asks for
-  it, and it is read only so an older row is not silently lost. The same is true
-  of `azure_account` / `azure_container` and
-  `backup_target_secrets.azure_connection_string`, superseded by the shared
-  destination above.
+  it, nothing calls it, and it is read only so an older row is not silently lost.
+  `azure_account` and `backup_target_secrets.azure_connection_string` are legacy
+  in the same way, superseded by the shared destination above.
+- `azure_container` is legacy too, but **still load-bearing**: it is how a target
+  claims the flat layout (`claimsLegacyLayout`). Leave it set until the last flat
+  dump has aged out of retention, then the claim rule, and the whole-container
+  listing it forces, can go.
 - The `backup-dispatch` Edge Function and its `backup_dispatch_*` Vault secrets
   are gone; the schedule posts to this app directly.
 
@@ -447,7 +460,8 @@ Details that matter:
   the target's prefix, so the older flat `<database>/<file>` dumps, listed in the
   history under the target that claims that layout, were never deleted: by
   November 2026 that was 1,718 dumps and 14.6GB past a seven-day policy, still
-  growing nightly because the old worker kept writing there
+  growing nightly because the old worker kept writing there until it was
+  stopped on 2026-11-17
   ([#92](https://github.com/kodplex/upview-vm-tracker/issues/92)). The first run
   after the fix clears that backlog, and its log line says how many of the dumps
   came from the flat layout. The rule also means a target with no prefix deletes

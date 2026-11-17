@@ -357,10 +357,20 @@ authenticated user. Bounded by the fact that all readers are already trusted wit
 the data; worth normalizing if the audience widens.
 
 <a id="a8"></a>
-**A8 — ~~A backup worker's own API is unauthenticated~~ — resolved.** The
-external worker is gone: the app performs its own dumps
-([backups.md](./backups.md)), so there is no second service with an open API in
-the path. Its replacement, `POST /api/backups/cron`, is the app's only
+**A8 — ~~A backup worker's own API is unauthenticated~~ — resolved on
+2026-11-17.** The app performs its own dumps ([backups.md](./backups.md)), but
+the worker it replaced **kept running** after that, open on port 2999 and still
+dumping nightly (#92, #93). This entry was marked resolved in the meantime, which
+was wrong. The worker's container (`mysql-backup-manager` on dev-vm,
+`20.197.41.68`) was stopped on 2026-11-17 with its restart policy set to `no`,
+and port 2999 no longer answers.
+
+Still to clear up, so the finding can't come back: the stopped container and the
+Jenkins workspace `Backup-MySQL Server` (with its `.env`) still hold a second copy
+of the MySQL and Azure credentials, and that Jenkins job is still enabled, so a
+manual run would redeploy the worker. Remove both, or disable the job.
+
+The app's own replacement, `POST /api/backups/cron`, is its only
 token-authenticated route — constant-time comparison, refused entirely when
 `BACKUP_CRON_SECRET` is unset, and able to do exactly one thing: start a backup.
 The original finding, for the record:
