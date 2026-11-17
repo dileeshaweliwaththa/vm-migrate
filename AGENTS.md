@@ -125,5 +125,7 @@ repeated arrays:
   helper rather than repeating a comparison.
 
 After making any code change, run `npm run build` and ensure it completes
-with zero TypeScript errors, then run `npm run lint`, before considering the
-task done.
+with zero TypeScript errors, then run `npm test` and `npm run lint`, before
+considering the task done. A bug fix in pure logic (a service rule, a `lib/`
+helper) comes with a Vitest test that fails without the fix; see
+[docs/architecture.md § Tests](docs/architecture.md#tests).

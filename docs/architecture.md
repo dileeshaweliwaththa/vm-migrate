@@ -99,7 +99,20 @@ supabase/migrations/                  ← Supabase CLI migrations (see schema.md
   request-scoped (cookie session) access, `service.ts` only for the rare
   route with no session (bypasses RLS — see `lib/supabase/service.ts`).
 
+## Tests
+
+**Vitest**, configured in `vitest.config.mts`, run with `npm test`. Tests cover
+the logic that takes plain values and returns plain values: the rules in
+`services/` and the helpers in `lib/`. That's where a wrong answer is easy to
+miss and cheap to pin down. They run in plain Node and never reach Supabase,
+Azure or Jenkins, so a rule that sits next to I/O is written as its own pure
+function and tested there.
+
+A test sits next to the file it covers, as `<name>.test.ts`. Pages and
+components aren't unit-tested; `npm run build`, `npm run lint` and a look in the
+browser cover them.
+
 ## Definition of done
 
 After any code change, run `npm run build` and confirm it completes with zero
-TypeScript errors, then run `npm run lint` and fix any issues.
+TypeScript errors, then run `npm test` and `npm run lint` and fix any issues.
