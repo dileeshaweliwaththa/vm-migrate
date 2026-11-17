@@ -81,6 +81,7 @@ import {
 import { EnvironmentForm } from '@/components/environments/environment-form';
 import { JenkinsConfigDialog } from '@/components/environments/jenkins-config-dialog';
 import { JenkinsJobsDialog } from '@/components/environments/jenkins-jobs-dialog';
+import { DialogBoundary } from '@/components/errors/dialog-boundary';
 import { JenkinsHistoryDialog } from '@/components/environments/jenkins-history-dialog';
 import { DockerImportDialog } from '@/components/environments/docker-import-dialog';
 import { RecordSource } from '@/components/environments/record-source';
@@ -577,14 +578,16 @@ function PortRow({
                 >
                   <History className="h-4 w-4" />
                 </Button>
-                <JenkinsHistoryDialog
-                  projectId={projectId}
-                  envId={env.id}
-                  portId={port.id}
-                  title={port.description || 'record'}
-                  open={historyOpen}
-                  onOpenChange={setHistoryOpen}
-                />
+                <DialogBoundary what="Build history" onClose={() => setHistoryOpen(false)}>
+                  <JenkinsHistoryDialog
+                    projectId={projectId}
+                    envId={env.id}
+                    portId={port.id}
+                    title={port.description || 'record'}
+                    open={historyOpen}
+                    onOpenChange={setHistoryOpen}
+                  />
+                </DialogBoundary>
               </>
             ) : null}
             {canEdit ? (
@@ -858,22 +861,26 @@ function EnvironmentCard({
                       />
                     </Button>
                   ) : null}
-                  <JenkinsConfigDialog
-                    projectId={projectId}
-                    envId={env.id}
-                    envName={environmentTitle(env.name, env.label)}
-                    open={jenkinsOpen}
-                    onOpenChange={setJenkinsOpen}
-                  />
-                  {/* Mounted on the same condition as the button that opens it. */}
-                  {canReachJenkinsServer ? (
-                    <JenkinsJobsDialog
+                  <DialogBoundary what="Jenkins settings" onClose={() => setJenkinsOpen(false)}>
+                    <JenkinsConfigDialog
                       projectId={projectId}
                       envId={env.id}
                       envName={environmentTitle(env.name, env.label)}
-                      open={jobsOpen}
-                      onOpenChange={setJobsOpen}
+                      open={jenkinsOpen}
+                      onOpenChange={setJenkinsOpen}
                     />
+                  </DialogBoundary>
+                  {/* Mounted on the same condition as the button that opens it. */}
+                  {canReachJenkinsServer ? (
+                    <DialogBoundary what="Jenkins jobs" onClose={() => setJobsOpen(false)}>
+                      <JenkinsJobsDialog
+                        projectId={projectId}
+                        envId={env.id}
+                        envName={environmentTitle(env.name, env.label)}
+                        open={jobsOpen}
+                        onOpenChange={setJobsOpen}
+                      />
+                    </DialogBoundary>
                   ) : null}
                 </>
               ) : null}

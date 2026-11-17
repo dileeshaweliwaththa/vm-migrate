@@ -98,6 +98,36 @@ supabase/migrations/                  ← Supabase CLI migrations (see schema.md
   request-scoped (cookie session) access, `service.ts` only for the rare
   route with no session (bypasses RLS — see `lib/supabase/service.ts`).
 
+## Errors and "not found"
+
+A failure is caught as close to where it happened as possible, so the rest of
+the app keeps working:
+
+| What fails | Caught by | What the reader sees |
+| --- | --- | --- |
+| A risky panel: the docs viewer and editor | `SectionBoundary` (`components/errors/`) | A small message in place of the panel, with **Try again** |
+| A risky dialog: the three Jenkins dialogs | `DialogBoundary`, wrapped **at the call site** | The error in a dialog; closing it closes the original |
+| Any signed-in page | `app/(protected)/(app)/error.tsx` | The message inside the shell, sidebar still there, with **Try again** |
+| The root layout itself | `app/global-error.tsx` | A standalone page with its own `<html>` |
+| A `[id]` page whose row doesn't exist | the page calls `notFound()` → `app/(protected)/(app)/not-found.tsx` | An in-shell 404 |
+| A URL matching no route | `app/not-found.tsx` | A plain 404 |
+
+All of them render `ErrorState` (`components/errors/error-state.tsx`), and none
+shows a server error's message, which production replaces anyway. They show the
+`digest`, which matches the server log.
+
+The boundaries come from Next's `unstable_catchError`. One catches errors from
+the components **below** it, not from the component whose JSX it sits in. That's
+why the Jenkins dialogs are wrapped where they're mounted: they map their rows
+inline.
+
+**A detail page checks its row before rendering.** `projects/[id]`, `vms/[id]`
+and `backups/[id]` call `projectExists` / `vmExists` / `backupTargetExists` and
+`notFound()` on a miss. Those services, and the getters behind each page's API,
+reject an id that isn't a uuid (`isUuid`, `lib/ids.ts`) before asking Postgres,
+whose `uuid` columns would fail the query with a database error rather than
+return no row.
+
 ## Tests
 
 **Vitest**, configured in `vitest.config.mts`, run with `npm test`. Tests cover

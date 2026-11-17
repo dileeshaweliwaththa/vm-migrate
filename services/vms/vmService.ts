@@ -39,6 +39,7 @@ import {
 } from '@/repositories/vmIps/vmIpRepository';
 import { getCurrentRole } from '@/services/auth/authService';
 import { canEdit, isAdmin } from '@/lib/rbac';
+import { isUuid } from '@/lib/ids';
 import { bareHost } from '@/lib/endpoints';
 import { ForbiddenError } from '@/lib/errors';
 import type { VmRow } from '@/types/supabase/response/vms';
@@ -250,7 +251,18 @@ export const getTrackerData = async (): Promise<TrackerData> => {
 //
 // Readable by every signed-in role, like the tracker — every table read here is
 // select-open under RLS, and Jenkins is the secret-free config.
+// Whether a VM page has anything to show: the row exists and isn't in the
+// tracker's trash. What the page checks before it renders, so a stale link is a
+// 404 (see `projectExists`).
+export const vmExists = async (id: string): Promise<boolean> => {
+  if (!isUuid(id)) return false;
+  const row = await findVmById(id);
+  return Boolean(row && !row.deleted);
+};
+
 export const getVmDetail = async (id: string): Promise<VmDetail | null> => {
+  // Not a uuid, so no row can match; asking Postgres would only fail (lib/ids.ts).
+  if (!isUuid(id)) return null;
   const row = await findVmById(id);
   if (!row || row.deleted) return null;
 

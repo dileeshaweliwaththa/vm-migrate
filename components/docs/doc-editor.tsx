@@ -21,6 +21,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { DocToolbar } from '@/components/docs/doc-toolbar';
+import { SectionBoundary } from '@/components/errors/section-boundary';
 
 // The editing surface, mounted only while the dialog is open so useEditor
 // initializes from the latest saved doc each time. A shadcn toolbar drives the
@@ -134,7 +135,11 @@ export function DocEditorDialog({
             Write project documentation, or generate a first draft with AI and edit it before saving.
           </DialogDescription>
         </DialogHeader>
-        <DocEditorBody projectId={projectId} initialDoc={initialDoc} onSaved={() => onOpenChange(false)} />
+        {/* The editor parses stored rich-text JSON; a malformed document fails
+            here, inside the dialog, instead of taking the project page down. */}
+        <SectionBoundary what="the documentation editor">
+          <DocEditorBody projectId={projectId} initialDoc={initialDoc} onSaved={() => onOpenChange(false)} />
+        </SectionBoundary>
       </DialogContent>
     </Dialog>
   );

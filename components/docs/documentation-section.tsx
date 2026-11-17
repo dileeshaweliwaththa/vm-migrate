@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { DocView } from '@/components/docs/doc-view';
+import { SectionBoundary } from '@/components/errors/section-boundary';
 import { DocEditorDialog } from '@/components/docs/doc-editor';
 
 // Documentation section for the project page. Shows the rendered doc (or an
@@ -61,7 +62,9 @@ export function DocumentationSection({
         </p>
       ) : hasContent ? (
         <div className="rounded-lg border border-border px-5 py-4">
-          <DocView html={doc?.contentHtml ?? ''} />
+          <SectionBoundary what="the documentation">
+            <DocView html={doc?.contentHtml ?? ''} />
+          </SectionBoundary>
         </div>
       ) : (
         <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border py-10 text-center text-sm text-muted-foreground">

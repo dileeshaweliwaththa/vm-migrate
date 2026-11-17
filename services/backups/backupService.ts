@@ -45,6 +45,7 @@ import {
 } from '@/services/backups/backupOwnership';
 import { findStorageIdsWithSecret } from '@/repositories/backupStorage/backupStorageRepository';
 import { isAdmin } from '@/lib/rbac';
+import { isUuid } from '@/lib/ids';
 import { ForbiddenError } from '@/lib/errors';
 import type { BackupDispatchRow, BackupTargetRow } from '@/types/supabase/response/backupTargets';
 import {
@@ -421,8 +422,14 @@ export const listBackupTargetSummaries = async (): Promise<BackupTargetSummary[]
 // The dumps that exist only as blobs — everything the worker this feature
 // replaced wrote — are *not* here. Finding them means listing the container, so
 // they arrive with the live tier and the history merges them in.
+// Whether a target page has anything to show. What the page checks before it
+// renders, so a stale link is a 404 (see `projectExists`).
+export const backupTargetExists = async (id: string): Promise<boolean> =>
+  isUuid(id) && (await findBackupTargetById(id)) !== null;
+
 export const getBackupTargetOverview = async (id: string): Promise<BackupTargetOverview> => {
-  const row = await findBackupTargetById(id);
+  // Not a uuid, so no row can match; asking Postgres would only fail (lib/ids.ts).
+  const row = isUuid(id) ? await findBackupTargetById(id) : null;
   if (!row) throw new Error('Backup target not found.');
 
   const [flags, runs, dispatches, stats, configured] = await Promise.all([
@@ -530,7 +537,7 @@ const listArchivedRecords = async (
 // Both halves are outbound and neither depends on the other, so they go together
 // and the page waits once rather than twice.
 export const getBackupTargetLive = async (id: string): Promise<BackupTargetLive> => {
-  const row = await findBackupTargetById(id);
+  const row = isUuid(id) ? await findBackupTargetById(id) : null;
   if (!row) throw new Error('Backup target not found.');
 
   const flags = await findBackupTargetSecretFlags([id]);

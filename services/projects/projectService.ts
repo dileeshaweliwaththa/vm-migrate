@@ -11,6 +11,7 @@ import { getAuthenticatedUser } from '@/repositories/auth/authRepository';
 import { upsertTags, replaceProjectTags } from '@/repositories/tags/tagRepository';
 import { getCurrentRole } from '@/services/auth/authService';
 import { isAdmin } from '@/lib/rbac';
+import { isUuid } from '@/lib/ids';
 import type { Project, ProjectDetail, ProjectInput } from '@/types/common/project';
 import {
   collectProjectEnvironments,
@@ -65,7 +66,15 @@ export const listProjects = async (includeArchived = false): Promise<Project[]> 
   return showArchived ? projects : projects.filter((p) => !p.archived);
 };
 
+// Whether a project page has anything to show — what the page checks before it
+// renders, so a stale or mistyped link is a 404 rather than a page that loads
+// and then reports an error. One row, no environments.
+export const projectExists = async (id: string): Promise<boolean> =>
+  isUuid(id) && (await findProjectById(id)) !== null;
+
 export const getProject = async (id: string): Promise<ProjectDetail | null> => {
+  // Not a uuid, so no row can match; asking Postgres would only fail (lib/ids.ts).
+  if (!isUuid(id)) return null;
   const row = await findProjectById(id);
   if (!row) return null;
   const envRows = await findProjectEnvironments(id);
