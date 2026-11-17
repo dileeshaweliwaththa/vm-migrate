@@ -5,7 +5,6 @@ import { ChevronsUpDown, LogOut } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { createClient } from '@/lib/supabase/client';
 import type { UserRole } from '@/types/common';
-import { NEVER_ACTIVE } from '@/components/layout/sidebar-item-styles';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -69,11 +68,8 @@ export function UserMenu({
             // on the navy chrome. See docs/ui-guidelines.md § Two traps in the
             // sidebar.
             'h-auto gap-3 py-2 text-sidebar-primary-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-            // `data-[state=open]`, not `data-open:` — Radix 1.4.3 emits the
-            // *valued* attribute, and the boolean variant would never match.
-            'data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground',
-            // Never a nav destination; kills the primitive's phantom active fill.
-            NEVER_ACTIVE
+            // Stays highlighted while its menu is open.
+            'data-open:bg-sidebar-accent data-open:text-sidebar-accent-foreground'
           )}
         >
           <Avatar className="size-9 shrink-0 rounded-full group-data-[collapsible=icon]:size-8">

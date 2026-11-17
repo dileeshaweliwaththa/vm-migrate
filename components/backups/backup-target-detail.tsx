@@ -243,9 +243,7 @@ export function BackupTargetDetail({
           page's own padding, so a narrower body left a gutter on both sides that
           read as a mistake — and the history's nine columns want the room. */}
       <div className="mx-auto w-full max-w-[100rem] space-y-4 px-4 py-8 sm:px-8">
-        {/* `ToggleGroup`, not `ui/tabs` — the generated tabs primitive styles on
-            Radix 2.x boolean attributes 1.4.3 never emits and renders as an empty
-            block (docs/ui-guidelines.md). Same control as the project page's. */}
+        {/* `ToggleGroup`: the same view switch as the project page's. */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <ToggleGroup
             type="single"

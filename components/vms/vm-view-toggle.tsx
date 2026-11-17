@@ -61,9 +61,7 @@ export function useVmView(): [VmView, (next: VmView) => void] {
   return [view, choose];
 }
 
-// `ToggleGroup`, not `ui/tabs` — same reason as the projects tag filter: the
-// generated tabs primitive styles on Radix 2.x boolean data attributes that
-// 1.4.3 never emits, so it renders as an empty block. See docs/ui-guidelines.md.
+// A `ToggleGroup`, the same segmented control as the projects tag filter.
 export function VmViewToggle({
   value,
   onChange,

@@ -10,9 +10,7 @@ import { countDatabases } from '@/lib/backup-utils';
 // actually decided: usually everything, sometimes one that failed.
 //
 // `ToggleGroup type="multiple"`, not a row of checkboxes: nineteen labelled chips
-// in a wrapped row is denser and reads as one control. It styles on
-// `data-[state=on]`, which radix-ui 1.4.3 does emit — `ui/tabs` and `ui/switch`
-// are the primitives that don't (docs/ui-guidelines.md).
+// in a wrapped row is denser and reads as one control.
 //
 // **`canManage: false` renders the same list as plain labels.** Which databases
 // are on a server, and therefore what is being backed up, is the most useful

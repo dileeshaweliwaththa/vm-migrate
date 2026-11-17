@@ -179,8 +179,7 @@ export function VmAddressDialog({
                   `flex-1` on the items has nothing to divide and the control
                   shrinks to its text — two segments of different widths rather
                   than a segmented control. Same `data-[state=on]` styling as
-                  `VmViewToggle`; `ui/tabs` is not an option here (it targets
-                  Radix 2.x attributes — docs/ui-guidelines.md). */}
+                  `VmViewToggle`. */}
               <ToggleGroup
                 type="single"
                 value={origin}

@@ -18,8 +18,7 @@ Admin-only end to end (defense-in-depth):
 
 ## Layout
 
-One category at a time: a menu down the left (shadcn `Item`s — `ui/tabs` renders
-empty on Radix 1.4.3, see [ui-guidelines.md](./ui-guidelines.md)), the chosen
+One category at a time: a menu down the left (shadcn `Item`s), the chosen
 section on the right, stacked on narrow screens. Each section owns its own
 buttons — the AI section its **Save**, GitHub its **Connect / Test / Disconnect** —
 so there is no page-level Save.

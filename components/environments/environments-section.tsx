@@ -152,11 +152,9 @@ export function EnvironmentsSection({
       </div>
 
       {/* One stage needs no switcher — "All" and the single button would filter to
-          the same thing, four PRODUCTIONs included. `ToggleGroup`, not `ui/tabs`:
-          the generated tabs primitive styles on Radix 2.x boolean data attributes
-          that 1.4.3 never emits and renders as an empty block
-          (docs/ui-guidelines.md). Same treatment as the tag filter on the
-          projects list, so the two read as one control. */}
+          the same thing, four PRODUCTIONs included. A `ToggleGroup`, the same
+          treatment as the tag filter on the projects list, so the two read as one
+          control. */}
       {stages.length > 1 ? (
         <ToggleGroup
           type="single"
@@ -783,9 +781,7 @@ function EnvironmentCard({
           </Badge>
           {env.vmName ? (
             <>
-              {/* `w-px` because ui/separator.tsx can't supply it on Radix 1.4.3 —
-                  see docs/ui-guidelines.md § Known casualties. */}
-              <Separator orientation="vertical" className="mx-1 h-4 w-px" />
+              <Separator orientation="vertical" className="mx-1 h-4" />
               {/* To the machine's own page: its other endpoints, what else runs
                   on it, and whether it answers. */}
               <Link

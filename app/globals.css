@@ -1,5 +1,11 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
+/* The variants the generated components/ui/ files style on: `data-open`,
+   `data-checked`, `data-active`, `data-horizontal` and the rest, mapped onto what
+   Radix actually emits (`data-state="open"`, `data-orientation="horizontal"`, …).
+   `shadcn init` adds this line; this project was missing it, which is why those
+   primitives rendered unstyled (#45). See docs/ui-guidelines.md. */
+@import 'shadcn/tailwind.css';
 @plugin '@tailwindcss/typography';
 
 @custom-variant dark (&:is(.dark *));

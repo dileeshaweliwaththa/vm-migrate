@@ -181,10 +181,7 @@ export function ProjectDetail({
         ) : null}
 
         {/* Underlined tabs, per the design: the selected view is marked by a 2px
-            rule in `primary` and a faint card fill, not by a pill.
-            `ToggleGroup` rather than `ui/tabs`, which styles on the Radix 2.x
-            boolean `data-active` and renders as an empty block on 1.4.3 — see
-            docs/ui-guidelines.md. `data-[state=on]` is emitted by 1.4.3. */}
+            rule in `primary` and a faint card fill, not by a pill. */}
         <ToggleGroup
           type="single"
           value={view}

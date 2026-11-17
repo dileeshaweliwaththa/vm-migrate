@@ -41,7 +41,8 @@ was correct, so the fault is in the registry item. After any `add`, check the ne
 file's `cn` import and `git diff package.json`. Fixing a broken generated import
 is allowed; rule 3 is about feature logic. Also answer **no** when the CLI offers to
 overwrite an existing primitive it depends on (it asked about `separator.tsx`):
-the existing files carry the Radix 1.4.3 notes below.
+other features already render with that file, so regenerate it on purpose, with
+its diff checked, not as a side effect of adding something else.
 
 ## Overriding widths on a primitive (a real trap)
 
@@ -63,56 +64,38 @@ The same reasoning applies to any generated primitive that sets a responsive
 utility — check the primitive's own classes before overriding. Editing the file in
 `components/ui/` to "fix" it is not the answer (rule 3).
 
-## Generated primitives target Radix 2.x — this project is on 1.4.3
+## The `data-*` variants come from `shadcn/tailwind.css`
 
-The biggest source of "the class is right there and does nothing" in this codebase.
-The generated files in `components/ui/` were produced for a shadcn style that
-assumes **Radix 2.x**, which emits *boolean* data attributes. `package.json` pins
-`radix-ui@^1.4.3`, which emits *valued* ones:
+The generated files in `components/ui/` style on short variants: `data-open:`,
+`data-closed:`, `data-checked:`, `data-unchecked:`, `data-active:`,
+`data-horizontal:`, `data-vertical:`, `data-selected:`, `data-disabled:`. Radix
+doesn't emit those attributes. It emits valued ones, and shadcn ships the mapping
+as `@custom-variant`s in **`shadcn/tailwind.css`**, imported at the top of
+`app/globals.css`:
 
-| Generated file styles on | Radix 1.4.3 actually emits |
-| ------------------------ | -------------------------- |
-| `data-checked` / `data-unchecked` | `data-state="checked"` / `"unchecked"` |
-| `data-horizontal` / `data-vertical` | `data-orientation="horizontal"` / `"vertical"` |
-| `data-active` | `data-state="active"` |
+| Variant | Matches |
+| ------- | ------- |
+| `data-open` / `data-closed` | `[data-state="open"]` / `"closed"` |
+| `data-checked` / `data-unchecked` | `[data-state="checked"]` / `"unchecked"` |
+| `data-active` | `[data-state="active"]`, or `[data-active]` unless it is `"false"` |
+| `data-horizontal` / `data-vertical` | `[data-orientation="horizontal"]` / `"vertical"` |
+| `data-selected` | `[data-selected="true"]` |
+| `data-disabled` | `[data-disabled]` unless it is `"false"` |
 
-In Tailwind v4, `data-checked:` compiles to `&[data-checked]` — attribute
-*presence*. Radix never sets that attribute, so the utility never applies. Nothing
-errors; the element just renders unstyled.
+**Keep that import.** Without it, Tailwind falls back to its built-in meaning,
+attribute *presence* (`data-checked:` → `&[data-checked]`). Nothing errors; the
+primitives just render wrong. Until November 2026 the import was missing (#45), and
+the symptoms were an invisible `Switch`, a `Tabs` list with no active tab,
+zero-size `Separator`s, every `Command` item highlighted at once, no open/close
+animation on dialogs and menus, and every `SidebarMenuButton` drawn as active.
+Those workarounds (`Toggle` instead of `Switch`, explicit separator sizes, a
+neutralising class on the sidebar) are no longer needed. Where they remain they
+are harmless.
 
-**Known casualties:**
-
-- `ui/switch.tsx` — the track's `data-unchecked:bg-input` never lands, so the track
-  is transparent and the thumb is `bg-background`: an **invisible switch** that
-  still occupies its 32px. Don't use it; use `Toggle`, which styles on
-  `data-[state=on]` and `aria-pressed` (both emitted by 1.4.3) and sizes itself
-  unconditionally.
-- `ui/tabs.tsx` — the `data-horizontal` / `group-data-horizontal` paths don't
-  resolve, so the tab list renders as an empty block. Use `toggle-group` for
-  segmented switches.
-- `ui/separator.tsx` — carries **all** of its sizing on
-  `data-horizontal:h-px data-horizontal:w-full data-vertical:w-px data-vertical:self-stretch`,
-  while the primitive emits only `data-orientation`. So a `Separator` is
-  **zero-area**: it mounts, occupies nothing, and shows nothing. `className="h-4"`
-  on a vertical one is *not* enough — the **width** is the part the primitive was
-  supposed to supply, which is why this reads as "the divider just isn't there"
-  rather than as a sizing bug. Pass the missing axis explicitly:
-
-  ```tsx
-  <Separator orientation="vertical" className="h-4 w-px" />   {/* ✅ */}
-  <Separator className="h-px w-full" />                       {/* ✅ horizontal */}
-  <Separator orientation="vertical" className="h-4" />        {/* ❌ invisible */}
-  ```
-
-  `SidebarSeparator` in `ui/sidebar.tsx` wraps the same primitive and inherits the
-  same problem.
-
-**Before reaching for a primitive from `components/ui/`,** check whether its
-classes depend on a boolean `data-*` variant. If they do, it will render wrong.
-Prefer one that keys off `data-[state=…]` or `aria-*`.
-
-Do **not** hand-edit the file to fix it (rule 3). The real fix is to upgrade
-`radix-ui` to 2.x and re-verify every primitive — tracked separately.
+If a primitive ever renders unstyled again, check this import before anything
+else. Do **not** hand-edit the file in `components/ui/` (rule 3), and don't swap
+the short variant for a hand-written `data-[state=…]` one at the call site: the
+mapping belongs in one place.
 
 ## Three more silent traps in dialogs
 
@@ -342,39 +325,15 @@ grep -c -F '.bg-your-token' $(grep -l 'sidebar-primary' .next/static/chunks/*.cs
    for `text-muted-foreground` and the default `AvatarFallback` tone: both are
    tuned for a light surface and wash out on the dark chrome.
 
-2. **`SidebarMenuButton`'s active styling applies to every button.** The primitive
-   renders `data-active={isActive}` *unconditionally*, and React stringifies a
-   `data-*` `false` — so the attribute is always present as `"false"`. Tailwind's
-   `data-active:` variant compiles to `[data-active]`, which tests attribute
-   **presence**, so the variant's
-   `data-active:bg-sidebar-accent data-active:font-medium
-   data-active:text-sidebar-accent-foreground` matches all of them. With the old
-   near-invisible accent nobody noticed; the moment the active colour became
-   distinct, the entire nav rendered filled.
-
-   This hits **every** `SidebarMenuButton`, not just nav items — including the two
-   that can never be active: the logo lockup and the account menu. Both rendered
-   permanently filled.
-
-   The fix is [`components/layout/sidebar-item-styles.ts`](../components/layout/sidebar-item-styles.ts),
-   which exports one `NEVER_ACTIVE` string restating those variants so
-   tailwind-merge drops the primitive's versions (same class group, same variant →
-   last wins). All three call sites use it; `navItemClass()` in `app-sidebar.tsx`
-   layers the *real* active styling on top from React state, with `!` because both
-   land at equal specificity and emission order shouldn't decide the winner. It
-   lives in a shared module because a copy that drifts fails silently — the button
-   just renders filled.
-
-   This is the same family as the Radix boolean-attribute trap above, but a
-   *different* root cause: it is the primitive's own JSX, so upgrading Radix will
-   not fix it. Don't edit `components/ui/sidebar.tsx` (rule 3); override at the
-   call site.
-
-3. **Reach for `data-[state=open]`, never `data-open:`.** The variant string also
-   carries `data-open:hover:bg-sidebar-accent`, which is dead on 1.4.3 for the
-   usual reason. When a `SidebarMenuButton` is a `DropdownMenuTrigger` (the
-   account menu), style its open state with `data-[state=open]:` — the valued
-   attribute 1.4.3 actually emits.
+2. **The nav item's own active styling needs `!`.** `SidebarMenuButton` renders
+   `data-active={isActive}` on every button, so the attribute is present as
+   `"false"` on inactive ones. The `data-active` variant from
+   `shadcn/tailwind.css` skips `"false"`, so only the real active item gets the
+   primitive's `data-active:bg-sidebar-accent data-active:font-medium …`.
+   `navItemClass()` in `app-sidebar.tsx` then layers the design's active styling
+   on top with `!`: both sets land at the same specificity and tailwind-merge
+   keeps both (different variants), so without `!` emission order would decide.
+   Don't edit `components/ui/sidebar.tsx` (rule 3); style at the call site.
 
 The sidebar is **280px**, not the primitive's 16rem. `SidebarProvider` spreads
 `style` *after* its own custom properties, so the app layout overrides

@@ -346,9 +346,8 @@ export function BackupTargetDialog({
                     {cronSchedule} · pg_cron
                   </p>
                 </div>
-                {/* `Toggle`, not `Switch`: the generated switch styles on Radix
-                    2.x boolean data attributes this project's 1.4.3 never emits
-                    and renders invisible (docs/ui-guidelines.md). */}
+                {/* `Toggle`: the same on/off control as the projects page's
+                    Show Archived. */}
                 <Toggle
                   variant="outline"
                   size="sm"

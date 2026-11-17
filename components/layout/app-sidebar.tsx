@@ -14,7 +14,6 @@ import {
 import { cn } from '@/lib/utils';
 import { isAdmin } from '@/lib/rbac';
 import type { UserRole } from '@/types/common';
-import { NEVER_ACTIVE } from '@/components/layout/sidebar-item-styles';
 import { UserMenu } from '@/components/layout/user-menu';
 import {
   Sidebar,
@@ -54,25 +53,17 @@ const UTILITY_NAV: NavItem[] = [
 
 // Shared by both groups so the pinned Settings item can't drift from the rest.
 //
-// `NEVER_ACTIVE` first to kill the primitive's phantom active fill (see that
-// module for why every button gets it), then the real active styling from React
-// state. `!` on the active rules because both land at equal specificity and
-// emission order shouldn't pick the winner.
+// The active styling comes from React state and carries `!`: the primitive's own
+// `data-active:bg-sidebar-accent data-active:font-medium …` also applies to the
+// active item, at the same specificity, and tailwind-merge keeps both (different
+// variants), so emission order would otherwise pick the winner.
 const navItemClass = (active: boolean) =>
   cn(
     'h-10 gap-4 rounded-sm text-body-md transition-all duration-200 [&>svg]:size-5',
-    NEVER_ACTIVE,
     active
       ? // The accent, plus the design's two touches: a glow keyed to the same
         // accent, and a 4px nudge inward. The nudge is dropped on the icon rail,
         // where there is no room for it and it would just clip the icon.
-        //
-        // `font-semibold!` needs the `!` as much as the colours do, and for a
-        // second reason: `NEVER_ACTIVE`'s `data-active:font-normal` compiles to
-        // `.data-active\:font-normal[data-active]` — specificity (0,2,0) — which
-        // outranks a plain `.font-semibold` (0,1,0). tailwind-merge keeps both
-        // (different variants), so without the `!` the current nav item silently
-        // renders at the same weight as its inactive siblings.
         'bg-sidebar-primary! font-semibold! text-sidebar-primary-foreground! shadow-nav-active hover:bg-sidebar-primary! hover:text-sidebar-primary-foreground! translate-x-1 group-data-[collapsible=icon]:translate-x-0'
       : 'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
   );
@@ -103,11 +94,11 @@ export function AppSidebar({
       <SidebarHeader className="pt-4 pb-6">
         <SidebarMenu>
           <SidebarMenuItem>
-            {/* Not a nav destination, so it must never render as active. */}
+            {/* Not a nav destination, so it never gets `isActive`. */}
             <SidebarMenuButton
               asChild
               size="lg"
-              className={cn('h-14 justify-center hover:bg-transparent', NEVER_ACTIVE)}
+              className="h-14 justify-center hover:bg-transparent"
             >
               {/* The name is on the link so assistive tech reads "DevOps Portal"
                   as one phrase — PORTAL is split into individual letters below,

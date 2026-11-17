@@ -42,13 +42,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
         <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-2 border-b border-border bg-background/80 px-4 backdrop-blur-md sm:px-8">
           <SidebarTrigger className="-ml-1 text-muted-foreground" />
-          {/* `w-px` is supplied here because the primitive can't. `ui/separator.tsx`
-              puts *all* of its sizing on `data-horizontal:` / `data-vertical:` —
-              Radix 2.x boolean attributes — and 1.4.3 emits `data-orientation`
-              instead, so the width never lands and the divider is zero-area. Third
-              casualty of that trap, alongside Switch and Tabs; see
-              docs/ui-guidelines.md. */}
-          <Separator orientation="vertical" className="mr-2 h-4 w-px" />
+          <Separator orientation="vertical" className="mr-2 h-4" />
           <Breadcrumbs />
           {/* No account control here — identity and sign-out live in the sidebar
               footer, in one place. */}

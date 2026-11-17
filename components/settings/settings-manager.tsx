@@ -257,8 +257,7 @@ const SECTIONS: Record<
 
 // Categories down the left, the chosen one on the right — one section on screen
 // at a time, so the page doesn't grow into a single long form as integrations
-// are added. The menu is shadcn's `Item` (not `ui/tabs`, which renders empty on
-// Radix 1.4.3 — docs/ui-guidelines.md). It stacks above the content on narrow
+// are added. The menu is shadcn's `Item`. It stacks above the content on narrow
 // screens.
 //
 // The choice is mirrored into `?section=`, so a category can be linked to

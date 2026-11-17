@@ -98,13 +98,8 @@ export function CellInput({
 // The tracker's tick box — the selection gutter, the select-all header, and the
 // options in the address dialog.
 //
-// `ui/checkbox.tsx` is one of the generated primitives written for Radix 2.x: its
-// checked styling is all `data-checked:*`, a boolean attribute 1.4.3 never emits,
-// so a ticked box would render as a bare check with no fill. The overrides below
-// restate it on `data-[state=checked]`, which 1.4.3 does emit — same class
-// groups, so tailwind-merge drops the dead ones. Kept here, in one place, rather
-// than copied into each view: a copy that drifts fails silently. See
-// docs/ui-guidelines.md § Generated primitives target Radix 2.x.
+// A thin wrapper over `ui/checkbox` that takes and reports a plain boolean and is
+// always labelled, so every tick box in the tracker behaves the same.
 export function TrackerCheckbox({
   checked,
   onCheckedChange,
@@ -128,10 +123,7 @@ export function TrackerCheckbox({
       onCheckedChange={(v) => onCheckedChange(v === true)}
       aria-label={label}
       title={label}
-      className={cn(
-        'border-input data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground',
-        className
-      )}
+      className={className}
     />
   );
 }

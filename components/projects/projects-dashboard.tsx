@@ -85,11 +85,8 @@ export function ProjectsDashboard({
 
       <div className="mx-auto w-full max-w-7xl space-y-6 px-4 py-8 sm:px-8">
         <div className="flex flex-wrap items-center justify-between gap-3">
-        {/* `ToggleGroup`, not `ui/tabs`. The generated tabs primitive styles on
-            `data-horizontal` / `data-active` — Radix 2.x boolean attributes that
-            1.4.3 never emits — so the tag filter rendered as an empty block. This
-            keys off `data-[state=on]`, which 1.4.3 does emit. Same trap as the
-            Switch, documented in docs/ui-guidelines.md. */}
+        {/* The tag filter: a `ToggleGroup`, the same control as the stage
+            filter on a project's environments. */}
         {tags.length > 1 ? (
           <ToggleGroup
             type="single"
@@ -112,14 +109,7 @@ export function ProjectsDashboard({
         )}
         <div className="flex items-center gap-4">
           {/* Admin-only: archived projects are invisible to editors and viewers,
-              and the service enforces that regardless of what the UI sends.
-
-              Toggle, not Switch. `ui/switch.tsx` styles on `data-checked` /
-              `data-unchecked`, which are Radix 2.x boolean attributes — this project
-              is on radix-ui 1.4.3, which emits `data-state="checked"`. So the track
-              never gets a background and the switch renders invisible. Toggle uses
-              `data-[state=on]` + `aria-pressed`, both of which 1.4.3 does emit, and
-              its sizing isn't conditional on a data variant. See ui-guidelines.md. */}
+              and the service enforces that regardless of what the UI sends. */}
           {isAdmin ? (
             <Toggle
               variant="outline"

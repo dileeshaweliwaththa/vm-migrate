@@ -57,7 +57,7 @@ Before implementing any feature, request, or fix, read and follow:
 - [docs/ui-guidelines.md](docs/ui-guidelines.md) — shadcn/ui is the only
   allowed component library; install primitives via the shadcn CLI and
   compose feature components from them. Also the **theme** (navy chrome, light
-  content) and the Radix 1.4.3 traps — read it before using a primitive.
+  content) and the primitive traps — read it before using a primitive.
 - [docs/schema.md](docs/schema.md) — database schema and the migration workflow.
 - [docs/auth.md](docs/auth.md) — the sign-in flow, and **where access is
   enforced** (page guard / route handler / role + RLS).
