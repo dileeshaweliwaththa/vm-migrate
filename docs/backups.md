@@ -53,8 +53,11 @@ as there were targets. A target now *picks* one.
 
 Because one container is shared, **each target writes under its own prefix**:
 `<container>/<target prefix>/<database>/<database>_<timestamp>.sql.gz`. Retention
-deletes by age *within* that prefix — without it, one target's seven-day policy
-would delete another's dumps. The prefix is derived from the target's name once,
+deletes by age only among the blobs a target **owns** — without that, one target's
+seven-day policy would delete another's dumps. A target owns its prefix, plus the
+older flat `<database>/<file>` layout if it is the one target claiming it (see
+[History is the container](#history-is-the-container-not-just-our-rows)). The
+prefix is derived from the target's name once,
 at creation, and then fixed: renaming a target must not orphan the blobs already
 written under the old one.
 
@@ -71,7 +74,7 @@ Five things, and nothing else:
 | --- | --- |
 | Engine | `engine` — `mysql` or `postgres`, which decides the client and nothing else |
 | Connection | `db_host`, `db_port`, `db_user` + the password in `backup_target_secrets` |
-| Retention | `retention_days` — blobs older than this are deleted from its prefix after each run |
+| Retention | `retention_days` — blobs it owns that are older than this are deleted after each run |
 | Destination | `storage_id` → a shared `backup_storage_accounts` row |
 | Schedule | `cron_schedule`, `schedule_enabled` → a pg_cron job |
 
@@ -95,7 +98,7 @@ The Azure key is the destination's, held the same way.
 | Routing    | `app/(protected)/(app)/backups/page.tsx` (the index), `backups/[id]/page.tsx` (one target); `app/api/backups/**/route.ts`, of which `[id]/live/route.ts` is the one that talks to anything outside Supabase |
 | UI         | `components/backups/backups-index.tsx`, `backup-target-detail.tsx`, `backup-stat-cards.tsx`, `backup-database-picker.tsx`, `backup-log-panel.tsx`, `backup-history.tsx`, `backup-schedule-test.tsx`, `backup-target-dialog.tsx`, `backup-storage-dialog.tsx` |
 | Hook       | `hooks/backups/useBackups.ts`, `useBackupStorage.ts`                                      |
-| Service    | `services/backups/backupService.ts` (rules + mapping), `backupStorageService.ts` (the destinations), `backupCronService.ts` (**testing the schedule**), `backupRunner.ts` (**the work**) |
+| Service    | `services/backups/backupService.ts` (rules + mapping), `backupStorageService.ts` (the destinations), `backupCronService.ts` (**testing the schedule**), `backupRunner.ts` (**the work**), `backupOwnership.ts` (**which blobs belong to which target**, shared by the history, download/delete and retention) |
 | Repository | `backupTargets/*`, `backupStorage/*`, `backupRuns/*`, `backupCron/*` (Supabase), `mysql/mysqlDumpRepository.ts` + `postgres/pgDumpRepository.ts` (**processes**), `azure/azureBlobRepository.ts` (**Azure SDK**) |
 
 Presentation helpers (`formatBytes`, `formatDuration`, `describeCron`,
@@ -439,6 +442,20 @@ Details that matter:
 - **Retention runs after the batch** and never fails it: the backups are made, and
   an old blob surviving a day longer is not a reason to report a good run as
   broken.
+- **Retention deletes what the history shows, by the same rule.** Both ask
+  `backupOwnership` which blobs a target owns. Retention used to look only under
+  the target's prefix, so the older flat `<database>/<file>` dumps, listed in the
+  history under the target that claims that layout, were never deleted: by
+  November 2026 that was 1,718 dumps and 14.6GB past a seven-day policy, still
+  growing nightly because the old worker kept writing there
+  ([#92](https://github.com/kodplex/upview-vm-tracker/issues/92)). The first run
+  after the fix clears that backlog, and its log line says how many of the dumps
+  came from the flat layout. The rule also means a target with no prefix deletes
+  nothing it cannot attribute. It used to list the whole container and delete
+  every old blob in it, other targets' included.
+- **Retention reads the targets service-role**, like the rest of the runner: on a
+  scheduled run the session client sees no targets, which would silently change
+  the answer to "does this target own the flat layout".
 
 ### If a dump ever needs to run elsewhere
 
@@ -652,7 +669,17 @@ Blobs are attributed to a target by path. This app writes
 older flat `<database>/<file>` layout has nothing to attribute by, so it is
 claimed only when exactly **one** target still carries that container in its
 legacy `azure_container` — with two candidates, showing those dumps under
-neither beats showing them under the wrong database server.
+neither beats showing them under the wrong database server. A blob at the
+container root belongs to no target. The rule lives in
+`services/backups/backupOwnership.ts` and is the same one retention deletes by,
+so a dump shown under a target is a dump that target's retention removes.
+
+"No row accounts for it" means no row among **all** of the target's runs.
+`findBackupRunBlobNames` reads them a page of 1,000 at a time, because PostgREST
+returns at most 1,000 rows per request. It used to make one unpaged request. Past
+1,000 runs the rest were silently missing, so their dumps showed twice: once as
+the run (with a duration) and once as a blob only the container knew about
+(without one).
 
 Record ids therefore come in two shapes: a UUID for a run row, and
 `blob_<base64url path>` for a blob. They are interpolated into a route path, and

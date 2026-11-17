@@ -274,7 +274,9 @@ like every other secrets table here.
 | `backup_storage_secrets` | `storage_id uuid pk → backup_storage_accounts`, `connection_string`, timestamps |
 
 Because the container is shared, `backup_targets.blob_prefix` gives each target
-its own folder inside it; retention deletes by age within that prefix. It is
+its own folder inside it; retention deletes by age among the blobs the target
+owns: that prefix, plus the older flat `<database>/<file>` layout when the target
+is the one claiming it (see [backups.md](./backups.md)). It is
 derived from the target's name at creation and then fixed — renaming a target
 would otherwise orphan everything under the old prefix.
 

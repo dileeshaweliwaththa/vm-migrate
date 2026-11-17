@@ -39,6 +39,10 @@ import {
   toBackupEngine,
 } from '@/services/backups/backupRunner';
 import { getStorageForWrite } from '@/services/backups/backupStorageService';
+import {
+  blobBelongsToTarget,
+  ownedListingPrefix,
+} from '@/services/backups/backupOwnership';
 import { findStorageIdsWithSecret } from '@/repositories/backupStorage/backupStorageRepository';
 import { isAdmin } from '@/lib/rbac';
 import { ForbiddenError } from '@/lib/errors';
@@ -206,46 +210,9 @@ const blobToRecord = (blob: BlobSummary): BackupRecord => {
   };
 };
 
-// Does this target own the old flat `<database>/<file>` layout in its container?
-//
-// Only when exactly one target still carries that container in its legacy
-// `azure_container` — with two candidates, showing those dumps under neither
-// beats showing them under the wrong database server.
-//
-// Its own function because it answers two questions: whether a given blob is
-// ours, and, before that, whether the whole container has to be listed to find
-// our blobs at all (`listArchivedRecords`).
-const claimsLegacyLayout = (
-  target: BackupTargetRow,
-  siblings: BackupTargetRow[],
-  container: string
-): boolean => {
-  if (target.azure_container !== container) return false;
-  const legacy = siblings.filter(
-    (row) => row.azure_container === container && row.storage_id === target.storage_id
-  );
-  return legacy.length === 1 && legacy[0].id === target.id;
-};
-
-// Which blobs in a shared container belong to this target.
-//
-// Two layouts coexist. This app writes `<target prefix>/<database>/<file>`, so
-// those attribute exactly. The older flat `<database>/<file>` has nothing to
-// attribute by, hence the claim rule above.
-const blobBelongsToTarget = (
-  blobName: string,
-  target: BackupTargetRow,
-  siblings: BackupTargetRow[],
-  container: string
-): boolean => {
-  const segments = blobName.split('/');
-  if (segments.length >= 3) {
-    return Boolean(target.blob_prefix) && segments[0] === target.blob_prefix;
-  }
-  if (segments.length === 2) return claimsLegacyLayout(target, siblings, container);
-  // A blob at the container root belongs to no database folder.
-  return false;
-};
+// Which blobs belong to which target — the flat-layout claim, the prefix match —
+// is decided in `backupOwnership`, shared with the runner's retention so the two
+// can never disagree about what a target owns.
 
 // ---- the registry ----------------------------------------------------------
 
@@ -532,17 +499,13 @@ const listArchivedRecords = async (
   const storage = await getStorageForWrite(row.storage_id);
   if (!storage.ok) return [];
 
-  const legacy = claimsLegacyLayout(row, siblings, storage.container);
+  const listing = ownedListingPrefix(row, siblings, storage.container);
   // Nothing to ask for: no prefix of its own, and no claim on the flat layout.
-  if (!row.blob_prefix && !legacy) return [];
+  if (!listing) return [];
 
   let blobs: BlobSummary[];
   try {
-    blobs = await listBlobs(
-      storage.connectionString,
-      storage.container,
-      legacy ? undefined : `${row.blob_prefix}/`
-    );
+    blobs = await listBlobs(storage.connectionString, storage.container, listing.prefix);
   } catch {
     // Azure being unreachable costs us the older dumps, not the page — the run
     // rows are still a complete record of what this app did.

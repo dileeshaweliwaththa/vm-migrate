@@ -22,9 +22,17 @@ import {
   insertBackupRun,
   insertBackupRunEvent,
 } from '@/repositories/backupRuns/backupRunRepository';
-import { findBackupTargetByIdAsService } from '@/repositories/backupTargets/backupTargetRepository';
+import {
+  findAllBackupTargetsAsService,
+  findBackupTargetByIdAsService,
+} from '@/repositories/backupTargets/backupTargetRepository';
 import { getBackupTargetSecrets } from '@/repositories/backupTargets/backupTargetSecretRepository';
 import { getStorageForWrite } from '@/services/backups/backupStorageService';
+import {
+  blobBelongsToTarget,
+  isFlatLayoutBlob,
+  ownedListingPrefix,
+} from '@/services/backups/backupOwnership';
 import type { BackupTargetRow } from '@/types/supabase/response/backupTargets';
 import {
   BACKUP_ENGINES,
@@ -273,21 +281,39 @@ const backupOneDatabase = async (
 // Deletes blobs past the target's retention. Runs after a batch, and a failure
 // here never fails the batch: the backups are made, and an old file surviving a
 // day longer is not worth reporting a successful run as broken.
+//
+// **Every blob the target owns, by the same rule the history uses**
+// (`backupOwnership`). This used to look only under the target's own prefix, so
+// the older flat `<database>/<file>` dumps, which the history lists under the
+// target that claims that layout, were never deleted by anything, and kept
+// growing while the old worker wrote there nightly (#92). See docs/backups.md.
+//
+// The same rule also stops the opposite mistake. A target with no prefix used to
+// list the *whole container* and delete everything old in it, every other
+// target's dumps included. Now a blob is deleted only if this target owns it.
 const applyRetention = async (config: BackupRunnerConfig, batchId: string): Promise<void> => {
   const days = config.target.retention_days || 0;
   if (days <= 0) return;
 
   try {
     const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
-    // **Scoped to this target's prefix.** The container is shared, and another
-    // target's retention is none of this run's business.
+    // Service-role: a scheduled run has no session, and under RLS the sibling
+    // targets would come back empty, which would quietly change the answer to
+    // "does this target own the flat layout".
+    const siblings = await findAllBackupTargetsAsService();
+    const listing = ownedListingPrefix(config.target, siblings, config.azureContainer);
+    if (!listing) return;
+
     const blobs = await listBlobs(
       config.azureConnectionString,
       config.azureContainer,
-      config.blobPrefix ? `${config.blobPrefix}/` : undefined
+      listing.prefix
     );
     const expired = blobs.filter(
-      (blob) => blob.createdAt && new Date(blob.createdAt).getTime() < cutoff
+      (blob) =>
+        blob.createdAt &&
+        new Date(blob.createdAt).getTime() < cutoff &&
+        blobBelongsToTarget(blob.name, config.target, siblings, config.azureContainer)
     );
 
     for (const blob of expired) {
@@ -295,11 +321,16 @@ const applyRetention = async (config: BackupRunnerConfig, batchId: string): Prom
     }
 
     if (expired.length) {
+      // Says how many came from the flat layout, so the first night after this
+      // change, which clears a backlog, reads as that rather than as a fault.
+      const flat = expired.filter((blob) => isFlatLayoutBlob(blob.name)).length;
       await insertBackupRunEvent({
         batch_id: batchId,
         target_id: config.target.id,
         type: 'retention',
-        message: `Removed ${expired.length} dump(s) older than ${days} days`,
+        message: `Removed ${expired.length} dump(s) older than ${days} days${
+          flat ? ` (${flat} from the older <database>/<file> layout)` : ''
+        }`,
       });
     }
   } catch (error) {

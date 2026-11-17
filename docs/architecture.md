@@ -106,7 +106,9 @@ the logic that takes plain values and returns plain values: the rules in
 `services/` and the helpers in `lib/`. That's where a wrong answer is easy to
 miss and cheap to pin down. They run in plain Node and never reach Supabase,
 Azure or Jenkins, so a rule that sits next to I/O is written as its own pure
-function and tested there.
+function and tested there. `services/backups/backupOwnership.ts` is the example:
+the backup runner and the history both call it, and its tests pin down which
+dumps retention may delete.
 
 A test sits next to the file it covers, as `<name>.test.ts`. Pages and
 components aren't unit-tested; `npm run build`, `npm run lint` and a look in the

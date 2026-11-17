@@ -91,18 +91,36 @@ export const findBackupRunStatsFor = async (
   return (data as BackupRunStatsRow | null) ?? null;
 };
 
+// PostgREST's `max-rows`: no response carries more than this, whatever the query
+// asks for. Supabase's default is 1000.
+const PAGE_ROWS = 1000;
+
 // Just the blob names, for deciding which dumps in the container this app has no
 // row for. The full rows are a hundred times the bytes for a set membership
 // test.
+//
+// **Every row, a page at a time.** One unpaged select stops silently at
+// `PAGE_ROWS`. Past a thousand runs (a nightly 19-database target gets there in
+// under two months), the rest of the rows were missing from the set, so their
+// dumps were listed a second time as dumps "only the container knows about": the
+// same file twice in the history, once with its duration and once without.
 export const findBackupRunBlobNames = async (targetId: string): Promise<string[]> => {
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from('backup_runs')
-    .select('blob_name')
-    .eq('target_id', targetId)
-    .not('blob_name', 'is', null);
-  if (error) throw new Error(error.message);
-  return ((data ?? []) as { blob_name: string }[]).map((row) => row.blob_name).filter(Boolean);
+  const names: string[] = [];
+  for (let from = 0; ; from += PAGE_ROWS) {
+    const { data, error } = await supabase
+      .from('backup_runs')
+      .select('blob_name')
+      .eq('target_id', targetId)
+      .not('blob_name', 'is', null)
+      // A stable order, or pages can overlap and skip rows between requests.
+      .order('id', { ascending: true })
+      .range(from, from + PAGE_ROWS - 1);
+    if (error) throw new Error(error.message);
+    const rows = (data ?? []) as { blob_name: string }[];
+    for (const row of rows) if (row.blob_name) names.push(row.blob_name);
+    if (rows.length < PAGE_ROWS) return names;
+  }
 };
 
 export const findBackupRunById = async (id: string): Promise<BackupRunRow | null> => {
