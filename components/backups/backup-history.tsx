@@ -50,11 +50,12 @@ import type { BackupRecord } from '@/types/common/backup';
 // collapses to one line — "Wed 13 May · 18 dumps · 214 MB · all uploaded" — which
 // is the check you actually make; open it when it isn't all fine.
 //
-// Every day starts **open**; the chevron collapses one you are done with. The
-// state therefore tracks which days are *closed* rather than which are open —
-// seeding an open-set from the records was a bug as well as a default: it was
-// computed on the first render, when the fetch had not resolved and there were no
-// days yet, so nothing ever opened.
+// Every day starts **collapsed**: a month of "19 dumps · 160 MB · All uploaded"
+// lines is the page's whole point, and one open day pushes the rest off screen.
+// The chevron opens the day you want to look into. The state tracks which days
+// are *open*, so the empty initial set already means "all collapsed" and a day
+// that arrives from a later fetch arrives collapsed too. Nothing is seeded from
+// records that haven't loaded yet.
 
 function StatusPill({ record }: { record: BackupRecord }) {
   return (
@@ -213,22 +214,21 @@ export function BackupHistory({
   const refreshLive = useRefreshBackupLive();
   const days = groupRecordsByDay(records);
 
-  // Which days the reader has collapsed. Empty — the initial state — means every
-  // day is open, so a day that arrives from a later fetch is open too, with no
-  // state to seed from data that hasn't loaded yet.
-  const [closed, setClosed] = useState<Set<string>>(new Set());
+  // Which days the reader has opened. Empty, the initial state, means every day
+  // is collapsed, so a day that arrives from a later fetch is collapsed too.
+  const [open, setOpen] = useState<Set<string>>(new Set());
 
   const toggle = (key: string) =>
-    setClosed((prev) => {
+    setOpen((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
       return next;
     });
 
-  // Two shortcuts, because thirteen days of chevrons is not a way to tidy up.
-  const collapseAll = () => setClosed(new Set(days.map((day) => day.key)));
-  const expandAll = () => setClosed(new Set());
+  // Two shortcuts, because a month of chevrons is not a way to tidy up.
+  const expandAll = () => setOpen(new Set(days.map((day) => day.key)));
+  const collapseAll = () => setOpen(new Set());
 
   return (
     <div className="space-y-2">
@@ -246,10 +246,10 @@ export function BackupHistory({
             <Button
               size="sm"
               variant="ghost"
-              onClick={closed.size ? expandAll : collapseAll}
-              title={closed.size ? 'Open every day' : 'Collapse every day'}
+              onClick={open.size ? collapseAll : expandAll}
+              title={open.size ? 'Collapse every day' : 'Open every day'}
             >
-              {closed.size ? 'Expand all' : 'Collapse all'}
+              {open.size ? 'Collapse all' : 'Expand all'}
             </Button>
           ) : null}
           <Button
@@ -277,7 +277,7 @@ export function BackupHistory({
       ) : (
         <div className="space-y-2">
           {days.map((day) => {
-            const isOpen = !closed.has(day.key);
+            const isOpen = open.has(day.key);
             return (
               <div key={day.key} className="overflow-hidden rounded-lg border border-border">
                 {/* The day line: everything you need to not open it. */}

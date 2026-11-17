@@ -641,9 +641,9 @@ project page uses:
 **History** — every run, **grouped by day and collapsed**: 200 records over
 eighteen databases a night is a fortnight of near-identical rows, and a day
 collapses to one line (*Wed 13 May · 18 dumps · 214 MB · All uploaded*), which is
-the check you actually make. Every day starts open, with `Collapse all` /
-`Expand all`; the state tracks which days are *closed*, so a day from a later
-fetch arrives open and no state is seeded from data that hasn't loaded. The day
+the check you actually make. Every day starts **collapsed**, with `Expand all` /
+`Collapse all`; the state tracks which days are *open*, so a day from a later
+fetch arrives collapsed and no state is seeded from data that hasn't loaded. The day
 line is a grid with `tabular-nums`, so the values line up down the stack.
 
 There are **two** outcomes per dump now, not three: a run that succeeded is in
