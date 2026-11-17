@@ -8,6 +8,7 @@ import type {
   EnvironmentPort,
   EnvironmentPortInput,
 } from '@/types/common/project';
+import type { EnvironmentSyncResult } from '@/types/common/jenkins';
 
 // Hook layer for environments + ports. All mutations invalidate the parent
 // project-detail query so the page re-renders with fresh data.
@@ -88,13 +89,19 @@ export const useEnvironmentMutations = (projectId: string) => {
   });
 
   // Pull this environment's Jenkins job config and refresh its jenkins-sourced
-  // ports (global credentials, per-environment target). Returns a result message.
+  // ports (global credentials, per-environment target). Returns the summary line
+  // plus what was written and what was skipped, so the UI can show both.
   const syncFromJenkins = useMutation({
-    mutationFn: async (envId: string): Promise<{ written: number; message: string }> => {
+    mutationFn: async (envId: string): Promise<EnvironmentSyncResult & { message: string }> => {
       const res = await fetch(`${base}/${envId}/jenkins-sync`, { method: 'POST' });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? 'Jenkins sync failed.');
-      return { written: body.data?.written ?? 0, message: body.message ?? 'Synced.' };
+      return {
+        ports: body.data?.ports ?? [],
+        skipped: body.data?.skipped ?? [],
+        written: body.data?.written ?? 0,
+        message: body.message ?? 'Synced.',
+      };
     },
     onSuccess: invalidate,
   });

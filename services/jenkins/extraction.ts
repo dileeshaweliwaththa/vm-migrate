@@ -1,11 +1,16 @@
 import type { Protocol } from '@/types/common/vm';
-import type { ExtractedPort, JenkinsRecordSource } from '@/types/common/jenkins';
+import type {
+  ExtractedPort,
+  JenkinsRecordSource,
+  PortExtraction,
+  SkippedPortCandidate,
+} from '@/types/common/jenkins';
 
 // Best-effort extraction from Jenkins job config (D3). Jenkins jobs don't expose
 // "deployed ports" natively — they live in Dockerfiles / deploy scripts / build
 // commands embedded in the job config. This scans the config text for common
-// patterns and returns what it finds; callers log whatever couldn't be mapped
-// (no silent truncation — see phase-2-plan.md §10).
+// patterns and returns what it maps, **and what it saw and couldn't**, so a sync
+// never reads as "covered everything" when it didn't (phase-2-plan.md §10, #28).
 
 interface PortPattern {
   label: string;
@@ -15,17 +20,44 @@ interface PortPattern {
 }
 
 // Ordered, most-specific first. All run against the raw config text.
+//
+// The capture is `\d+`, not `\d{2,5}`: a bounded count silently skipped
+// `-p 8080:123456` (no 2-5 digit run ends on a word boundary there), so the one
+// mistake worth reporting never reached the validity check below.
 const PORT_PATTERNS: PortPattern[] = [
-  { label: 'docker -p mapping', regex: /-p\s+\d+:(\d{2,5})\b/gi, group: 1 },
-  { label: 'docker -p single', regex: /-p\s+(\d{2,5})\b/gi, group: 1 },
-  { label: 'Dockerfile EXPOSE', regex: /EXPOSE\s+(\d{2,5})\b/gi, group: 1 },
-  { label: 'k8s containerPort', regex: /containerPort:\s*(\d{2,5})\b/gi, group: 1 },
-  { label: 'server.port', regex: /server\.port\s*[=:]\s*(\d{2,5})\b/gi, group: 1 },
-  { label: '--port flag', regex: /--port[=\s]+(\d{2,5})\b/gi, group: 1 },
-  { label: 'PORT env', regex: /\bPORT\s*[=:]\s*(\d{2,5})\b/g, group: 1 },
+  { label: 'docker -p mapping', regex: /-p\s+\d+:(\d+)\b/gi, group: 1 },
+  // `(?!:)`: not the host half of a mapping. Without it `-p 8080:3000` also
+  // yielded 8080, the *host* port, as if the container listened on it.
+  { label: 'docker -p single', regex: /-p\s+(\d+)\b(?!:)/gi, group: 1 },
+  { label: 'Dockerfile EXPOSE', regex: /EXPOSE\s+(\d+)\b/gi, group: 1 },
+  { label: 'k8s containerPort', regex: /containerPort:\s*(\d+)\b/gi, group: 1 },
+  { label: 'server.port', regex: /server\.port\s*[=:]\s*(\d+)\b/gi, group: 1 },
+  { label: '--port flag', regex: /--port[=\s]+(\d+)\b/gi, group: 1 },
+  { label: 'PORT env', regex: /\bPORT\s*[=:]\s*(\d+)\b/g, group: 1 },
+];
+
+// Places a port shows up that no pattern above turns into a record. Only used to
+// *report* what was left behind: a hint whose number a pattern already mapped is
+// claimed and not reported.
+const PORT_HINTS: PortPattern[] = [
+  { label: 'URL with a port', regex: /\b[a-z][\w+.-]*:\/\/[^\s/:'"<>]+:(\d+)/gi, group: 1 },
+  { label: 'host:port', regex: /\b(?:localhost|\d{1,3}(?:\.\d{1,3}){3}):(\d+)\b/gi, group: 1 },
+  { label: 'quoted port mapping', regex: /["']\d+:(\d+)["']/g, group: 1 },
+  { label: '--publish flag', regex: /--publish[=\s]+(?:\d+:)?(\d+)\b/gi, group: 1 },
+  { label: 'nginx listen', regex: /\blisten\s+(\d+)\b/gi, group: 1 },
 ];
 
 const isPlausiblePort = (n: number): boolean => n >= 1 && n <= 65535;
+
+// About a line of text around a match, decoded, so a skipped item can be found in
+// the job config by eye.
+const CONTEXT_CHARS = 40;
+const contextAround = (xml: string, index: number, length: number): string => {
+  const start = Math.max(0, index - CONTEXT_CHARS);
+  const end = Math.min(xml.length, index + length + CONTEXT_CHARS);
+  const text = decodeXml(xml.slice(start, end)).replace(/\s+/g, ' ');
+  return `${start > 0 ? '…' : ''}${text}${end < xml.length ? '…' : ''}`;
+};
 
 // HTTPS is the tracker default; downgrade to HTTP only if the config clearly
 // mentions plain http near no TLS markers.
@@ -36,23 +68,53 @@ const inferProtocol = (xml: string): Protocol => {
   return 'HTTPS';
 };
 
-export const extractPorts = (xml: string): ExtractedPort[] => {
-  if (!xml) return [];
+export const extractPorts = (xml: string): PortExtraction => {
+  if (!xml) return { ports: [], skipped: [] };
   const protocol = inferProtocol(xml);
   const seen = new Map<string, ExtractedPort>();
+  // Keyed by reason + number, so a port that's out of range in five places is
+  // reported once, with the first place it appeared.
+  const skipped = new Map<string, SkippedPortCandidate>();
+  const skip = (candidate: SkippedPortCandidate) => {
+    const key = `${candidate.reason}:${candidate.token}`;
+    if (!skipped.has(key)) skipped.set(key, candidate);
+  };
 
   for (const { label, regex, group } of PORT_PATTERNS) {
     for (const match of xml.matchAll(regex)) {
       const raw = match[group];
-      const num = Number(raw);
-      if (!raw || !isPlausiblePort(num)) continue;
+      if (!raw) continue;
+      if (!isPlausiblePort(Number(raw))) {
+        skip({
+          token: raw,
+          reason: 'out_of_range',
+          foundIn: label,
+          context: contextAround(xml, match.index, match[0].length),
+        });
+        continue;
+      }
       if (!seen.has(raw)) {
         seen.set(raw, { port: raw, protocol, description: `Detected (${label})`, foundIn: label });
       }
     }
   }
 
-  return Array.from(seen.values());
+  // Normalised the way the patterns' results are keyed (`0080` is port 80).
+  const mapped = new Set(Array.from(seen.keys(), (port) => String(Number(port))));
+  for (const { label, regex, group } of PORT_HINTS) {
+    for (const match of xml.matchAll(regex)) {
+      const raw = match[group];
+      if (!raw || mapped.has(String(Number(raw)))) continue;
+      skip({
+        token: raw,
+        reason: isPlausiblePort(Number(raw)) ? 'no_pattern' : 'out_of_range',
+        foundIn: label,
+        context: contextAround(xml, match.index, match[0].length),
+      });
+    }
+  }
+
+  return { ports: Array.from(seen.values()), skipped: Array.from(skipped.values()) };
 };
 
 // ── Repository and branch ────────────────────────────────────────────────────

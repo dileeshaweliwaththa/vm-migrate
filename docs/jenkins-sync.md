@@ -502,6 +502,25 @@ for common patterns (`docker -p host:container`, `EXPOSE`, k8s `containerPort`,
 inferred, default `HTTPS`). Best-effort: if a job's config can't be read, the
 sync says so rather than failing silently (see phase-2-plan.md §10).
 
+**It also reports what it couldn't map** (#28). `extractPorts` returns
+`{ ports, skipped }`. A skipped item is one of two kinds
+(`PORT_SKIP_REASONS`):
+
+| Reason | Example | Meaning |
+| --- | --- | --- |
+| `out_of_range` | `-p 8080:123456`, `EXPOSE 0` | A pattern matched it, but it isn't a port (1–65535) |
+| `no_pattern` | `curl http://localhost:4000`, `listen 8081`, `"3000:3000"` | It looks like a port, but no pattern turned it into one |
+
+Each item carries the number, the pattern or hint that saw it, and about a
+line of the config around it. A `no_pattern` hint whose number a pattern
+already mapped isn't reported. A sync that skipped anything opens a result
+dialog listing what was written and, collapsibly, what couldn't be mapped; a
+clean sync is a toast. The summary line distinguishes "nothing found" from
+"found port-like items, mapped none", which a bare count couldn't.
+
+`docker -p single` doesn't match the host half of a mapping: `-p 8080:3000`
+yields 3000 only. (It used to yield 8080 too.)
+
 ## Limitations
 
 - Extraction reads `.../job/NAME/config.xml`, which in Jenkins requires the

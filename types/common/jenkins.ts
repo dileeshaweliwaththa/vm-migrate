@@ -120,9 +120,41 @@ export interface ExtractedPort {
   foundIn: string; // which pattern matched, for transparency
 }
 
+// Why a port-like token in a job's config didn't become a record:
+// - `out_of_range`: a pattern matched it, but it isn't a port (0, or over 65535).
+// - `no_pattern`: it looks like a port (`host:3000`, `listen 80`, `"3000:3000"`)
+//   but none of the extraction patterns claimed it.
+export const PORT_SKIP_REASONS = ['out_of_range', 'no_pattern'] as const;
+export type PortSkipReason = (typeof PORT_SKIP_REASONS)[number];
+
+export const PORT_SKIP_REASON_LABELS: Record<PortSkipReason, string> = {
+  out_of_range: 'Not a valid port (1–65535)',
+  no_pattern: 'Looks like a port, but no pattern recognised it',
+};
+
+export interface SkippedPortCandidate {
+  // The number as written in the config.
+  token: string;
+  reason: PortSkipReason;
+  // The pattern that matched it, for `out_of_range`; the kind of hint that
+  // spotted it, for `no_pattern`.
+  foundIn: string;
+  // The text around it, entity-decoded, so the reader can find it in the job.
+  context: string;
+}
+
+// What extraction found in a job's config: the ports it could map, and every
+// port-like token it saw and couldn't. "Nothing found" and "found things, mapped
+// none" are different answers and must not read the same.
+export interface PortExtraction {
+  ports: ExtractedPort[];
+  skipped: SkippedPortCandidate[];
+}
+
 // Result of syncing one environment from its Jenkins job.
 export interface EnvironmentSyncResult {
   ports: ExtractedPort[];
+  skipped: SkippedPortCandidate[];
   written: number;
 }
 

@@ -378,6 +378,17 @@ export const saveEnvironmentJenkinsConfig = async (
   }
 };
 
+// The one-line summary of a sync. Four distinct outcomes, because "connected,
+// found nothing" and "found port-like things, mapped none of them" call for
+// different next steps, and a count alone can't tell them apart (#28).
+const syncMessage = (written: number, skipped: number): string => {
+  const unmapped = `${skipped} port-like item${skipped === 1 ? '' : 's'} couldn't be mapped`;
+  if (written && skipped) return `Synced ${written} port(s) from Jenkins. ${unmapped}.`;
+  if (written) return `Synced ${written} port(s) from Jenkins.`;
+  if (skipped) return `No ports synced: ${unmapped}.`;
+  return 'Connected, but no ports were detected in the job config.';
+};
+
 // Per-environment sync (editor+). Reads the environment's own Jenkins job URL +
 // username, and the token from the server-only secrets store, pulls the job
 // config, extracts ports best-effort, and replaces only the `jenkins`-sourced
@@ -409,7 +420,7 @@ export const syncEnvironmentPorts = async (
       };
     }
 
-    const ports = extractPorts(result.xml);
+    const { ports, skipped } = extractPorts(result.xml);
 
     // Replace only the jenkins-sourced ports; keep manual ones.
     for (const p of env.ports.filter((p) => p.source === 'jenkins')) {
@@ -428,10 +439,8 @@ export const syncEnvironmentPorts = async (
 
     return {
       success: true,
-      message: ports.length
-        ? `Synced ${ports.length} port(s) from Jenkins.`
-        : 'Connected, but no ports were detected in the job config.',
-      data: { ports, written: ports.length },
+      message: syncMessage(ports.length, skipped.length),
+      data: { ports, skipped, written: ports.length },
     };
   } catch (error) {
     return { success: false, message: asMsg(error, 'Jenkins sync failed.'), data: null };
