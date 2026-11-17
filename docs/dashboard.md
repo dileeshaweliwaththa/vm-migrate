@@ -13,27 +13,41 @@ can never disagree with the page you drill into.
 
 | Layer      | Files                                                                        |
 | ---------- | ---------------------------------------------------------------------------- |
-| Routing    | `app/(protected)/(app)/dashboard/page.tsx`                                    |
-| UI         | `components/dashboard/dashboard-overview.tsx`                                 |
-| Hook       | — none. See [No hook layer](#no-hook-layer).                                  |
-| Service    | `services/dashboard/dashboardService.ts` — `getDashboardSummary`               |
+| Routing    | `app/(protected)/(app)/dashboard/page.tsx`, `app/api/dashboard/route.ts` (`GET ?client=&days=`) |
+| UI         | `components/dashboard/dashboard-view.tsx` (header + filters), `dashboard-overview.tsx` (the tiles) |
+| Hook       | `hooks/dashboard/useDashboard.ts`                                             |
+| Service    | `services/dashboard/dashboardService.ts` (the reads), `summary.ts` (the counting; pure and tested) |
 | Repository | `environments`, `environmentBuildRuns` (+ `projectService` / `vmService`)      |
 
 Domain types live in [`types/common/dashboard.ts`](../types/common/dashboard.ts).
 
-### No hook layer
+### Filters
 
-The summary is read-once with no interaction, so the page is a **server
-component** that calls the service directly and passes the result into a pure
-component as props. That satisfies the
-[architecture](./architecture.md) rules — pages may call services, and the
-component imports nothing from `services/`. Add a hook only if the dashboard
-later needs client-side refetching or filters.
+Two filters sit in the page header (#75):
+
+- **Client**: one project tag, or all clients. It narrows every tile: the
+  projects tagged with it, their environments and records, the builds of those
+  environments, and the migration bars, which then cover the VMs those
+  environments run on. The list of clients to pick from is always the whole
+  workspace's.
+- **Build window**: the last 7, 30 or 90 days (`DASHBOARD_BUILD_WINDOWS`). It
+  only moves the build tile and the recent-builds feed.
+
+The page renders the default view (all clients, 7 days) on the **server** and
+hands it to `useDashboard` as initial data, so the first paint needs no fetch. A
+filter change asks `GET /api/dashboard?client=…&days=…`, and the previous
+numbers stay on screen, dimmed, until the new ones arrive. An unknown client or
+window falls back to all clients and 7 days, and `summary.filters` says what
+was applied.
+
+The reads always cover the whole workspace and the filtering happens in
+`buildDashboardSummary`, which is pure. That keeps the reads simple and puts
+the rules where Vitest can check them (`summary.test.ts`).
 
 ## What it shows
 
-**Four headline tiles** — Projects, Environments, Deployed records, Builds this
-week. Each carries a sub-line of context (clients, Jenkins/VM wiring, reachable
+**Four headline tiles** — Projects, Environments, Deployed records, Builds in
+the chosen window. Each carries a sub-line of context (clients, Jenkins/VM wiring, reachable
 URLs — a record with a domain, or on a managed platform with only its platform
 default domain — pass/fail split) and the first two link onward to `/projects`.
 
@@ -72,8 +86,10 @@ These are the decisions worth knowing before changing `dashboardService`:
 - **Archived projects self-gate.** The service calls `listProjects(true)`, which
   returns archived rows to **admins only**. Non-admins therefore see
   `archived: 0` — no separate role check is needed here, and none is performed.
-- **Build window.** The aggregate covers the last **7 days**, capped at 200 rows.
-  One query serves both the aggregate and the 8-row feed sliced off its front.
+- **Build window.** The aggregate covers the last **7, 30 or 90 days**, capped
+  at 2,000 rows. If the cap is hit the tile shows `2000+`, because the counts are
+  then a floor. One query serves both the aggregate and the 8-row feed sliced off
+  its front.
 - **"In flight" uses `isTerminalRunPhase`** — the same predicate the run poller
   uses, so the dashboard and the per-environment build card never disagree.
 - **Failed is deliberately coarse:** any terminal run whose result isn't
@@ -89,7 +105,8 @@ These are the decisions worth knowing before changing `dashboardService`:
 ## Extending it
 
 - A new tile: add the field to `DashboardSummary`, compute it in
-  `getDashboardSummary`, render it in `DashboardOverview`. Don't query from the
-  component.
-- Per-client or per-date filtering: that's the point at which this slice needs a
-  hook + an `/api/dashboard` route, because the reads stop being read-once.
+  `buildDashboardSummary` (with a test), and render it in `DashboardOverview`.
+  If it needs data the service doesn't read yet, add the read to
+  `getDashboardSummary`. Don't query from the component.
+- A new filter: add it to `DashboardFilters` and `parseDashboardFilters`, apply
+  it in `buildDashboardSummary`, and add the control to `DashboardView`.

@@ -21,13 +21,34 @@ export interface ProgressMetric {
   total: number;
 }
 
+// How far back the build tile looks, in days (#75). The first is the default.
+export const DASHBOARD_BUILD_WINDOWS = [7, 30, 90] as const;
+export type DashboardBuildWindow = (typeof DASHBOARD_BUILD_WINDOWS)[number];
+export const DEFAULT_DASHBOARD_BUILD_WINDOW: DashboardBuildWindow = DASHBOARD_BUILD_WINDOWS[0];
+
+// What the dashboard is narrowed to. `client` is a project tag; null is every
+// client.
+export interface DashboardFilters {
+  client: string | null;
+  days: DashboardBuildWindow;
+}
+
+export const DEFAULT_DASHBOARD_FILTERS: DashboardFilters = {
+  client: null,
+  days: DEFAULT_DASHBOARD_BUILD_WINDOW,
+};
+
 export interface DashboardSummary {
+  // The filters as applied: an unknown client or window falls back to "all" and
+  // the default window, and this says which.
+  filters: DashboardFilters;
   projects: {
     total: number;
     // Archived projects are only visible to admins, so this is 0 for everyone
     // else rather than a number they can't drill into.
     archived: number;
-    // Distinct tag names across all projects — the client groupings.
+    // Distinct tag names across **all** projects, whatever the filter: the
+    // client groupings, and the choices the client filter offers.
     clients: string[];
   };
   environments: {
@@ -46,11 +67,20 @@ export interface DashboardSummary {
     reachable: number;
   };
   // The VM tracker's own migration progress, so the dashboard answers "how far
-  // along is the migration?" without a trip to /tracker.
+  // along is the migration?" without a trip to /tracker. Narrowed to a client,
+  // it covers the VMs that client's environments are deployed on.
   migration: ProgressMetric[];
   builds: {
-    // Runs recorded in the last 7 days, by outcome.
-    lastWeek: { total: number; succeeded: number; failed: number; inFlight: number };
+    // Runs recorded in the last `days` days, by outcome. `capped` means the
+    // window held more runs than the query fetches, so the counts are a floor.
+    inWindow: {
+      days: DashboardBuildWindow;
+      total: number;
+      succeeded: number;
+      failed: number;
+      inFlight: number;
+      capped: boolean;
+    };
     recent: EnvironmentBuildRun[];
   };
 }

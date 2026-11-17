@@ -192,12 +192,16 @@ function BuildRow({ run }: { run: EnvironmentBuildRun }) {
 // ---- page body -------------------------------------------------------------
 
 export function DashboardOverview({ summary }: { summary: DashboardSummary }) {
-  const { projects, environments, records, migration, builds } = summary;
+  const { projects, environments, records, migration, builds, filters } = summary;
+  const buildWindow = builds.inWindow;
 
   const archivedNote =
     projects.archived > 0 ? `${projects.archived} archived` : undefined;
-  const clientNote =
-    projects.clients.length > 0
+  // Narrowed to one client, "8 clients" would describe the workspace rather than
+  // the numbers on screen.
+  const clientNote = filters.client
+    ? `tagged ${filters.client}`
+    : projects.clients.length > 0
       ? `${projects.clients.length} client${projects.clients.length === 1 ? '' : 's'}`
       : undefined;
 
@@ -234,12 +238,13 @@ export function DashboardOverview({ summary }: { summary: DashboardSummary }) {
         />
         <StatTile
           icon={Activity}
-          label="Builds this week"
-          value={builds.lastWeek.total}
+          label={`Builds, last ${buildWindow.days} days`}
+          // A capped window is a floor, and says so.
+          value={buildWindow.capped ? `${buildWindow.total}+` : buildWindow.total}
           sub={
-            builds.lastWeek.total > 0
-              ? `${builds.lastWeek.succeeded} passed · ${builds.lastWeek.failed} failed${
-                  builds.lastWeek.inFlight > 0 ? ` · ${builds.lastWeek.inFlight} running` : ''
+            buildWindow.total > 0
+              ? `${buildWindow.succeeded} passed · ${buildWindow.failed} failed${
+                  buildWindow.inFlight > 0 ? ` · ${buildWindow.inFlight} running` : ''
                 }`
               : undefined
           }
@@ -257,7 +262,9 @@ export function DashboardOverview({ summary }: { summary: DashboardSummary }) {
           <CardHeader>
             <CardTitle className="text-base">Migration progress</CardTitle>
             <CardDescription>
-              How far the VM migration has come, from the tracker.
+              {filters.client
+                ? `How far the migration has come on the VMs ${filters.client}'s environments run on.`
+                : 'How far the VM migration has come, from the tracker.'}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -284,7 +291,8 @@ export function DashboardOverview({ summary }: { summary: DashboardSummary }) {
           <CardContent>
             {builds.recent.length === 0 ? (
               <p className="py-6 text-center text-sm text-muted-foreground">
-                No builds triggered in the last 7 days.
+                No builds triggered in the last {buildWindow.days} days
+                {filters.client ? ` for ${filters.client}` : ''}.
               </p>
             ) : (
               <ul className="divide-y divide-border">
