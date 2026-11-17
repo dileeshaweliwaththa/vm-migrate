@@ -18,7 +18,7 @@ your app needs.
 | `id`         | `uuid`        | primary key, FK → `auth.users.id`                 |
 | `email`      | `text`        | from sign-up                                      |
 | `name`       | `text`        | nullable; from sign-up metadata                   |
-| `role`       | `text`        | RBAC role: `admin` \| `editor` \| `viewer` (default `viewer`) |
+| `role`       | `user_role`   | RBAC role: `viewer` \| `editor` \| `admin` (default `viewer`); see [rbac.md](./rbac.md) |
 | `created_at` | `timestamptz` | default `now()`                                   |
 
 RLS: authenticated users can read their own profile (`id = auth.uid()`);

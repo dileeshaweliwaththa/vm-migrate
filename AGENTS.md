@@ -58,19 +58,25 @@ Before implementing any feature, request, or fix, read and follow:
   allowed component library; install primitives via the shadcn CLI and
   compose feature components from them. Also the **theme** (navy chrome, light
   content) and the primitive traps — read it before using a primitive.
+- [docs/project-structure.md](docs/project-structure.md) — where things go.
 - [docs/schema.md](docs/schema.md) — database schema and the migration workflow.
 - [docs/auth.md](docs/auth.md) — the sign-in flow, and **where access is
   enforced** (page guard / route handler / role + RLS).
+- [docs/rbac.md](docs/rbac.md) — the three roles, the `lib/rbac.ts` helpers,
+  `current_user_role()` and the standard RLS policies, and who can do what.
 - [docs/security.md](docs/security.md) — the threat model, the secrets inventory,
   the SSRF and stored-HTML rules, the **accepted** risks, and the checklist every
   new route/table/outbound fetch has to pass.
 - [docs/vms.md](docs/vms.md) — the VMs list and the per-machine page, and the
   live endpoint health check with its outbound rules.
 - [docs/phase-3-plan.md](docs/phase-3-plan.md) — what Phase 3 is, its locked
-  decisions and its issues. (Phase 2's hardening stage is
+  decisions and its issues. (Phase 2 is
+  [docs/phase-2-plan.md](docs/phase-2-plan.md), and its hardening stage
   [docs/phase-2-hardening-plan.md](docs/phase-2-hardening-plan.md).)
 - [docs/tracker.md](docs/tracker.md) — the VM tracker feature, its layers, its
   API, and its per-role permissions.
+- [docs/projects.md](docs/projects.md) — projects, tags, environments and their
+  records: the layers, the rules (slugs, archive, delete), permissions and API.
 - [docs/dashboard.md](docs/dashboard.md) — the `/dashboard` summary and its
   aggregation rules.
 - [docs/deployment.md](docs/deployment.md) — the Docker image and compose setup,
@@ -82,6 +88,12 @@ Before implementing any feature, request, or fix, read and follow:
   from pasted `docker ps` output.
 - [docs/github.md](docs/github.md) — the app's GitHub token (Settings → GitHub)
   and the repository/branch pickers it powers on every non-Jenkins record.
+- [docs/ai-docs.md](docs/ai-docs.md) — project documentation: the rich-text
+  editor, the stored-HTML rules, and generating a draft with AI.
+- [docs/settings.md](docs/settings.md) — the admin Settings page and its
+  categories.
+- [docs/secure-deployment-plan.md](docs/secure-deployment-plan.md) — the
+  proposal for keeping source and secrets off the server when deploying.
 - [docs/backups.md](docs/backups.md) — the **Backups** tab: MySQL dumps performed
   by this app and streamed into Azure Blob (nothing on disk), scheduled by
   pg_cron, with the credentials in a service-role-only table.
