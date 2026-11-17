@@ -78,7 +78,6 @@ lib/
     client.ts                         ← browser client
     server.ts                         ← server client (cookie session)
     service.ts                        ← service-role client (no session; bypasses RLS)
-    session.ts                        ← session helper
     proxy.ts                          ← session refresh for the proxy (middleware)
 
 supabase/migrations/                  ← Supabase CLI migrations (see schema.md)

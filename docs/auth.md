@@ -44,8 +44,10 @@ touches all five architecture layers (see [architecture.md](./architecture.md)).
   each request; it is wired up in `proxy.ts` at the project root (the Next.js
   proxy/middleware entry). The auth cookie is named `app-session` —
   keep the name consistent across `client.ts`, `server.ts`, and `proxy.ts`.
-- `lib/supabase/session.ts` exposes `getUserEmail()` as a small server-side
-  helper example.
+- Server code reads the signed-in user through
+  `repositories/auth/authRepository.ts` (`getAuthenticatedUser`), on the
+  request-scoped client from `lib/supabase/server.ts`. There is no other helper
+  for it.
 - **Sign-out lives in exactly one place:** the account menu in the sidebar footer
   ([`components/layout/user-menu.tsx`](../components/layout/user-menu.tsx)), which
   is also the only place the app displays who you are. It runs
