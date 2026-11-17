@@ -58,7 +58,8 @@ Before implementing any feature, request, or fix, read and follow:
   allowed component library; install primitives via the shadcn CLI and
   compose feature components from them. Also the **theme** (navy chrome, light
   content) and the primitive traps — read it before using a primitive.
-- [docs/project-structure.md](docs/project-structure.md) — where things go.
+- [docs/project-structure.md](docs/project-structure.md) — where things go, and
+  where each feature's pages and docs live.
 - [docs/schema.md](docs/schema.md) — database schema and the migration workflow.
 - [docs/auth.md](docs/auth.md) — the sign-in flow, and **where access is
   enforced** (page guard / route handler / role + RLS).
