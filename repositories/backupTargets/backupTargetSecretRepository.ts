@@ -3,7 +3,7 @@ import { createServiceClient } from '@/lib/supabase/service';
 // Repository layer: a backup target's credentials in `backup_target_secrets` —
 // the MySQL password and the Azure Storage connection string.
 //
-// Same construction as `environment_secrets` and `vm_jenkins_secrets`: the table
+// Same construction as `vm_jenkins_secrets`: the table
 // has RLS enabled with NO policies, so no authenticated client can touch it.
 // Only this repository — via the service-role client, from server code behind a
 // role check in the service layer — ever reads or writes it. Neither value is

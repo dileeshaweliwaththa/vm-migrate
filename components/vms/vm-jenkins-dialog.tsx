@@ -30,8 +30,7 @@ import type { Vm } from '@/types/common/vm';
 //
 // A VM runs one Jenkins, so this is where the server, its Basic-auth user and
 // its API token live — the environments on this machine only name their own
-// jobs. Before this, each environment carried its own copy of all three and a
-// sibling had to lend them.
+// jobs, and this is the only place a server is configured.
 //
 // The token is write-only by construction: the payload behind the trigger says
 // whether one is stored (`hasToken`), never what it is, and an empty field on

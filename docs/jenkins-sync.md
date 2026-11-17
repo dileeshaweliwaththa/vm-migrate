@@ -17,28 +17,29 @@ The address is normally just the machine's IP: `normalizeJenkinsServerUrl` adds
 port or scheme that is typed is kept, so the rare server on another port still
 works.
 
-An environment then only needs its job — and when its VM is configured, the
-environment's Jenkins settings modal shows where the credentials come from and
-asks for nothing else. Username and token fields appear there only when there is
-no VM-level config to use.
+An environment then only needs its job. Its Jenkins settings modal asks for the
+job and nothing else, and shows where the credentials come from, or, when the VM
+has no complete server yet, says so and links to the VM. There is no
+per-environment username or token (#84).
 
 The VM dialog verifies as well as configures: `testVmJenkinsConnection` pings
 the server (`pingJenkins` — `/api/json?tree=mode`, the cheapest authenticated
 call) and reports what failed, and a save runs it automatically. The SSRF guard
 re-runs on the address being tested, including one typed into the form.
 
-**Resolution order** (`resolveEnvJenkinsServer`), each part falling back
-independently:
+**Resolution** (`resolveEnvJenkinsServer`) reads the environment's **VM**
+(`vm_jenkins` + `vm_jenkins_secrets`) and nothing else. An environment with no
+linked VM, or on a VM with no complete server, gets a message saying which part
+is missing and where to set it.
 
-1. the environment's **VM** (`vm_jenkins` + `vm_jenkins_secrets`) — the one place
-   anything new is written;
-2. the environment's own stored URL / username / token — the pre-VM layout, and
-   the only home an environment with **no linked VM** has;
-3. a sibling environment on the same VM (`findVmJenkinsDonor`) — how inheritance
-   worked before the VM held the server.
-
-2 and 3 are legacy *read* paths kept so no working setup broke when this moved;
-the migration seeded every VM that had a configured environment.
+Until #84 there were two fallbacks behind the VM: the environment's own
+username and token (`environments.jenkins_username` + `environment_secrets`),
+and a sibling environment's on the same VM. Both are gone.
+`…_backfill_vm_jenkins_from_environments.sql` copied the per-environment
+credentials onto the two VMs that still depended on them, and
+`…_drop_environment_jenkins_credentials.sql` drops the column and the table,
+refusing to run while any Jenkins environment's VM is incomplete. The deploy
+order is under [Limitations](#limitations).
 
 ## One place to set the job
 
@@ -46,12 +47,10 @@ The **Jenkins settings** modal (⚙ on the environment card) is the *only* place
 Jenkins gets configured. The Add/Edit Environment form deliberately has no
 "Jenkins job URL" box — it shows a pointer to the modal instead.
 
-The URL, username and token are one unit of configuration, and the token can
-only be set in the modal (it never travels through a form that a non-secret
-field shares). A second box for one third of that unit gave the same field two
-owners: a URL typed in the environment form and a URL typed in the modal both
-wrote `environments.jenkins_url`, with no ordering between them, and only the
-modal's path ran `isDeniedJenkinsTarget` on the value before storing it.
+A second box gave the same field two owners: a URL typed in the environment
+form and a URL typed in the modal both wrote `environments.jenkins_url`, with no
+ordering between them, and only the modal's path ran `isDeniedJenkinsTarget` on
+the value before storing it.
 
 So the write path is closed at three layers, not just hidden in the UI:
 
@@ -68,14 +67,13 @@ configuring an environment can't leave the provider disagreeing with the config.
 
 ## Why the token is split out
 
-An environment's Jenkins **URL and username** are not secret, so they live on
-the `environments` row (`jenkins_url`, `jenkins_username`). The **API token**
-is secret, and `environments` is readable by every authenticated user under RLS
-— a token there would be sent to every viewer's browser. So the token lives in
-`environment_secrets`, a table with **RLS on and no policies**: no authenticated
-client can read or write it. Only server code touches it, via the service-role
-client, behind an editor/admin check. See [schema.md](./schema.md) and
-AGENTS.md §6.
+A VM's Jenkins **server root and username** are not secret, so they live in
+`vm_jenkins`, readable by every signed-in user. The **API token** is secret, so
+it lives in `vm_jenkins_secrets`, a table with **RLS on and no policies**: no
+authenticated client can read or write it. Only server code touches it, via the
+service-role client, behind an editor check to change it and a `canRunBuild`
+check to use it. It is never sent to a browser; the dialogs are told whether
+one is stored. See [schema.md](./schema.md#vm_jenkins--vm_jenkins_secrets).
 
 ## Who can do what
 
@@ -103,7 +101,7 @@ re-derives them from role strings.
 | UI         | `components/environments/jenkins-config-dialog.tsx` (modal), `jenkins-jobs-dialog.tsx` (browse), `jenkins-history-dialog.tsx` (per-record build history), `jenkins-sync-dialog.tsx` (sync preview + apply), `jenkins-status.tsx` (status + run pills), per-env buttons + record rows in `components/environments/environments-section.tsx` |
 | Hook       | `hooks/environments/useEnvironmentJenkins.ts` (config, job list, trigger, run progress, history), `hooks/environments/useEnvironments.ts` (`previewJenkinsSync`, `syncFromJenkins`) |
 | Service    | `services/jenkins/jenkinsService.ts`, `services/jenkins/extraction.ts`, `services/jenkins/portSyncPlan.ts` (what a sync would change; pure) |
-| Repository | `repositories/jenkins/jenkinsRepository.ts` (external HTTP), `repositories/environmentSecrets/environmentSecretRepository.ts` (service-role), `repositories/environmentBuildRuns/environmentBuildRunRepository.ts` (build history) |
+| Repository | `repositories/jenkins/jenkinsRepository.ts` (external HTTP), `repositories/vmJenkins/vmJenkinsRepository.ts` + `vmJenkinsSecretRepository.ts` (the VM's server; the token through the service-role client), `repositories/environmentBuildRuns/environmentBuildRunRepository.ts` (build history) |
 | Shared     | [`lib/jenkins-url.ts`](../lib/jenkins-url.ts) — deriving a server root, the same-server guard, and re-mounting reported URLs (see [below](#the-urls-jenkins-reports-are-not-the-address-you-reach-it-on)) |
 
 `jenkinsRepository` is the **one external-HTTP data source** — the documented
@@ -151,16 +149,13 @@ settings.
 On a project page, each environment whose CI/CD provider is **Jenkins** shows
 (editor+ unless noted):
 
-1. **Jenkins settings** (⚙) — opens a modal to set the **Job URL** (a specific
-   job, or just the server base URL), **Username**, and **API token**
-   (write-only; masked once stored). URL + username save to the environment; the
-   token saves to `environment_secrets`. If the environment's VM already has
-   Jenkins configured elsewhere, the modal arrives pre-filled — see
+1. **Jenkins settings** (⚙) — opens a modal to set the environment's **Job
+   URL**. It shows the VM's server and user, or says what the VM is missing and
+   links to it; the credentials are set on the VM, not here. See
    [Inheriting a VM's Jenkins credentials](#inheriting-a-vms-jenkins-credentials).
 2. **Browse jobs** (list icon) — lists **all jobs on the server**. Needs only a
-   server, not a job, so it is also shown when the environment has nothing of its
-   own and inherits both from its VM — that is how an environment picks its *first*
-   job. For each job it shows status (from `color` + last build result), last build
+   server, not a job, so it is also shown when the environment has no job yet but
+   its VM has a server — that is how an environment picks its *first* job. For each job it shows status (from `color` + last build result), last build
    #/time, and description, with:
    - **Run** — triggers a build (POST `{jobUrl}/build` with a CSRF crumb),
      behind a confirm. Needs `Job → Build` permission.
@@ -207,85 +202,36 @@ On a project page, each environment whose CI/CD provider is **Jenkins** shows
 
 ## Inheriting a VM's Jenkins credentials
 
-A VM runs **one** Jenkins. So the second environment placed on a VM is being
-pointed at a server the app already has credentials for, and asking the editor to
-re-type the same URL, user, and token is asking them to re-enter what is already
-stored. The settings modal therefore arrives pre-filled.
+A VM runs **one** Jenkins, so every environment on it uses the VM's server,
+user and token. Nothing is copied: the environment stores only its job, and
+each Jenkins call reads the VM's configuration at that moment. Rotating the
+VM's token in the tracker takes effect for all of its environments at once.
 
-**What is pre-filled, and what is not.** The token is write-only —
-`getEnvironmentJenkinsConfig` has never returned it and still doesn't
-([security.md § Secrets handling](./security.md#secrets-handling)). So "pre-filled"
-covers exactly the two non-secret fields:
+Resolution is split in two, and which one a call uses is a real decision:
 
-| Field | Pre-filled with | How |
-| ----- | --------------- | --- |
-| Job URL | the donor's **server root**, not its job URL | client-side, from `inherited.jenkinsBase` |
-| Username | the donor's username | client-side, from `inherited.jenkinsUsername` |
-| API token | — | **server-side on save**; never sent to the browser |
+| Resolver | Needs | Used by |
+| -------- | ----- | ------- |
+| `resolveEnvJenkinsServer` | the VM's server root, user and token | **Browse jobs**, **link a job** |
+| `resolveEnvJenkins` | all of the above **plus this environment's own job URL** | **Sync ports**, **trigger a build**, job status |
 
-The server root rather than the job URL, because the job is per environment while
-the server is per VM. It leaves the editor one step: name the job, or save and pick
-one with **Browse jobs**, which needs only the root.
-
-**How the token gets there.** Leaving the token box blank is the accept. On save,
-when nothing was typed *and* the environment has no token of its own,
-`saveEnvironmentJenkinsConfig` reads the donor's token and writes it to this
-environment's row — both reads through the service-role repository, both rows
-equally unreachable by any client, the value never crossing the network. Typing a
-token instead is the decline: an explicit value always wins.
-
-**Who the donor is** (`findVmJenkinsDonor`): an environment on the same `vm_id`,
-excluding this one, carrying a job URL *and* a username *and* a token. Basic auth is
-username + token, so a half-configured environment is no use as a donor. Ordered by
-`updated_at` descending, so a rotated token is what gets lent rather than the oldest
-one on the VM.
-
-**When the offer appears:** only while the environment has no token of its own.
-Once it has one, its own configuration is the answer, and a standing offer would be
-a second source of truth for the same field.
-
-### Inheritance at *read* time, not just on save
-
-Pre-filling the modal is only half of it. An environment that has never been
-configured also **resolves** its server and credentials through the donor, so the
-Jenkins actions work before anything has been saved to its row. Resolution is
-therefore split in two, and which one a call uses is a real decision:
-
-| Resolver | Needs | Falls back to the VM's donor for | Used by |
-| -------- | ----- | -------------------------------- | ------- |
-| `resolveEnvJenkinsServer` | a server root + credentials | server root, username, token — each independently | **Browse jobs**, **link a job** |
-| `resolveEnvJenkins` | all of the above **plus this environment's own job URL** | credentials only — never the job | **Sync ports**, **trigger a build**, job status |
-
-The split follows the same asymmetry as the pre-fill: the **server is the VM's**,
-the **job is the environment's**. Listing what jobs exist needs only a server, so
-requiring a job URL first made the affordance that *sets* the job URL unreachable —
-an environment whose VM was already configured had no way to pick its first job
-except to type the server address a second time. Anything that reads or runs *this*
-environment's pipeline still requires its own job: falling back to a sibling's would
-sync ports from, or deploy, the wrong one.
+The server is the VM's, the job is the environment's. Listing what jobs exist
+needs only a server, so requiring a job URL first would make the affordance that
+*sets* the job URL unreachable. Anything that reads or runs *this* environment's
+pipeline still requires its own job: there is no other environment's job it
+could sensibly fall back to.
 
 `jenkinsInherited` on the environment payload is what lets the card show the
-browse-jobs action in that state. It is set by `annotateJenkinsInheritance`
-(`services/jenkins/inheritance.ts`) rather than the row mapper, which has no
-business making the queries it needs — one per distinct VM plus one for the tokens,
-batched across the project and skipped entirely when nothing is waiting to borrow.
-It is advisory: the service re-derives the donor and re-checks access itself, so a
-forged `true` buys nothing. That module exists separately from `jenkinsService`
-because `projectService` needs it and `jenkinsService` already imports
-`projectService` — putting it there would close an import cycle.
+browse-jobs action before a job is set. `annotateJenkinsInheritance`
+(`services/jenkins/inheritance.ts`) sets it on every Jenkins environment whose VM
+has a **complete** server (root, user and token), with two queries for the whole
+project. Only a complete server counts, or the card would offer a browse that
+then fails. It is advisory: the service reads the VM and re-checks access
+itself, so a forged `true` buys nothing. The module exists separately from
+`jenkinsService` because `projectService` needs it and `jenkinsService` already
+imports `projectService`; putting it there would close an import cycle.
 
-Two consequences worth knowing:
-
-- **The copy is a snapshot, not a link.** Rotating the donor's token does not
-  update the environments that inherited it — they keep the value they were given
-  and start failing with a 401 until each is re-saved. A per-VM credential record
-  would fix this properly; it is the same shape as the `jenkins_servers` table
-  under [Limitations](#limitations).
-- **A VM can host more than one project's environments**, so the donor may belong to
-  a different project. That is deliberate — the VM is the unit that has a Jenkins —
-  and the modal names the VM so the editor can see what they're accepting. It grants
-  no capability an editor didn't already have; see
-  [security.md](./security.md#secrets-handling).
+A VM can host more than one project's environments, so they share one set of
+credentials. That is deliberate: the VM is the unit that has a Jenkins.
 
 ## Records by provider
 
@@ -550,11 +496,19 @@ yields 3000 only. (It used to yield 8080 too.)
 - ~~**Credentials are per environment, and cannot be shared.**~~ **Resolved**
   by `vm_jenkins` / `vm_jenkins_secrets` (#80): the server, its user and its
   token belong to the machine, so ten environments on one Jenkins are configured
-  once and a token is rotated in one place. What remains is the cleanup — the
-  per-environment columns and `environment_secrets` are still there as a read
-  fallback for an environment with no linked VM, and `deriveJenkinsBase()` still
-  exists because `environments.jenkins_url` means the server root *or* the job
-  URL depending on how it was set. Tracked in **#84**.
+  once and a token is rotated in one place. The per-environment copy is removed
+  by **#84**, in three steps that **must be deployed in this order**:
+  1. apply `…_backfill_vm_jenkins_from_environments.sql`, which gives every VM
+     that still depended on an environment's credentials a server of its own;
+  2. deploy the app version that reads only the VM;
+  3. apply `…_drop_environment_jenkins_credentials.sql`. It refuses to run while
+     any Jenkins environment's VM lacks a server, user or token.
+
+  Deploying step 2 before step 1 leaves the environments that depended on their
+  own credentials without Jenkins until step 1 runs. Running step 3 before step 2
+  breaks the Jenkins dialog of the version still deployed, which reads
+  `environment_secrets`. `deriveJenkinsBase()` stays: it turns a job URL into its
+  server root, which the record mapper and the job links still need.
 - **A wrong Jenkins URL setting is worked around, not repaired.** Re-mounting keeps
   this app working, but Jenkins itself still emails links and renders absolute URLs
   pointing at the stale host. Fixing Jenkins Location on the server is still worth

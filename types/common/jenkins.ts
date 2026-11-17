@@ -1,10 +1,10 @@
 import type { Protocol } from '@/types/common/vm';
 import type { EnvironmentPort } from '@/types/common/project';
 
-// Domain types for the per-environment Jenkins integration (Phase 2b · M3). The
-// non-secret parts (job URL, username) live on the environment; the secret token
-// lives in environment_secrets and is only ever read server-side. See
-// docs/jenkins-sync.md.
+// Domain types for the per-environment Jenkins integration (Phase 2b · M3). An
+// environment holds its job URL; the server, user and token are its VM's
+// (`vm_jenkins` / `vm_jenkins_secrets`), the token only ever read server-side.
+// See docs/jenkins-sync.md.
 
 // Auth + target for a single Jenkins job request (resolved server-side).
 export interface JenkinsAuth {
@@ -183,20 +183,6 @@ export interface EnvironmentSyncResult {
 
 // Public (secret-free) per-environment Jenkins config for the modal. The token
 // is replaced by a boolean — never sent to the browser.
-// What another environment on the *same VM* already has configured, offered to an
-// environment that has no credentials of its own. A VM runs one Jenkins, so the
-// second environment on it shouldn't need the same server, user, and token typed
-// again. Non-secret by construction: the server root and username, never the
-// token — that is copied server-side on save and never travels to the browser.
-// See docs/jenkins-sync.md § Inheriting a VM's Jenkins credentials.
-export interface InheritedJenkinsConfig {
-  // The VM both environments sit on — what makes the offer make sense to read.
-  vmName: string;
-  // The donor's *server root*, not its job URL: the job differs per environment.
-  jenkinsBase: string;
-  jenkinsUsername: string;
-}
-
 // A VM's Jenkins server, as the tracker and the config dialog see it. A VM runs
 // one Jenkins, so this is where the server, its user and its token live; an
 // environment only names the *job* on it.
@@ -217,25 +203,21 @@ export interface VmJenkinsInput {
   apiToken?: string;
 }
 
+// An environment's Jenkins setup, as its dialog sees it. The environment owns
+// only its **job**; the server, user and token are its VM's (#84).
 export interface EnvironmentJenkinsConfig {
   jenkinsUrl: string;
-  jenkinsUsername: string;
-  hasToken: boolean;
-  // Null unless this environment has no token and its VM has one to lend.
-  inherited: InheritedJenkinsConfig | null;
-  // The **VM's own** Jenkins server, when this environment sits on a machine
-  // that has one. This is where the server and credentials now live, so when it
-  // is set the environment's dialog asks for nothing but the job — the three
-  // credential fields would be a second place to maintain the same thing.
+  // The VM's Jenkins server, or null when the environment has no VM or its VM
+  // has none configured yet. Then the dialog says where to set it up.
   vmJenkins: (VmJenkinsConfig & { vmName: string }) | null;
+  // The linked VM, so the dialog can link to where its server is set up.
+  vmId: string | null;
+  vmName: string;
 }
 
-// Write payload from the modal. Token is only sent when (re)set; undefined keeps
-// the stored value, empty string clears it.
+// Write payload from the dialog: the job, and nothing else.
 export interface EnvironmentJenkinsInput {
   jenkinsUrl: string;
-  jenkinsUsername: string;
-  jenkinsApiToken?: string;
 }
 
 // Where a Jenkins-linked record builds from, read live from its job's config.xml

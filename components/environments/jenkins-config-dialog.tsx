@@ -1,13 +1,14 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { toast } from 'sonner';
-import { KeyRound, Server } from 'lucide-react';
+import { Server, TriangleAlert } from 'lucide-react';
 import {
   useEnvironmentJenkinsConfig,
   useSaveEnvironmentJenkinsConfig,
 } from '@/hooks/environments/useEnvironmentJenkins';
-import type { EnvironmentJenkinsConfig, EnvironmentJenkinsInput } from '@/types/common/jenkins';
+import type { EnvironmentJenkinsConfig } from '@/types/common/jenkins';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -22,12 +23,46 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 
-const SECRET_UNCHANGED = '';
+// Where this environment's VM gets its Jenkins server, or why it has none yet.
+// A VM runs one Jenkins, so the server, its user and its token are the VM's,
+// set from the VM tracker; this dialog only ever sets the environment's job.
+function ServerNotice({ config }: { config: EnvironmentJenkinsConfig }) {
+  const vm = config.vmJenkins?.baseUrl ? config.vmJenkins : null;
+  const vmLabel = config.vmName || 'this VM';
 
-// The VM's Jenkins server root, when there's one to borrow. Named rather than
-// inlined because "" and undefined both have to fall through to the placeholder.
-const inheritedBase = (config: EnvironmentJenkinsConfig): string =>
-  config.inherited?.jenkinsBase ?? '';
+  if (vm && vm.hasToken && vm.username) {
+    return (
+      <div className="rounded-md border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+        <Server className="mr-1 inline h-3 w-3 align-[-2px]" />
+        Server and credentials come from{' '}
+        <span className="font-medium text-foreground">{vmLabel}</span>:{' '}
+        <span className="font-mono">{vm.baseUrl}</span> as {vm.username}.
+      </div>
+    );
+  }
+
+  const problem = !config.vmId
+    ? 'This environment has no VM, and Jenkins credentials are set on a VM.'
+    : !vm
+      ? `${vmLabel} has no Jenkins server set up yet.`
+      : !vm.username
+        ? `${vmLabel}'s Jenkins server has no user set.`
+        : `${vmLabel}'s Jenkins server has no API token stored.`;
+
+  return (
+    <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-muted-foreground">
+      <TriangleAlert className="mr-1 inline h-3 w-3 align-[-2px] text-destructive" />
+      {problem} Sync and builds won&apos;t work until it is.{' '}
+      {config.vmId ? (
+        <Link href={`/vms/${config.vmId}`} className="font-medium text-foreground underline underline-offset-2">
+          Open {vmLabel}
+        </Link>
+      ) : (
+        <>Link a VM to this environment first.</>
+      )}
+    </div>
+  );
+}
 
 // Inner form: seeded once from the loaded config. Only mounted after the config
 // query resolves, so there's no setState-in-effect.
@@ -43,122 +78,41 @@ function ConfigForm({
   onSaved: () => void;
 }) {
   const save = useSaveEnvironmentJenkinsConfig(projectId, envId);
-  // Seeded from what the VM already has where this environment has nothing. The
-  // server root is a starting point, not an answer: the editor still has to name
-  // the job (or save and pick one with "Browse jobs", which only needs the root).
-  const [jenkinsUrl, setJenkinsUrl] = useState(config.jenkinsUrl || inheritedBase(config));
-  const [jenkinsUsername, setJenkinsUsername] = useState(
-    config.jenkinsUsername || config.inherited?.jenkinsUsername || ''
-  );
-  const [jenkinsApiToken, setJenkinsApiToken] = useState(SECRET_UNCHANGED);
+  const [jenkinsUrl, setJenkinsUrl] = useState(config.jenkinsUrl);
 
   const handleSave = () => {
-    const input: EnvironmentJenkinsInput = { jenkinsUrl, jenkinsUsername };
-    if (jenkinsApiToken !== SECRET_UNCHANGED) input.jenkinsApiToken = jenkinsApiToken;
-    save.mutate(input, {
-      onSuccess: () => {
-        toast.success('Jenkins settings saved.');
-        onSaved();
-      },
-      onError: (e) => toast.error(e instanceof Error ? e.message : 'Failed to save.'),
-    });
+    save.mutate(
+      { jenkinsUrl },
+      {
+        onSuccess: () => {
+          toast.success('Jenkins job saved.');
+          onSaved();
+        },
+        onError: (e) => toast.error(e instanceof Error ? e.message : 'Failed to save.'),
+      }
+    );
   };
-
-  // The token is never sent to the browser, so "prefilled" can only ever mean the
-  // two non-secret fields — the third is a promise the server keeps on save.
-  const inherited = config.inherited;
-
-  // A VM runs one Jenkins, and it is configured on the VM (tracker → the J
-  // button). So when this environment's machine has a server, this form is about
-  // the **job** only: showing username and token here as well would be a second
-  // place to maintain one set of credentials, which is exactly what moving them
-  // to the VM was for. Without a configured VM — an environment with no VM
-  // linked, or one whose VM hasn't been set up — the old per-environment fields
-  // remain, or there would be nowhere to put them.
-  const vmJenkins = config.vmJenkins?.baseUrl ? config.vmJenkins : null;
 
   return (
     <>
       <div className="space-y-4">
-        {vmJenkins ? (
-          <div className="rounded-md border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-            <Server className="mr-1 inline h-3 w-3 align-[-2px]" />
-            Server and credentials come from{' '}
-            <span className="font-medium text-foreground">{vmJenkins.vmName || 'this VM'}</span> —{' '}
-            <span className="font-mono">{vmJenkins.baseUrl}</span>
-            {vmJenkins.hasToken ? (
-              <> as {vmJenkins.username || 'its configured user'}. Set the job below.</>
-            ) : (
-              <>
-                , but <span className="font-medium text-foreground">no API token is stored</span>{' '}
-                for it yet — add one on the VM in the tracker.
-              </>
-            )}
-          </div>
-        ) : null}
-        {inherited && !vmJenkins ? (
-          <div className="rounded-md border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-            <Server className="mr-1 inline h-3 w-3 align-[-2px]" />
-            {inherited.vmName ? (
-              <>
-                <span className="font-medium text-foreground">{inherited.vmName}</span> already has
-                Jenkins set up
-              </>
-            ) : (
-              <>This VM already has Jenkins set up</>
-            )}
-            , so its server and user are filled in below and its API token will be reused. Paste a
-            token only to use a different one.
-          </div>
-        ) : null}
+        <ServerNotice config={config} />
         <div className="space-y-2">
           <Label htmlFor="jk-url">Job URL</Label>
           <Input
             id="jk-url"
             value={jenkinsUrl}
             onChange={(e) => setJenkinsUrl(e.target.value)}
-            placeholder="https://jenkins.example.com/job/chex-api/job/dev/"
+            placeholder={
+              config.vmJenkins?.baseUrl
+                ? `${config.vmJenkins.baseUrl}/job/…`
+                : 'https://jenkins.example.com/job/chex-api/job/dev/'
+            }
           />
-        </div>
-        {vmJenkins ? null : (
-        <div className="space-y-2">
-          <Label htmlFor="jk-user">Username</Label>
-          <Input
-            id="jk-user"
-            autoComplete="off"
-            value={jenkinsUsername}
-            onChange={(e) => setJenkinsUsername(e.target.value)}
-            placeholder="jenkins user"
-          />
-        </div>
-        )}
-        {vmJenkins ? null : (
-        <div className="space-y-2">
-          <Label htmlFor="jk-token">API token</Label>
-          <div className="relative">
-            <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              id="jk-token"
-              type="password"
-              className="pl-9"
-              autoComplete="off"
-              placeholder={
-                config.hasToken
-                  ? '•••••••••• (leave blank to keep)'
-                  : inherited
-                    ? '•••••••••• (leave blank to reuse the VM’s)'
-                    : 'Paste the API token'
-              }
-              value={jenkinsApiToken}
-              onChange={(e) => setJenkinsApiToken(e.target.value)}
-            />
-          </div>
           <p className="text-xs text-muted-foreground">
-            Stored securely server-side and never shown again — used only for syncing this
-            environment.
+            Or pick one with &ldquo;Browse jobs&rdquo;, which lists every job on the VM&apos;s server.
           </p>
         </div>
-        )}
       </div>
 
       <DialogFooter>
@@ -175,8 +129,8 @@ function ConfigForm({
   );
 }
 
-// Per-environment Jenkins settings modal. Credentials live with the environment
-// (URL/username on the row; token in the server-only secrets store).
+// Per-environment Jenkins settings: the environment's **job**. The server, its
+// user and its token belong to the environment's VM (#84).
 export function JenkinsConfigDialog({
   projectId,
   envId,
@@ -198,13 +152,13 @@ export function JenkinsConfigDialog({
         <DialogHeader>
           <DialogTitle>Jenkins — {envName}</DialogTitle>
           <DialogDescription>
-            Set this environment&apos;s Jenkins job and credentials, then use “Sync from Jenkins”.
+            Set this environment&apos;s Jenkins job, then use &ldquo;Sync from Jenkins&rdquo;. The server and
+            its credentials are set on the VM.
           </DialogDescription>
         </DialogHeader>
 
         {isLoading ? (
           <div className="space-y-3">
-            <Skeleton className="h-9 w-full" />
             <Skeleton className="h-9 w-full" />
             <Skeleton className="h-9 w-full" />
           </div>

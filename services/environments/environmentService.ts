@@ -36,9 +36,9 @@ const envInputToColumns = (input: EnvironmentInput): EnvironmentWriteColumns => 
   // empty string — the value every reader already treats as "no name".
   if (input.label !== undefined) cols.label = input.label.trim();
   if (input.cicdProvider !== undefined) cols.cicd_provider = input.cicdProvider;
-  // `jenkins_url` / `jenkins_username` are deliberately not writable from here —
-  // they belong to `saveEnvironmentJenkinsConfig`, which owns the whole Jenkins
-  // triple (URL, username, token) and SSRF-checks the target before storing it.
+  // `jenkins_url` is deliberately not writable from here: it belongs to
+  // `saveEnvironmentJenkinsConfig`, which SSRF-checks the target before storing
+  // it. The server and credentials are the VM's, set from the tracker.
   if (input.deployUrl !== undefined) cols.deploy_url = input.deployUrl;
   if (input.vmId !== undefined) cols.vm_id = input.vmId;
   if (input.notes !== undefined) cols.notes = input.notes;

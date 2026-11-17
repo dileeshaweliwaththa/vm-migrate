@@ -179,20 +179,23 @@ address (`normalizeJenkinsServerUrl` in [lib/jenkins-url.ts](../lib/jenkins-url.
 not a secret — the tracker marks them for everyone), insert/update/delete =
 `editor`/`admin`.
 
-`vm_jenkins_secrets` has **RLS on with no policies**, exactly like
-`environment_secrets`: no authenticated client can read or write it, only server
-code via the service-role client behind an editor check. That is what lets a
-viewer trigger a build without ever being sent the token.
+`vm_jenkins_secrets` has **RLS on with no policies**: no authenticated client
+can read or write it, only server code via the service-role client behind an
+editor check. That is what lets a viewer trigger a build without ever being sent
+the token.
 
 | table                | columns                                                                 |
 | -------------------- | ----------------------------------------------------------------------- |
 | `vm_jenkins`         | `vm_id uuid pk → vms`, `base_url text`, `username text`, `created_at`, `updated_at` |
 | `vm_jenkins_secrets` | `vm_id uuid pk → vms`, `jenkins_api_token text`, `created_at`, `updated_at` |
 
-The per-environment columns (`environments.jenkins_username`,
-`environment_secrets`) are **not** dropped: they remain a read-only fallback for
-an environment with no VM to inherit from. See
-[jenkins-sync.md](./jenkins-sync.md#where-jenkins-is-configured).
+This is the **only** place a Jenkins server is configured. The per-environment
+copy (`environments.jenkins_username`, `environment_secrets`) is removed by #84:
+`…_backfill_vm_jenkins_from_environments.sql` moves the last credentials that
+lived only there onto their VMs, and `…_drop_environment_jenkins_credentials.sql`
+drops both. See
+[jenkins-sync.md § Limitations](./jenkins-sync.md#limitations) for the deploy
+order.
 
 ## `backup_targets` / `backup_target_secrets` / `backup_dispatches`
 
@@ -380,8 +383,7 @@ role-based RLS as `projects` (writes = `editor`/`admin`).
 | `name`          | `environment_name` | the **stage** — enum: `DEV` / `STAGE` / `PRODUCTION` |
 | `label`         | `text`        | optional display name, for a project with two environments in one stage (`DEV · CSE UAT`). Empty is the normal case; composed with `name` by `environmentTitle` in [lib/endpoints.ts](../lib/endpoints.ts) |
 | `cicd_provider` | `text`        | overrides the project default                    |
-| `jenkins_url`   | `text`        | Jenkins job URL (secret token lives in `environment_secrets`) |
-| `jenkins_username` | `text`     | Jenkins Basic-auth username (non-secret)         |
+| `jenkins_url`   | `text`        | the environment's Jenkins **job** URL. The server, user and token are its VM's ([`vm_jenkins`](#vm_jenkins--vm_jenkins_secrets)) |
 | `deploy_url`    | `text`        | legacy live/deployed URL. **No longer asked for or shown** for any provider — every record's own domain is linked from the Domain column, and a Jenkins environment's address is its Jenkins wiring. Kept (untouched by the form) so existing values aren't lost |
 | `vm_id`         | `uuid`        | FK → `vms.id`, `on delete set null` (optional); its IPs are what the records table's Link column is built from |
 | `notes`         | `text`        | free text                                        |
@@ -533,7 +535,8 @@ by AI” flow) read it via the **service-role** client, which bypasses RLS; the
 value is used to call Gemini and never returned to the browser (the settings
 service masks it to a boolean, and the key field is write-only in the UI). An
 MVP fallback reads `GEMINI_API_KEY` from the server env if the row is unset.
-Jenkins is configured **per-environment**, not here (see `environment_secrets`).
+Jenkins is configured **per VM**, not here (see
+[`vm_jenkins`](#vm_jenkins--vm_jenkins_secrets)).
 See [settings.md](./settings.md) and [ai-docs.md](./ai-docs.md).
 
 | column             | type          | notes                                       |
@@ -544,21 +547,15 @@ See [settings.md](./settings.md) and [ai-docs.md](./ai-docs.md).
 | `ai_style_prompt`  | `text`        | house-style instructions for consistent docs |
 | `created_at` / `updated_at` | `timestamptz` | `set_updated_at` trigger           |
 
-## `environment_secrets`
+## `environment_secrets` — removed
 
-Phase 2b · M3. The **secret** per-environment Jenkins API token, split out from
-`environments` because that table is readable by every authenticated user (a
-token there would leak). RLS is **enabled with no policies**, so no
-authenticated client can read or write it — only the **service-role** client
-(server-side, behind an editor/admin check) touches it. The non-secret Jenkins
-job URL + username live on `environments` (`jenkins_url`, `jenkins_username`).
-See [jenkins-sync.md](./jenkins-sync.md).
-
-| column              | type          | notes                                      |
-| ------------------- | ------------- | ------------------------------------------ |
-| `environment_id`    | `uuid`        | PK, FK → `environments.id`, `on delete cascade` |
-| `jenkins_api_token` | `text`        | **secret** — read server-side only         |
-| `created_at` / `updated_at` | `timestamptz` | `set_updated_at` trigger           |
+Phase 2b · M3 held each environment's Jenkins API token here, with
+`environments.jenkins_username` beside it. Once a VM held its own server
+(`vm_jenkins` / `vm_jenkins_secrets`), they were only a fallback, and #84
+removes them: `…_backfill_vm_jenkins_from_environments.sql` copies the
+credentials still needed onto their VMs, then
+`…_drop_environment_jenkins_credentials.sql` drops the table and the column,
+refusing while any Jenkins environment's VM is incomplete.
 
 ## Migration files
 
@@ -681,6 +678,15 @@ In `supabase/migrations/`, applied in timestamp order:
   `vms`, so no authenticated session can destroy a machine's record. The tracker
   trash becomes an archive; real deletion is a database-level act. See
   [`vms`](#vms).
+- `…_backfill_vm_jenkins_from_environments.sql` — #84 step 1: for every VM with
+  no `vm_jenkins` row whose environments still carry their own Jenkins
+  credentials, copies the server root, user and token of the most recently
+  updated one onto the VM. Additive only.
+- `…_drop_environment_jenkins_credentials.sql` — #84 step 3: drops
+  `environments.jenkins_username` and `environment_secrets`. Refuses (raises)
+  while any Jenkins environment with a job sits on a VM without a server, user
+  and token. Apply only after the app version that no longer reads them is
+  deployed. See [jenkins-sync.md § Limitations](./jenkins-sync.md#limitations).
 
 ## Deploying migrations
 

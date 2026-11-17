@@ -10,11 +10,6 @@ import {
   triggerBuild,
 } from '@/repositories/jenkins/jenkinsRepository';
 import { updateEnvironment } from '@/repositories/environments/environmentRepository';
-import {
-  getEnvironmentToken,
-  setEnvironmentToken,
-  hasEnvironmentToken,
-} from '@/repositories/environmentSecrets/environmentSecretRepository';
 import { deleteEndpoint } from '@/repositories/endpoints/endpointRepository';
 // The sync writes its records through the service, not the repository, so a
 // synced port adopts an endpoint the tracker already has instead of adding a
@@ -28,7 +23,6 @@ import {
   type BuildRunWriteColumns,
 } from '@/repositories/environmentBuildRuns/environmentBuildRunRepository';
 import { rowToBuildRun } from '@/services/jenkins/mappers';
-import { findVmJenkinsDonor } from '@/services/jenkins/inheritance';
 import {
   getVmJenkinsConfig,
   getVmJenkinsCredentials,
@@ -67,11 +61,12 @@ import type { Environment } from '@/types/common/project';
 // included, because each run is recorded against the user who started it in
 // `environment_build_runs`. See lib/rbac.ts and docs/jenkins-sync.md.
 //
-// Non-secret config (job URL, username) is stored on the environment; the secret
-// API token is stored in environment_secrets and only ever read/written here via
-// the service-role repository — it is never returned to the browser. The sync
-// reads the environment's own job config and refreshes its jenkins-sourced ports
-// (manual ports are preserved).
+// The environment stores only its **job** URL. The server, its user and its API
+// token belong to the environment's VM (`vm_jenkins` / `vm_jenkins_secrets`, set
+// from the tracker); the token is read server-side through the service-role
+// repository and never returned to the browser. The sync reads the environment's
+// own job config and refreshes its jenkins-sourced ports (manual ports are
+// preserved).
 
 const asMsg = (error: unknown, fallback: string): string =>
   (error instanceof Error && error.message) || fallback;
@@ -193,41 +188,17 @@ type Resolution =
 // it. Listing jobs needs only the server and the credentials — not a job — which
 // is why this exists separately from `resolveEnvJenkins` below.
 //
-// A VM runs one Jenkins, so **the VM's own configuration comes first**
-// (`vm_jenkins`, set from the tracker). Two older sources remain behind it, each
-// part falling back independently:
-//
-//   1. the VM's server (the one place it is now configured),
-//   2. this environment's own stored URL/username/token — the pre-VM layout, and
-//      the only home an environment with no linked VM has,
-//   3. a sibling environment on the same VM (`findVmJenkinsDonor`), which is how
-//      inheritance worked before the VM held the server itself.
-//
-// 2 and 3 are legacy read paths, not places anything new is written: they exist
-// so no setup that worked before this moved stops working.
+// A VM runs one Jenkins, so the server, its user and its token come from **the
+// VM** (`vm_jenkins` / `vm_jenkins_secrets`, set from the tracker) and nowhere
+// else. Until #84 an environment could hold its own copy, and one without could
+// borrow a sibling's; both fallbacks are gone.
 const resolveEnvJenkinsServer = async (projectId: string, envId: string): Promise<Resolution> => {
   const env = await findEnv(projectId, envId);
   if (!env) return { ok: false, message: 'Environment not found.' };
 
-  const vmConfig = env.vmId
+  const { base, username, apiToken } = env.vmId
     ? await getVmJenkinsCredentials(env.vmId)
     : { base: '', username: '', apiToken: '' };
-
-  let base = vmConfig.base || (env.jenkinsUrl.trim() ? deriveJenkinsBase(env.jenkinsUrl) : '');
-  let username = vmConfig.username || env.jenkinsUsername.trim();
-  let apiToken = vmConfig.apiToken || (await getEnvironmentToken(envId)).trim();
-
-  if (!base || !username || !apiToken) {
-    const donor = await findVmJenkinsDonor(env);
-    if (donor) {
-      // The donor's *server root*, never its job URL — the job differs per
-      // environment, and borrowing one would point this environment's builds at
-      // another's pipeline.
-      if (!base) base = deriveJenkinsBase(donor.jenkinsUrl);
-      if (!username) username = donor.jenkinsUsername.trim();
-      if (!apiToken) apiToken = (await getEnvironmentToken(donor.id)).trim();
-    }
-  }
 
   if (!base) {
     return {
@@ -238,19 +209,17 @@ const resolveEnvJenkinsServer = async (projectId: string, envId: string): Promis
     };
   }
   // The SSRF guard applies to whatever address is actually about to be fetched,
-  // inherited or not — a denied target must not become reachable by way of a
-  // sibling environment. See docs/security.md.
+  // re-checked here even though the VM's server was checked when it was saved.
+  // See docs/security.md.
   if (isDeniedJenkinsTarget(base)) return { ok: false, message: DENIED_TARGET };
   if (!apiToken) {
-    return {
-      ok: false,
-      message: env.vmId
-        ? "No Jenkins API token stored for this VM — add it in the VM tracker."
-        : 'No Jenkins API token set for this environment.',
-    };
+    return { ok: false, message: "No Jenkins API token stored for this VM. Add it in the VM tracker." };
   }
   if (!username) {
-    return { ok: false, message: 'Set the Jenkins username (the token must be paired with its user).' };
+    return {
+      ok: false,
+      message: "Set the Jenkins username on this VM in the VM tracker (the token must be paired with its user).",
+    };
   }
 
   return { ok: true, value: { env, auth: { username, apiToken }, base } };
@@ -274,7 +243,18 @@ const resolveEnvJenkins = async (projectId: string, envId: string): Promise<Reso
   return resolved;
 };
 
-// Public, secret-free config for the modal (token replaced by a boolean).
+// The environment's job plus its VM's server, for the dialog. Secret-free: the
+// VM's token is reported as `hasToken`, never sent.
+const jenkinsConfigFor = async (env: Environment, jenkinsUrl: string): Promise<EnvironmentJenkinsConfig> => {
+  const vmConfig = env.vmId ? await getVmJenkinsConfig(env.vmId) : null;
+  return {
+    jenkinsUrl,
+    vmJenkins: vmConfig ? { ...vmConfig, vmName: env.vmName ?? '' } : null,
+    vmId: env.vmId,
+    vmName: env.vmName ?? '',
+  };
+};
+
 export const getEnvironmentJenkinsConfig = async (
   projectId: string,
   envId: string
@@ -286,33 +266,7 @@ export const getEnvironmentJenkinsConfig = async (
   if (!env) return { success: false, message: 'Environment not found.', data: null };
 
   try {
-    const hasToken = await hasEnvironmentToken(envId);
-    // The machine's own server, which is where Jenkins is configured now. When
-    // it is set, the dialog asks for the job and nothing else.
-    const vmConfig = env.vmId ? await getVmJenkinsConfig(env.vmId) : null;
-    // Only offered to an environment with nothing of its own — once it has a
-    // token, its own configuration is the answer and the offer would just be a
-    // second, confusing source of truth.
-    const donor = hasToken ? null : await findVmJenkinsDonor(env);
-    return {
-      success: true,
-      message: 'OK',
-      data: {
-        jenkinsUrl: env.jenkinsUrl,
-        jenkinsUsername: env.jenkinsUsername,
-        hasToken,
-        vmJenkins: vmConfig ? { ...vmConfig, vmName: env.vmName ?? '' } : null,
-        inherited: donor
-          ? {
-              vmName: env.vmName ?? '',
-              // The server root, not the donor's job URL — the job is per
-              // environment, the server is per VM.
-              jenkinsBase: deriveJenkinsBase(donor.jenkinsUrl),
-              jenkinsUsername: donor.jenkinsUsername,
-            }
-          : null,
-      },
-    };
+    return { success: true, message: 'OK', data: await jenkinsConfigFor(env, env.jenkinsUrl) };
   } catch (error) {
     return { success: false, message: asMsg(error, 'Failed to load Jenkins config.'), data: null };
   }
@@ -336,44 +290,14 @@ export const saveEnvironmentJenkinsConfig = async (
   }
 
   try {
-    // Non-secret parts on the environment; ensure the provider reflects Jenkins.
-    await updateEnvironment(envId, {
-      jenkins_url: input.jenkinsUrl.trim(),
-      jenkins_username: input.jenkinsUsername.trim(),
-      cicd_provider: 'jenkins',
-    });
-    // Secret token: only write when provided (undefined = keep stored value).
-    if (input.jenkinsApiToken !== undefined) {
-      await setEnvironmentToken(envId, input.jenkinsApiToken.trim());
-    } else if (!(await hasEnvironmentToken(envId))) {
-      // Nothing typed and nothing stored: take the VM's. This is the only path
-      // that moves a token between rows, and it is why the modal can offer to
-      // reuse credentials without the token ever reaching the browser — the value
-      // is read and written here, server-side, both rows being equally
-      // unreachable by any client. Editor-gated by the check at the top.
-      const donor = await findVmJenkinsDonor(env);
-      if (donor) await setEnvironmentToken(envId, await getEnvironmentToken(donor.id));
-    }
-    const hasToken = await hasEnvironmentToken(envId);
+    // The job is the environment's only Jenkins setting; the server and its
+    // credentials are the VM's. Saving one also makes Jenkins the provider.
+    const jenkinsUrl = input.jenkinsUrl.trim();
+    await updateEnvironment(envId, { jenkins_url: jenkinsUrl, cicd_provider: 'jenkins' });
     return {
       success: true,
-      message: 'Jenkins settings saved.',
-      data: {
-        jenkinsUrl: input.jenkinsUrl.trim(),
-        jenkinsUsername: input.jenkinsUsername.trim(),
-        hasToken,
-        // Whatever was on offer has just been taken (or was declined by typing a
-        // token) — either way this environment now stands on its own.
-        inherited: null,
-        // Re-read rather than assumed null: the VM's server is not something
-        // this save can change, and the dialog re-renders from this payload.
-        vmJenkins: env.vmId
-          ? await (async () => {
-              const config = await getVmJenkinsConfig(env.vmId as string);
-              return config ? { ...config, vmName: env.vmName ?? '' } : null;
-            })()
-          : null,
-      },
+      message: 'Jenkins job saved.',
+      data: await jenkinsConfigFor(env, jenkinsUrl),
     };
   } catch (error) {
     return { success: false, message: asMsg(error, 'Failed to save Jenkins config.'), data: null };

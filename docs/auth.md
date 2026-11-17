@@ -76,9 +76,10 @@ Three layers, each of which must hold on its own:
 **Service-role paths bypass RLS**, so for those the service-layer check is the
 *only* enforcement and must be treated as load-bearing:
 `userRepository` (all of it), `appSettingsRepository.findAppSettingsServiceRole`,
-and `environmentSecretRepository`. Each is reached only through a service that
-calls `requireAdmin()` or a `canEdit`/`canRunBuild` gate first — keep it that
-way when adding to them.
+and `vmJenkinsSecretRepository`, among others; the full list is in
+[security.md § Service-role paths](./security.md#service-role-paths-are-the-load-bearing-ones).
+Each is reached only through a service that calls `requireAdmin()` or a
+`canEdit`/`canRunBuild` gate first — keep it that way when adding to them.
 
 One deliberate asymmetry worth knowing: triggering a Jenkins build is open to
 viewers by design, because each run is attributed in `environment_build_runs`.

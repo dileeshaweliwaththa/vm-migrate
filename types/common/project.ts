@@ -93,18 +93,17 @@ export interface Environment {
   // name are never joined two different ways.
   label: string;
   cicdProvider: CicdProvider;
+  // This environment's Jenkins **job**. The server, user and token are its VM's.
   jenkinsUrl: string;
-  jenkinsUsername: string;
-  // True when this environment has **no** Jenkins server of its own but sits on a
-  // VM that can lend one — another environment on that VM has a server, a user
-  // and a token. A VM runs one Jenkins, so the server is the VM's property and
-  // only the *job* is this environment's; that is what makes "browse jobs" usable
-  // before this environment has been configured at all.
+  // True when this environment's VM has a complete Jenkins server (root, user,
+  // token). A VM runs one Jenkins, so the server is the VM's and only the *job*
+  // is this environment's; this is what makes "browse jobs" usable before the
+  // environment has picked one.
   //
-  // Set by `annotateJenkinsInheritance`, not by the row mapper — it takes queries
-  // the mapper has no business making, so anything built straight from a row gets
-  // `false`. Never a reason to skip a server-side check: the resolver re-derives
-  // the donor itself.
+  // Set by `annotateJenkinsInheritance`, not by the row mapper, because it takes
+  // queries the mapper has no business making, so anything built straight from a
+  // row gets `false`. Never a reason to skip a server-side check: the resolver
+  // reads the VM itself.
   jenkinsInherited: boolean;
   deployUrl: string;
   vmId: string | null;
@@ -177,11 +176,10 @@ export interface InlineVmInput {
   isClient?: boolean;
 }
 
-// Note what is **not** here: `jenkinsUrl` (and `jenkinsUsername`). Jenkins
-// configuration is one unit — server/job URL, username, token — and the token can
-// only be written by `saveEnvironmentJenkinsConfig`, which is also the only writer
-// of the other two. Accepting a URL here as well would give one field two write
-// paths, one of which skips the SSRF check on the target. See docs/jenkins-sync.md.
+// Note what is **not** here: `jenkinsUrl`. Its only writer is
+// `saveEnvironmentJenkinsConfig`, which SSRF-checks the target first. Accepting
+// it here as well would give one field two write paths, one of which skips that
+// check. See docs/jenkins-sync.md.
 export type EnvironmentInput = Partial<
   Pick<
     Environment,

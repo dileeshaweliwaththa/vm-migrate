@@ -16,7 +16,7 @@ credentials that can *trigger deployments*. So the assets, in order of value:
 
 | Asset | Where | Who may reach it |
 | ----- | ----- | ---------------- |
-| Jenkins API tokens | `environment_secrets`, `vm_jenkins_secrets` | **nobody** via any client; server code only |
+| Jenkins API tokens | `vm_jenkins_secrets` (and `environment_secrets` until #84's drop migration runs) | **nobody** via any client; server code only |
 | Backup DB passwords (MySQL and Postgres alike) + Azure connection strings | `backup_target_secrets` | **nobody** via any client; server code only |
 | Scheduled-backup bearer token | `BACKUP_CRON_SECRET` (env) + Supabase Vault | server code only; pg_cron reads its copy from Vault |
 | Gemini API key | `app_settings.gemini_api_key` | admins (write-only), server code (read) |
@@ -62,22 +62,20 @@ Verified in this review:
   `public.current_user_role()`. `profiles` has **no self-update policy**, so a
   viewer cannot promote themselves — role changes are admin-only, in Postgres, not
   just in the app.
-- `environment_secrets`, `vm_jenkins_secrets`, `backup_target_secrets` and
-  `github_secrets` have RLS
+- `vm_jenkins_secrets`, `backup_target_secrets` and `github_secrets` have RLS
   on with **no policies at all**: unreachable by any
   authenticated client, by construction rather than by policy logic.
 
 ### Service-role paths are the load-bearing ones
 
-Eleven repositories use the service-role client and therefore **bypass RLS**. For
+Ten repositories use the service-role client and therefore **bypass RLS**. For
 these the service-layer check is the *only* enforcement:
 
 | Repository | Gate that must hold |
 | ---------- | ------------------- |
 | `userRepository` (all of it) | `requireAdmin()` in `userService` |
 | `appSettingsRepository.findAppSettingsServiceRole` | reached only from `getGeminiConfig`, whose callers are `canEdit`-gated |
-| `environmentSecretRepository` | `canEdit` to configure, `canRunBuild` to use, in `jenkinsService` |
-| `vmJenkinsSecretRepository` | `requireEditor` to write, in `vmJenkinsService`; the read is server-internal (`getVmJenkinsCredentials`, called only by `jenkinsService`) |
+| `vmJenkinsSecretRepository` | `requireEditor` to write, in `vmJenkinsService`; the read is server-internal (`getVmJenkinsCredentials`, called only by `jenkinsService`, behind `canEdit` to configure and `canRunBuild` to use) |
 | `backupTargetSecretRepository` | `requireAdmin` in `backupService` |
 | `backupTargetRepository.insertBackupDispatch` | `requireAdmin` in `runBackup`, or the cron route's bearer token for a scheduled run. Service-role because pg_cron has no session; the table has no insert policy |
 | `backupStorageRepository` (the connection string) | `requireAdmin` in `backupStorageService`; `getStorageForWrite` is server-internal |
@@ -92,51 +90,30 @@ is the audit — it should return exactly the rows above.
 
 ## Secrets handling
 
-- The Jenkins token is **write-only** from the browser's perspective: the config
-  dialog can set it, and `getEnvironmentJenkinsConfig` returns `hasToken: boolean`
+- The Jenkins token is **write-only** from the browser's perspective: the VM's
+  Jenkins dialog can set it, and `getVmJenkinsConfig` returns `hasToken: boolean`
   instead of the value. A viewer can run a build without the token ever reaching
   their browser.
-- **One token can be copied to another environment on the same VM**, entirely
-  server-side ([jenkins-sync.md § Inheriting a VM's Jenkins
-  credentials](./jenkins-sync.md#inheriting-a-vms-jenkins-credentials)). This is
-  the only path that moves a token between rows, and it holds the write-only rule:
-  `saveEnvironmentJenkinsConfig` reads the donor's value and writes the new row
-  through the service-role repository, so the token is never returned to a client,
-  and the modal's "pre-fill" is only ever the server root and username. The
-  supporting query, `findEnvironmentIdsWithToken`, returns **ids only** — by
-  construction it cannot carry a token value out to a caller. Gated on `canEdit`
-  like every other write in that service. Two properties to preserve if this is
-  extended: the donor must be on the *same VM* (`vm_id`, the unit that actually
-  has a Jenkins), and an explicitly typed token must always win over the copy.
-  Note the blast radius it accepts: a VM can host environments from **different
-  projects**, so an editor configuring one project's environment may inherit a
-  token first configured in another. That grants no capability an editor lacked —
-  they could already trigger builds against that server through the donor
-  environment, and per [A7](#accepted-risks) deployment authority is effectively
-  "editor" — but it does widen where the value is *stored*, which is why the modal
-  names the VM it is borrowing from rather than filling the fields silently.
-- **A token is also *used* across rows, not only copied.** `resolveEnvJenkinsServer`
-  falls back to the same VM's donor for the server root, username, and token when an
-  environment has none of its own, so an unconfigured environment can list the jobs
-  on its VM's Jenkins ([jenkins-sync.md § Inheritance at read
-  time](./jenkins-sync.md#inheritance-at-read-time-not-just-on-save)). This does not
-  widen where the token is *stored* — nothing is written — and it holds the
-  write-only rule: the value is read through the service-role repository and used to
-  sign an outbound request, never returned to a client. It is the same blast radius
-  already accepted for the copy above, reached one step earlier: an editor could
-  trigger builds against that server through the donor environment anyway.
-  Three properties to preserve:
-  - the donor must be on the **same VM**, as with the copy;
-  - the **SSRF guard applies to the inherited base too** — `isDeniedJenkinsTarget`
-    is re-checked on whatever address is about to be fetched, so a denied target
-    cannot become reachable by way of a sibling row;
-  - only the **server** is inheritable, never the job. `resolveEnvJenkins` — the
-    resolver behind port sync and build triggering — still requires the
-    environment's own `jenkins_url`, so an inherited server can never cause a sync
-    or a deploy to hit a sibling's pipeline.
-
-  `jenkinsInherited` on the environment payload is a UI affordance only; the
-  resolver re-derives the donor server-side, so a forged value grants nothing.
+- **A token is stored once, on the VM, and used by every environment on it.**
+  `resolveEnvJenkinsServer` reads the VM's server root, user and token at the
+  moment of each call ([jenkins-sync.md § Inheriting a VM's Jenkins
+  credentials](./jenkins-sync.md#inheriting-a-vms-jenkins-credentials)). Nothing
+  is copied between rows: until #84 an environment could hold its own copy, and
+  one without could borrow a sibling's, and both paths are gone. The read goes
+  through the service-role repository and is only ever used to sign an outbound
+  request. A VM can host environments from **different projects**, which then
+  share one token; that grants no capability an editor lacked, since deployment
+  authority is effectively "editor" ([A7](#accepted-risks)). Three properties to
+  preserve:
+  - the **SSRF guard applies to the VM's base too**: `isDeniedJenkinsTarget` is
+    re-checked on whatever address is about to be fetched, even though it was
+    checked when the VM's server was saved;
+  - only the **server** comes from the VM, never the job. `resolveEnvJenkins`,
+    behind port sync and build triggering, requires the environment's own
+    `jenkins_url`, so a sync or a deploy can never hit another environment's
+    pipeline;
+  - `jenkinsInherited` on the environment payload is a UI affordance only; the
+    resolver reads the VM server-side, so a forged value grants nothing.
 - The GitHub token is reduced to `configured` + the account login, and is
   verified against GitHub before it's stored ([github.md](./github.md)).
 - The Gemini key is likewise reduced to `hasGeminiKey`. Provider errors are
@@ -341,9 +318,9 @@ the Jenkins feature existing: the app must connect to whatever internal address
 the team's build server has. Compensating controls: editor+ only; no response body
 is reflected verbatim; a 15s timeout on every request; credentials are never sent
 off-origin (verified); link-local/metadata targets refused. A stricter version
-would be an explicit allowlist of Jenkins hosts, which is the natural companion to
-the `jenkins_servers` table proposed in
-[jenkins-sync.md § Limitations](./jenkins-sync.md#limitations) (#80).
+would be an explicit allowlist of Jenkins hosts. `vm_jenkins` already lists every
+server the app talks to, since #84 made it the only place one is configured, so
+it is the natural place to hang that allowlist.
 
 <a id="a2"></a>
 **A2 — The session cookie is not `httpOnly`.** `@supabase/ssr` sets

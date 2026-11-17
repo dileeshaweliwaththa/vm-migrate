@@ -10,7 +10,6 @@ export type EnvironmentWriteColumns = Partial<{
   label: string;
   cicd_provider: string;
   jenkins_url: string;
-  jenkins_username: string;
   deploy_url: string;
   vm_id: string | null;
   notes: string;

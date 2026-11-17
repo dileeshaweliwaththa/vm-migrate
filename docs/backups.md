@@ -763,7 +763,7 @@ not lose them.
 - **Credentials**: `backup_target_secrets` (database passwords) and
   `backup_storage_secrets` (Azure connection strings), both RLS on with no
   policies — service-role only, never sent to a browser. Same construction as
-  `vm_jenkins_secrets` and `environment_secrets`.
+  `vm_jenkins_secrets`.
 - **Outbound**: the app connects to a MySQL host and an Azure storage account an
   admin typed in. Unlike the Jenkins integration there is no URL being *fetched*,
   so the SSRF guard does not apply; what an admin can do is dump a database they

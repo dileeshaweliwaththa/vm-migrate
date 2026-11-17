@@ -634,14 +634,14 @@ function EnvironmentCard({
   >(null);
   const isJenkins = env.cicdProvider === 'jenkins';
 
-  // Can this environment reach a Jenkins *server*? Either it has one of its own,
-  // or it sits on a VM that lends one (`jenkinsInherited`). A VM runs one Jenkins,
+  // Can this environment reach a Jenkins *server*? Either it already has a job,
+  // or its VM has a complete server (`jenkinsInherited`). A VM runs one Jenkins,
   // so browsing what jobs exist only needs the server — which is why this, not
   // `env.jenkinsUrl`, gates the browse-jobs action. Gating it on the job URL meant
   // an environment whose VM was already configured had no way to pick its first
   // job: the affordance that sets the URL was hidden until the URL was set.
   //
-  // Advisory only — the service re-derives the donor and enforces access itself.
+  // Advisory only — the service reads the VM itself and enforces access.
   const canReachJenkinsServer = isJenkins && (Boolean(env.jenkinsUrl.trim()) || env.jenkinsInherited);
 
   // Live Jenkins status/last-build for records that link a job — one request per
